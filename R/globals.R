@@ -1,0 +1,25 @@
+# Declare global variables for package check
+globalVariables(
+  c(
+    ".data",
+    "adm1",
+    "adm2",
+    "age",
+    "ci_l",
+    "ci_u",
+    "cluster_id",
+    "mic_pos",
+    "mic_res",
+    "mother",
+    "pfpr_mic_low",
+    "pfpr_mic_upp",
+    "pfpr_rdt_low",
+    "pfpr_rdt_upp",
+    "present",
+    "rdt_pos",
+    "rdt_res",
+    "survey_weight",
+    "tested_mic",
+    "tested_rdt"
+  )
+)

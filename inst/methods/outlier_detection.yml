@@ -1,0 +1,180 @@
+title: "Outlier Detection and Classification Framework"
+version: "1.1.0"
+author: "AHADI Analytics Team"
+context: "Subnational Tailoring – Routine Malaria Surveillance"
+description: >
+  Defines the framework for detecting, classifying, and interpreting unusually
+  high values in routine malaria surveillance data. The approach distinguishes
+  between potential data anomalies and true epidemiological events by applying
+  multiple statistical methods (mean + SD, median + MAD, Tukey IQR fence) with
+  guardrails and consensus logic. Outlier detection is performed at facility or
+  administrative level over time, and optionally integrates facility activeness
+  and reporting completeness filters.
+
+  The framework focuses on high outliers only—representing possible outbreaks
+  or reporting errors—while ignoring low values that reflect normal
+  fluctuations or under-reporting. It can classify consecutive outliers as
+  sustained outbreaks, providing both diagnostic and epidemiological insight.
+
+institutional_context: >
+  Within the SNT workflow, identifying outliers is a prerequisite for credible
+  trend analysis and incidence estimation. Outlier detection ensures that
+  anomalies from reporting errors, delayed uploads, or duplicated entries do
+  not bias routine indicators. It also allows distinguishing real increases in
+  malaria transmission (outbreaks) from artefacts of data collection.
+
+  Because SNT analyses operate at subnational levels where case volumes can be
+  small, even a single erroneous value can distort incidence, TPR, or care-
+  seeking trends. Outlier detection therefore functions both as a data quality
+  control and as an epidemiological alert mechanism, feeding into subsequent
+  validation, imputation, and incidence adjustment steps.
+
+principles:
+  - "Outliers are defined as unusually high values beyond robust statistical
+    bounds, not as low or missing observations."
+  - "Detection is performed per facility or administrative unit and period
+    (usually month)."
+  - "Methods use distribution-based thresholds (mean+SD, median+MAD, IQR)."
+  - "Consensus across multiple methods strengthens confidence in detection."
+  - "Facility activeness and reporting completeness are checked before flagging."
+  - "Seasonality is respected by within-year comparison to avoid misclassifying
+    normal seasonal peaks as outliers."
+  - "Optional outbreak classification links consecutive outlier months into
+    sustained epidemiological signals."
+
+key_metrics:
+  outlier_flag_mean: "Flag for outliers exceeding mean + SD bounds."
+  outlier_flag_median: "Flag for outliers exceeding median + MAD bounds."
+  outlier_flag_iqr: "Flag for outliers exceeding Tukey IQR upper fence."
+  outlier_flag_consensus: "Consensus flag requiring ≥2 methods to agree."
+  outbreak_flag: "Reclassification of consecutive outliers as sustained outbreaks."
+
+data_inputs:
+  - "Monthly DHIS2 data with key indicators (e.g., conf, test, treat)."
+  - "Facility or admin identifiers (hf_uid, adm1, adm2, date)."
+  - "Optional reporting rate column (reprate) in [0,1] for guardrail filtering."
+  - "Optional activeness classification (`classify_facility_activity()` output)."
+  - "Indicator type (count or rate) for appropriate scaling."
+
+guardrails:
+  - "Minimum observations per comparison group (min_n ≥ 8)."
+  - "Reporting rate threshold (reporting_rate_min ≥ 0.5)."
+  - "Inactive or newly opened facilities excluded if `key_indicators_hf`
+    provided."
+  - "Guardrail reasons include: low_reporting, insufficient_n, unstable_scale,
+    inactive_facility."
+
+methods:
+  mean_method:
+    name: "Mean ± SD"
+    formula: "x > mean + (multiplier × SD)"
+    description: >
+      Identifies observations substantially above the group mean. Sensitive to
+      skew and large single spikes, useful for early signal detection in stable
+      data.
+    strengths:
+      - "Captures sharp spikes efficiently."
+      - "Straightforward and interpretable."
+    limitations:
+      - "Affected by extreme outliers and non-normal distributions."
+
+  median_method:
+    name: "Median Absolute Deviation (MAD)"
+    formula: "x > median + (multiplier × MAD × constant)"
+    description: >
+      Robust to skew and unaffected by single anomalies. Uses the median as
+      center and MAD as spread measure. Ideal for indicators with irregular
+      distributions.
+    strengths:
+      - "Stable in presence of skewed data or heavy tails."
+      - "Resilient to single data entry errors."
+    limitations:
+      - "Less sensitive to rapid genuine increases in transmission."
+
+  iqr_method:
+    name: "Tukey Upper Fence (IQR)"
+    formula: "x > Q3 + (multiplier × IQR)"
+    description: >
+      Compares each observation to the interquartile spread. Detects values far
+      above the upper quartile, complementing MAD and SD methods.
+    strengths:
+      - "Simple, interpretable rule for non-normal data."
+      - "Less sensitive to scale instability."
+    limitations:
+      - "Can miss mild but epidemiologically relevant anomalies."
+
+  consensus:
+    name: "Cross-method agreement"
+    rule: "Flag as outlier when ≥2 of 3 methods agree."
+    purpose: >
+      Provides balanced classification by combining evidence from multiple
+      independent methods. Reduces false positives and strengthens confidence.
+    validation:
+      - "At least two other methods must be active for consensus."
+      - "Consensus column (`outlier_flag_consensus`) produced only when
+        available methods ≥2."
+
+strictness_presets:
+  lenient:
+    mean_sd: 4.0
+    mad_mult: 12
+    iqr_mult: 3.0
+  balanced:
+    mean_sd: 3.0
+    mad_mult: 9
+    iqr_mult: 2.0
+  strict:
+    mean_sd: 2.5
+    mad_mult: 6
+    iqr_mult: 1.5
+  advanced:
+    description: >
+      Analyst-defined thresholds using `sd_multiplier`, `mad_multiplier`,
+      and `iqr_multiplier`. Used for fine-tuning when data volume or stability
+      allows greater control.
+
+outbreak_classification:
+  description: >
+    Consecutive outliers are reclassified as “outbreaks” if they occur over
+    multiple months and meet continuity criteria. This helps separate isolated
+    anomalies (e.g., reporting spikes) from sustained epidemiological events.
+  rules:
+    - "Minimum run length ≥ 2 months."
+    - "Allowed gap between outliers ≤ 1 month."
+    - "Within-run proportional consistency ≥ 0.9."
+  outputs:
+    - "outlier_flag_* columns reclassified to include 'outbreak' state."
+    - "Simplified categories: normal, outlier, outbreak, insufficient_data."
+
+integration_with_reporting_and_activity:
+  - "Facilities with reporting_rate < threshold are excluded from detection."
+  - "Inactive facilities (from `active_status.yaml`) are skipped and tagged
+    with `reason = 'inactive_facility'`."
+  - "Integration with completeness diagnostics ensures outliers are not artefacts
+    of reporting interruptions."
+  - "Consistency across outlier detection and completeness assessment enables
+    coherent interpretation of surveillance data."
+
+validation_summary:
+  - "Check that all value columns are numeric and non-negative for count data."
+  - "Ensure at least min_n observations per comparison group."
+  - "Confirm reporting_rate ∈ [0,1] if provided."
+  - "Verify that time_mode ('within_year' vs 'across_time') is applied consistently."
+  - "Ensure consensus rule ≤ number of active detection methods."
+  - "Visually inspect outlier and outbreak patterns via plots."
+
+interpretation_guidance:
+  - "Isolated outliers often reflect reporting delays or manual entry errors."
+  - "Clusters of consecutive outliers may signal outbreaks or data aggregation issues."
+  - "Facilities newly added to DHIS2 may show false spikes; verify activeness."
+  - "Differences between methods highlight uncertainty in signal strength."
+  - "Balanced preset is recommended for general use; strict preset for quality audits."
+  - "Visualize flagged points over time to verify epidemiological plausibility."
+
+strengths_of_approach:
+  - "Integrates multiple robust statistical methods with consensus logic."
+  - "Automatically enforces data quality guardrails before flagging."
+  - "Supports outbreak classification for epidemiological relevance."
+  - "Adjusts for activeness and reporting completeness to prevent false positives."
+  - "Produces reproducible, auditable, and interpretable outputs."
+  - "Directly links to subsequent imputation and incidence adjustment steps."

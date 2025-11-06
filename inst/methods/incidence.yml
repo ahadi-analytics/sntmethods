@@ -1,0 +1,165 @@
+title: "Incidence Adjustment Framework"
+version: "1.1.0"
+source: "Adapted from WHO Standard Approach to Estimate Incidence (2023)"
+author: "AHADI Analytics Team"
+context: "Subnational Tailoring – Routine Malaria Surveillance"
+description: >
+  Defines the standard stepwise approach (N0–N3) for estimating malaria
+  incidence using routine DHIS2 data. Each step progressively adjusts for
+  diagnostic, reporting, and care-seeking biases. The approach aligns with
+  WHO Global Malaria Programme guidance and uses standardized variable names
+  from SNT workflows (e.g., conf, test, pres, reprate, pop). When disaggregated
+  variables are used (e.g., conf_u5), the corresponding population denominator
+  is automatically aligned (e.g., pop_u5).
+
+levels:
+  N0:
+    name: "Crude Incidence"
+    formula: "N0 = conf"
+    where:
+      conf: "Confirmed malaria cases (routine_data.conf)"
+    scale: "per 1,000 population"
+    purpose: >
+      Provides the baseline incidence using only confirmed malaria cases.
+      No correction is applied for testing, reporting, or care-seeking bias.
+    assumptions:
+      - Confirmed malaria cases are accurately recorded.
+      - Population denominators (pop) are correctly assigned to the same level.
+    uncertainty_points:
+      - May underestimate burden in areas with low testing or reporting.
+      - Excludes presumed, private, or non-seeking cases.
+    outputs:
+      - n0_cases
+      - n0_incidence
+    validation:
+      - "conf ≥ 0 and not missing"
+
+  N1:
+    name: "Testing-Adjusted Incidence"
+    formula: "N1 = conf + pres × (conf / test)"
+    where:
+      conf: "Confirmed malaria cases"
+      pres: "Presumed malaria cases = max(treated − confirmed, 0)"
+      test: "Number tested for malaria"
+      (conf/test): "Test positivity rate (TPR)"
+    scale: "per 1,000 population"
+    purpose: >
+      Adjusts for incomplete testing by estimating additional confirmed cases
+      among presumed cases using the facility-level test positivity rate (TPR).
+    assumptions:
+      - The TPR among presumed cases is similar to that among tested cases.
+      - pres is either directly reported or derived from treated − confirmed.
+      - TPR values are valid and within range [0,1].
+    fallback_logic:
+      1: "Use HF-level TPR (conf/test) if both values present."
+      2: "If missing, use HF rolling mean (previous + next month)."
+      3: "If still missing, use higher admin-level TPR (adm2 → adm1 → adm0)."
+      4: "If still missing, use same HF-month TPR from previous year."
+    uncertainty_points:
+      - Presumed cases may be inconsistently reported.
+      - Small denominators produce unstable TPR.
+      - Seasonal variations may bias TPR if few months are reported.
+    outputs:
+      - n1_cases
+      - n1_incidence
+      - tpr_method
+    validation:
+      - "0 ≤ TPR ≤ 1"
+      - "pres floored at zero"
+      - "warn if test == 0 or missing"
+
+  N2:
+    name: "Reporting-Adjusted Incidence"
+    formula: "N2 = N1 / reprate"
+    where:
+      reprate: "Reporting rate = rep / exp, bounded to [0,1]"
+    scale: "per 1,000 population"
+    purpose: >
+      Adjusts for incomplete facility reporting by dividing N1 by the reporting
+      rate, accounting for facilities that did not submit reports.
+    assumptions:
+      - Non-reporting facilities have similar patterns to reporting ones.
+      - Missingness within the analysis period is random or consistent.
+    uncertainty_points:
+      - If reprate is aggregated annually, short-term variation is missed.
+      - Low reprate inflates estimates if not validated.
+    outputs:
+      - n2_cases
+      - n2_incidence
+      - reprate_used
+    validation:
+      - "0 ≤ reprate ≤ 1"
+      - "Expected reports (exp) > 0"
+      - "Warn if reprate < 0.8 or missing for >20% of months"
+
+  N3:
+    name: "Care-Seeking-Adjusted Incidence"
+    formula: >
+      N3 = N2 + (N2 × CS_Pr / CS_Pu) + (N2 × CS_N / CS_Pu)
+    where:
+      CS_Pu: "Proportion seeking care in public facilities"
+      CS_Pr: "Proportion seeking care in private facilities"
+      CS_N: "Proportion not seeking care"
+      rho: "Private capture share (portion already included in routine data)"
+    scale: "per 1,000 population"
+    purpose: >
+      Adjusts for populations seeking care outside public facilities or not
+      seeking care at all, using care-seeking proportions (CS_Pu, CS_Pr, CS_N)
+      from national household surveys such as DHS or MIS.
+    assumptions:
+      - Care-seeking fractions are representative for the analysis period.
+      - Care-seeking among febrile adults approximates that of children.
+      - CS_Pu + CS_Pr + CS_N ≈ 1.
+    uncertainty_points:
+      - Survey years may differ from routine data period.
+      - Care-seeking data usually available for <5 children only.
+      - Interpolations to district level add uncertainty.
+    outputs:
+      - n3_cases
+      - n3_incidence
+      - careseek_method
+    validation:
+      - "All CS values within [0,1]"
+      - "CS_Pu > 0"
+      - "Warn if |(CS_Pu + CS_Pr + CS_N − 1)| > 0.05"
+
+aggregation_rules:
+  - "Variables use SNT standardized naming: conf, test, pres, treated, reprate,
+    pop."
+  - "When variables are age-disaggregated (e.g., conf_u5, conf_preg), matching
+    denominators follow the same pattern (e.g., pop_u5, pop_preg_exp)."
+  - "Aggregation across admin levels (adm1, adm2) uses weighted sums of cases
+    and population."
+  - "When reprate or TPR missing for an area, fallback logic is applied before
+    aggregation."
+
+validation_summary:
+  - "TPR validated at each level before use in N1."
+  - "Reprate checked against expected and received reports."
+  - "All denominators verified as non-zero and non-missing."
+
+strengths_of_approach:
+  - "Stepwise structure allows flexible adjustment by data quality."
+  - "Targets main biases: testing completeness, reporting rate, care-seeking."
+  - "Uses consistent variable names across SNT workflows for reproducibility."
+  - "Supports stratification by age group, sex, or population group."
+  - "Compatible with DHIS2, MFL, and population data inputs."
+  - "Easily extends to special denominators (e.g., pop_u5, pop_preg_exp)."
+  - "Can be run at facility, district, or provincial level."
+
+outputs:
+  - "monthly_incidence.parquet"
+  - "annual_incidence.parquet"
+  - "tpr_audit.parquet"
+  - "n0_to_n3_summary.csv"
+
+metadata_stored:
+  - "Start date, end date, and scale factor (k)."
+  - "Fallback TPR method applied per facility."
+  - "Reporting completeness summary (reprate)."
+  - "Care-seeking proportions (CS_Pu, CS_Pr, CS_N) used in N3."
+  - "Analyst name, method version, and date of run."
+
+references:
+  - "AHADI SNT Code Library (2025). Stratification – Epidemiological
+    Adjustments."

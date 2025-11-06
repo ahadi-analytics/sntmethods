@@ -1,0 +1,47 @@
+# R specific
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj.user
+*.Rhistory
+*.RData
+*.Ruserdata
+
+# Package build files
+*.tar.gz
+*.zip
+
+# Documentation
+/man/
+/doc/
+/docs/
+vignettes/*.html
+vignettes/*.pdf
+vignettes/*.R
+
+# Generated files
+/Meta/
+/build/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+
+# renv
+renv/library/
+renv/staging/
+renv/python/
+
+# Temporary files
+*~
+*.swp
+*.swo
+.~lock.*
+
+*renv
+CLAUDE.md
+/.claude

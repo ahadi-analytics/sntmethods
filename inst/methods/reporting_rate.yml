@@ -1,0 +1,175 @@
+title: "Reporting Rate Framework"
+version: "1.1.0"
+author: "AHADI Analytics Team"
+context: "Subnational Tailoring – Routine Malaria Surveillance"
+description: >
+  Defines the analytical and visualization framework for assessing reporting
+  completeness in routine malaria surveillance data. The framework quantifies
+  and visualizes the proportion of active health facilities that reported valid
+  data in each month and geographic unit. It provides both unweighted and
+  weighted reporting rates, aligned with the classification of active facilities
+  established in `active_status.yaml`.
+
+  The framework is used to generate time-series plots, administrative-level
+  heatmaps, and faceted maps showing trends in reporting completeness. It is a
+  key diagnostic for interpreting surveillance coverage and quality before
+  incidence adjustment (N2–N3 steps).
+institutional_context: >
+  Within the SNT workflow, completeness of routine data is a critical
+  determinant of whether other indicators—such as malaria incidence, confirmed
+  case counts, or test positivity rate—can be reliably interpreted. Reporting
+  rate provides a simple but essential measure of data quality by showing what
+  fraction of expected facilities are reporting consistently across geography
+  and time.
+
+  This diagnostic is particularly valuable when triangulating DHIS2 data with
+  survey or campaign data, or when explaining gaps in observed trends. It helps
+  identify whether changes in reported burden reflect real epidemiological
+  change or gaps in routine reporting.
+
+  The reporting rate framework builds on the *Determining Active and Inactive
+  Status* method, which defines which facilities are expected to report. It
+  forms part of the broader *Data Assembly and Management* process described in
+  Section 2.3 of the SNT Code Library.
+
+principles:
+  - "Reporting rate measures completeness among facilities classified as active
+    (see active_status.yaml)."
+  - "Missingness is defined at the variable level but summarized at facility or
+    administrative level."
+  - "Weighted reporting rate adjusts for the volume of patients served, giving
+    larger facilities higher influence."
+  - "Facility-type filters ensure only facilities expected to provide malaria
+    services (e.g., testing and treatment) are included in denominators."
+  - "Consistency with active facility definition ensures alignment across
+    completeness and incidence outputs."
+  - "Indicator-specific completeness is preferred, as reporting practice can
+    differ across indicators within the same facility."
+
+key_metrics:
+  reprate: "Proportion of active facilities reporting in a given month or group."
+  missrate: "Complement of reprate (1 - reprate)."
+  reprate_w: "Weighted reporting rate based on facility volume."
+  missrate_w: "Weighted missing rate (1 - reprate_w)."
+
+numerator_denominator_definition:
+  numerator: >
+    Number of active facilities that reported valid data for the variable(s)
+    of interest in the given period.
+  denominator: >
+    Number of facilities classified as active using the selected activity
+    definition from `active_status.yaml` (method1, method2, or method3).
+  institutional_considerations: >
+    Before calculating the denominator, facilities that are not expected to
+    report should be excluded—such as facilities closed, newly opened, or those
+    that do not provide malaria testing or treatment services (e.g., HIV
+    clinics or maternity wards). These rules should be discussed and validated
+    with the SNT and national malaria program teams to ensure alignment with
+    national practices.
+
+data_inputs:
+  - "Monthly DHIS2 facility dataset containing indicator values (e.g., test,
+    conf, treat)."
+  - "Facility metadata columns (hf_id, adm2, adm1, date, type)."
+  - "Activity classification from `classify_facility_activity()` using chosen
+    method."
+  - "Optional weighting variable (e.g., allout) representing facility service
+    volume."
+  - "Administrative shapefiles for visualization at adm1–adm2 level."
+
+scenarios:
+  1. "Proportion of active facilities reporting any data (by facility, adm2,
+  month)."
+  2. "Reporting rate by variable and administrative level over time."
+  3. "Weighted reporting rate adjusted for facility size or patient volume."
+  4. "Overall completeness combining multiple key indicators (e.g., conf, test,
+  treat)."
+
+methods:
+  Unweighted:
+    name: "Simple completeness ratio"
+    formula: "reprate = rep / exp"
+    logic: >
+      Calculates the fraction of active facilities that reported at least one
+      variable of interest in each period. Counts all facilities equally.
+    purpose: >
+      Provides a baseline completeness measure for national and subnational
+      comparison and is recommended for assessing general reporting performance.
+    strengths:
+      - "Simple and interpretable."
+      - "Stable when data are complete and weights unavailable."
+    limitations:
+      - "May overstate completeness when larger facilities are non-reporting."
+      - "Does not capture the scale of missing service volume."
+
+  Weighted:
+    name: "Volume-adjusted completeness ratio"
+    formula: "reprate_w = Σ(weight * reported) / Σ(weight)"
+    logic: >
+      Weights each facility by its typical service volume to reflect the
+      proportion of patient encounters represented by reporting facilities.
+      Typical volume is calculated as a rolling mean over `weight_window`
+      months using `weight_var` (e.g., allout).
+    purpose: >
+      Provides a population-weighted completeness estimate, emphasizing the
+      contribution of larger or busier facilities. When completeness is used
+      for incidence correction (N2 adjustment), this approach more accurately
+      captures under-reporting of total case volume.
+    assumptions:
+      - "Facility volume is a stable proxy for reporting importance."
+      - "Weighting variable reflects service volume (e.g., outpatient visits)."
+    validation:
+      - "Weights sum to 1 within each period and group."
+      - "Cold starts filled using median facility size (local or global)."
+    outputs:
+      - "reprate_w, missrate_w"
+      - "avg_<weight_var>, min_<weight_var>, max_<weight_var>"
+
+integration_with_active_status:
+  reference: "active_status.yaml"
+  linkage: >
+    The denominator of the reporting rate calculation is defined by the
+    facility activity classification method chosen from `active_status.yaml`.
+    Method1, Method2, or Method3 determine whether a facility is considered
+    “active” in a given period. This ensures internal consistency between
+    completeness and incidence calculations.
+  dependencies:
+    - "Activity classification method (method1–3)."
+    - "nonreport_window parameter for dynamic deactivation (method3)."
+  implications:
+    - "Using a stable method (e.g., method1) yields smoother reporting rate
+      trends."
+    - "Dynamic method (method3) captures short-term disruptions in reporting
+      patterns."
+    - "Choice must be documented and consistent across analytical steps."
+
+validation_summary:
+  - "0 ≤ reprate, reprate_w ≤ 1 for all groups."
+  - "Ensure expected > 0 for denominator calculations."
+  - "Confirm activity definitions derived from valid methods in
+    `active_status.yaml`."
+  - "Check that all key_indicators exist and are numeric."
+  - "Validate rolling mean logic for weighting stability."
+  - "Review trends visually to detect sudden drops caused by data entry or
+    upload delays."
+
+interpretation_guidance:
+  - "A low unweighted reporting rate may indicate widespread data entry delays
+    or system-level issues."
+  - "A large gap between weighted and unweighted rates suggests non-reporting
+    among high-volume facilities."
+  - "Sudden district-level declines often indicate temporary upload issues or
+    structural changes in DHIS2."
+  - "Stable completeness across months supports confidence in trend and
+    incidence analyses."
+
+strengths_of_approach:
+  - "Directly integrates with facility activity framework
+    (`active_status.yaml`)."
+  - "Combines numeric and visual completeness diagnostics."
+  - "Supports both unweighted and weighted completeness estimation."
+  - "Facilitates early data-quality assessment before incidence computation."
+  - "Produces consistent, comparable outputs across time and administrative
+    units."
+  - "Supports dialogue with national teams on completeness drivers and
+    improvements."

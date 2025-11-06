@@ -1,0 +1,35 @@
+Package: sntmethods
+Title: Analytical Methods for Sub-National Tailoring Workflows
+Version: 0.0.1
+Authors@R: c(
+    person("Mohamed A.", "Yusuf",
+           role = c("aut", "cre"),
+           email = "myusuf@appliedhealthanalytics.org",
+           comment = c(ORCID = "0000-0002-9339-4613",
+                      second_email = "mohamedayusuf87@gmail.com")))
+Author: Mohamed A. Yusuf [aut, cre]
+Maintainer: Mohamed A. Yusuf <myusuf@appliedhealthanalytics.org>
+Description: Provides core analytical functions for Sub-National Tailoring (SNT)
+    processes, including incidence estimation, imputation of routine health data,
+    campaign performance metrics, and small-area statistical methods. Designed as
+    a companion to 'sntutils', this package focuses on epidemiologically grounded
+    methods that produce reproducible, standardized outputs for malaria and related
+    programmatic analyses.
+License: MIT + file LICENSE
+URL: https://github.com/ahadi-analytics/sntmethods
+BugReports: https://github.com/ahadi-analytics/sntmethods/issues
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Imports:
+    cli (>= 3.6.5),
+    dplyr (>= 1.1.4),
+    haven (>= 2.5.5),
+    sntutils (>= 1.11.6),
+    survey (>= 4.4.8)
+Suggests:
+    testthat (>= 3.0.0),
+    tibble (>= 3.3.0)
+Config/testthat/edition: 3
+Depends:
+    R (>= 4.2)

@@ -1,0 +1,167 @@
+title: "Active Status Classification Framework"
+version: "1.1.0"
+source: "AHADI SNT Code Library – Routine Surveillance Methods"
+author: "AHADI Analytics Team"
+context: "Subnational Tailoring – Routine Malaria Surveillance"
+description: >
+  Defines the standard methodological framework for determining whether each
+  health facility (HF) is active and therefore expected to report in a given
+  month. The classification underpins the calculation of reporting rates and
+  subsequent incidence adjustments in the SNT workflow. It provides a
+  transparent, reproducible, and data-driven way to identify active and inactive
+  facilities using routine DHIS2 data.
+
+  The approach can use either:
+    1. Administrative definitions (e.g., facilities marked active in the Health
+       Facility Master List); or
+    2. Data-driven definitions based on observed reporting behaviour for key
+       malaria indicators such as `test`, `pres`, `conf`, and `treat`.
+
+  When no reliable master list exists—or when validation is required—the
+  data-driven method provides a consistent operational definition of activity
+  status directly from the data.
+
+principles:
+  - "A facility is active if it reports valid data for at least one key
+    indicator in a month."
+  - "A facility that has never reported is classified as inactive."
+  - "Facilities that have reported previously but not in the current month are
+    'Active – Not Reporting'."
+  - "Activity status defines which facilities are included in the expected
+    (denominator) set for reporting rate calculations."
+  - "The choice of classification method should reflect the national reporting
+    context and be validated with the SNT team."
+
+variables:
+  hf: "Health facility identifier."
+  date: "Observation month (YYYY-MM)."
+  key_indicators:
+    - "test: number tested for malaria."
+    - "pres: presumed malaria cases."
+    - "conf: confirmed malaria cases."
+    - "treat: treated malaria cases."
+  reported_any: >
+    Boolean flag indicating whether the facility reported valid data for any key
+    indicator in a given month.
+  reporting_rule:
+    any_non_na: "Any non-missing value (including 0) counts as reporting."
+    positive_only: "Only values strictly greater than 0 count as reporting."
+  nonreport_window: >
+    Minimum number of consecutive non-reporting months required to consider a
+    facility inactive under dynamic classification (default 6 months).
+
+methods:
+  M1:
+    name: "Permanent Activation"
+    formula: "Active from first report onward."
+    logic: >
+      A facility becomes active in the month it first reports valid data and
+      remains active thereafter. Months prior to its first report are inactive.
+      Once activated, the facility is assumed continuously functional.
+    purpose: >
+      Provides a stable denominator when systems are expanding or historical
+      completeness is limited.
+    assumptions:
+      - Facilities do not permanently close once they begin reporting.
+      - Early months may contain facilities not yet operational.
+    uncertainty_points:
+      - May overestimate active facilities over time.
+      - Does not account for permanent or long-term closures.
+    best_use: >
+      Suitable for early system expansion phases or initial SNT baselines when
+      completeness is still improving.
+    outputs:
+      - "activity_status_m1"
+      - "first_reporting_date"
+
+  M2:
+    name: "First–Last Activation"
+    formula: "Active between first and last reporting months, allowing a grace
+      window."
+    logic: >
+      A facility is active only between its first and last months of valid
+      reporting. If it has not reported for a period exceeding the defined
+      nonreport_window after its last report, it is considered inactive. This
+      window prevents premature classification of temporary gaps as closures.
+    purpose: >
+      Captures both activation and permanent deactivation events, reflecting
+      facilities that stop reporting for operational or structural reasons.
+    assumptions:
+      - A sustained run of non-reporting indicates facility inactivity.
+      - Facilities rarely re-open after the grace period.
+    uncertainty_points:
+      - May misclassify short-term interruptions as permanent closures if
+        the window is too short.
+      - Requires a complete historical record to detect last report months.
+    best_use: >
+      Appropriate for mature reporting systems where permanent attrition
+      should be represented.
+    outputs:
+      - "activity_status_m2"
+      - "first_reporting_date"
+      - "last_reporting_date"
+
+  M3:
+    name: "Dynamic Activation"
+    formula: "Active unless non-reporting persists ≥ nonreport_window months."
+    logic: >
+      A facility remains active as long as it continues to report or has missed
+      fewer than nonreport_window consecutive months. If non-reporting persists
+      beyond that threshold, the facility becomes inactive but may reactivate
+      upon subsequent reporting. This produces a time-varying status that adapts
+      to real operational conditions.
+    purpose: >
+      Reflects the reality of temporary interruptions (e.g., stock-outs,
+      staff absences, seasonal inaccessibility) without permanently excluding
+      facilities that later resume normal reporting.
+    assumptions:
+      - Facilities can resume reporting after temporary disruption.
+      - Window size reflects program tolerance for inactivity (commonly six
+        months).
+    uncertainty_points:
+      - Frequent toggling between statuses if window is too short.
+      - Requires continuous monthly records to calculate gaps.
+    best_use: >
+      Best suited for ongoing monitoring and dynamic completeness adjustments
+      where temporary operational issues are expected.
+    outputs:
+      - "activity_status_m3"
+      - "gap_run"
+      - "run_length"
+
+comparison_summary:
+  - "M1: Stable denominators, ignores closures."
+  - "M2: Captures activation and permanent deactivation."
+  - "M3: Dynamic, handles temporary disruptions."
+  - "Choice of method depends on DHIS2 maturity, reporting reliability,
+    and analytic purpose."
+
+integration_with_reporting_rate:
+  formula: "reprate = reported / expected"
+  where:
+    reported: "Number of active facilities that submitted reports in a month."
+    expected: "Number of facilities classified as active using selected method."
+  purpose: >
+    The classification directly defines the denominator in the reporting rate
+    calculation used in incidence estimation (N2 step). Consistency in method
+    selection ensures comparability between completeness and incidence outputs.
+  validation:
+    - "0 ≤ reprate ≤ 1"
+    - "expected > 0"
+    - "warn if reprate < 0.8 or missing for >20% of periods"
+
+validation_summary:
+  - "Ensure all facilities have complete month sequences."
+  - "Check that all key_indicators exist and contain numeric values."
+  - "Confirm reporting_rule correctly applied (any_non_na or positive_only)."
+  - "Verify nonreport_window ≥ 1 and method ∈ {M1, M2, M3}."
+  - "Activity outputs aligned to standard naming (activity_status_m1–m3)."
+
+strengths_of_approach:
+  - "Provides reproducible logic for determining expected reporting facilities."
+  - "Aligns with SNT data-driven quality assessment workflows."
+  - "Captures both long-term and short-term operational changes."
+  - "Ensures comparability across subnational units and time periods."
+  - "Forms the basis for reporting rate denominators and completeness
+    adjustments."
+  - "Compatible with administrative or empirical definitions of activity."
