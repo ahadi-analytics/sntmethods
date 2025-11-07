@@ -1,8 +1,5 @@
 title: "Incidence Adjustment Framework"
 version: "1.1.0"
-source: "Adapted from WHO Standard Approach to Estimate Incidence (2023)"
-author: "AHADI Analytics Team"
-context: "Subnational Tailoring – Routine Malaria Surveillance"
 description: >
   Defines the standard stepwise approach (N0–N3) for estimating malaria
   incidence using routine DHIS2 data. Each step progressively adjusts for
@@ -95,21 +92,21 @@ levels:
   N3:
     name: "Care-Seeking-Adjusted Incidence"
     formula: >
-      N3 = N2 + (N2 × CS_Pr / CS_Pu) + (N2 × CS_N / CS_Pu)
+      N3 = N2 + (N2 × cs_priv / cs_pub) + (N2 × cs_none / cs_pub)
     where:
-      CS_Pu: "Proportion seeking care in public facilities"
-      CS_Pr: "Proportion seeking care in private facilities"
-      CS_N: "Proportion not seeking care"
+      cs_pub: "Proportion seeking care in public facilities"
+      cs_priv: "Proportion seeking care in private facilities"
+      cs_none: "Proportion not seeking care"
       rho: "Private capture share (portion already included in routine data)"
     scale: "per 1,000 population"
     purpose: >
       Adjusts for populations seeking care outside public facilities or not
-      seeking care at all, using care-seeking proportions (CS_Pu, CS_Pr, CS_N)
+      seeking care at all, using care-seeking proportions (cs_pub, cs_priv, cs_none)
       from national household surveys such as DHS or MIS.
     assumptions:
       - Care-seeking fractions are representative for the analysis period.
       - Care-seeking among febrile adults approximates that of children.
-      - CS_Pu + CS_Pr + CS_N ≈ 1.
+      - cs_pub + cs_priv + cs_none ≈ 1.
     uncertainty_points:
       - Survey years may differ from routine data period.
       - Care-seeking data usually available for <5 children only.
@@ -120,8 +117,8 @@ levels:
       - careseek_method
     validation:
       - "All CS values within [0,1]"
-      - "CS_Pu > 0"
-      - "Warn if |(CS_Pu + CS_Pr + CS_N − 1)| > 0.05"
+      - "cs_pub > 0"
+      - "Warn if |(cs_pub + cs_priv + cs_none − 1)| > 0.05"
 
 aggregation_rules:
   - "Variables use SNT standardized naming: conf, test, pres, treated, reprate,
@@ -137,29 +134,3 @@ validation_summary:
   - "TPR validated at each level before use in N1."
   - "Reprate checked against expected and received reports."
   - "All denominators verified as non-zero and non-missing."
-
-strengths_of_approach:
-  - "Stepwise structure allows flexible adjustment by data quality."
-  - "Targets main biases: testing completeness, reporting rate, care-seeking."
-  - "Uses consistent variable names across SNT workflows for reproducibility."
-  - "Supports stratification by age group, sex, or population group."
-  - "Compatible with DHIS2, MFL, and population data inputs."
-  - "Easily extends to special denominators (e.g., pop_u5, pop_preg_exp)."
-  - "Can be run at facility, district, or provincial level."
-
-outputs:
-  - "monthly_incidence.parquet"
-  - "annual_incidence.parquet"
-  - "tpr_audit.parquet"
-  - "n0_to_n3_summary.csv"
-
-metadata_stored:
-  - "Start date, end date, and scale factor (k)."
-  - "Fallback TPR method applied per facility."
-  - "Reporting completeness summary (reprate)."
-  - "Care-seeking proportions (CS_Pu, CS_Pr, CS_N) used in N3."
-  - "Analyst name, method version, and date of run."
-
-references:
-  - "AHADI SNT Code Library (2025). Stratification – Epidemiological
-    Adjustments."
