@@ -63,3 +63,11 @@ u5mr_results <- calc_u5mr_dhs(
   admin_level = c("adm1", "adm2"),
   join_nearest = TRUE
 )
+
+csb_results <- calc_csb_dhs(
+  dhs_kr = kr_data,
+  gps_data = gps_data_dhs,
+  shapefile = shapefile,
+  admin_level = c("adm1", "adm2"),
+  join_nearest = TRUE
+)

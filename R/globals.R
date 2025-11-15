@@ -44,7 +44,25 @@ globalVariables(
     "dhs_pfpr_rdt_se",
     "n_clusters",
     "dhs_u5mr_low",
-    ":=", "Class", "LCI", "R", "UCI", "dhs_n_births", "dhs_n_deaths", "dhs_u5mr",
-    "dhs_u5mr_upp"
+    ":=", "Class", "LCI", "R",
+    "UCI", "dhs_n_births",
+    "dhs_n_deaths", "dhs_u5mr",
+    "dhs_u5mr_upp",
+    "age_months",
+    "dhs_csb_any",
+    "dhs_csb_none",
+    "dhs_csb_private",
+    "dhs_csb_public",
+    "dhs_n_fever",
+    "dhs_n_sought_any",
+    "dhs_n_sought_none",
+    "dhs_n_sought_private",
+    "dhs_n_sought_public",
+    "had_fever",
+    "sought_any",
+    "sought_none",
+    "sought_private",
+    "sought_public",
+    "stratum_id"
   )
 )
