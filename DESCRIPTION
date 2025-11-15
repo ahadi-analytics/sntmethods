@@ -22,14 +22,21 @@ Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
 Imports:
+    arrow,
     cli (>= 3.6.5),
     dplyr (>= 1.1.4),
+    fs,
     haven (>= 2.5.5),
+    janitor,
+    purrr,
+    rlang,
+    sf,
     sntutils (>= 1.11.6),
-    survey (>= 4.4.8)
+    survey (>= 4.4.8),
+    tibble
 Suggests:
-    testthat (>= 3.0.0),
-    tibble (>= 3.3.0)
+    here,
+    testthat (>= 3.0.0)
 Config/testthat/edition: 3
 Depends:
     R (>= 4.2)

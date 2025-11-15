@@ -92,21 +92,21 @@ levels:
   N3:
     name: "Care-Seeking-Adjusted Incidence"
     formula: >
-      N3 = N2 + (N2 × cs_priv / cs_pub) + (N2 × cs_none / cs_pub)
+      N3 = N2 + (N2 × CS_Priv / CS_Pub) + (N2 × CS_None / CS_Pub)
     where:
-      cs_pub: "Proportion seeking care in public facilities"
-      cs_priv: "Proportion seeking care in private facilities"
-      cs_none: "Proportion not seeking care"
+      CS_Pub: "Proportion seeking care in public facilities"
+      CS_Priv: "Proportion seeking care in private facilities"
+      CS_None: "Proportion not seeking care"
       rho: "Private capture share (portion already included in routine data)"
     scale: "per 1,000 population"
     purpose: >
       Adjusts for populations seeking care outside public facilities or not
-      seeking care at all, using care-seeking proportions (cs_pub, cs_priv, cs_none)
+      seeking care at all, using care-seeking proportions (CS_Pub, CS_Priv, CS_None)
       from national household surveys such as DHS or MIS.
     assumptions:
       - Care-seeking fractions are representative for the analysis period.
       - Care-seeking among febrile adults approximates that of children.
-      - cs_pub + cs_priv + cs_none ≈ 1.
+      - CS_Pub + CS_Priv + CS_None ≈ 1.
     uncertainty_points:
       - Survey years may differ from routine data period.
       - Care-seeking data usually available for <5 children only.
@@ -117,8 +117,8 @@ levels:
       - careseek_method
     validation:
       - "All CS values within [0,1]"
-      - "cs_pub > 0"
-      - "Warn if |(cs_pub + cs_priv + cs_none − 1)| > 0.05"
+      - "CS_Pub > 0"
+      - "Warn if |(CS_Pub + CS_Priv + CS_None − 1)| > 0.05"
 
 aggregation_rules:
   - "Variables use SNT standardized naming: conf, test, pres, treated, reprate,

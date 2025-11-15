@@ -1,253 +1,94 @@
 title: "TPR Computation and Proxy Framework"
 version: "1.0.0"
-author: "AHADI Analytics Team"
-context: "Subnational Tailoring – Routine Malaria Surveillance"
 description: >
-  Defines the standardised method for computing Test Positivity Rate (TPR)
-  from routine malaria data and for deriving proxy values when direct
-  calculation is not possible. The framework ensures consistency and
-  comparability of TPR across facilities, months, and administrative
-  levels, and corrects for missing or unstable data through structured
-  fallback logic. It underpins incidence estimation and adjustment in SNT
-  workflows by providing a reliable indicator of diagnostic completeness
-  and malaria transmission intensity. TPR values produced here are used as
-  covariates or weighting factors within incidence models (N1–N3) to
-  account for under-testing, reporting variability, and shifts in care-
-  seeking behaviour.
+  Defines the method for calculating Test Positivity Rate (TPR) from
+  routine malaria data and for deriving proxy values when direct
+  calculation is not possible. Ensures consistency across facilities and
+  administrative levels and provides a valid TPR for each reporting
+  period. The framework supports incidence estimation and adjustment in
+  SNT workflows by supplying a reliable indicator of diagnostic
+  completeness and malaria transmission intensity. Variables follow SNT
+  standard naming conventions, using `conf` for confirmed cases and
+  `test` for tested individuals. When age-disaggregated data are used
+  (e.g., `conf_u5`, `test_u5`), TPR is computed separately for each
+  subgroup.
 
 compute_tpr:
   description: >
-    Calculates validated malaria TPRs, smooths sparse data, aggregates
-    across administrative levels, and applies a proxy algorithm when test
-    or confirmation data are missing. Returns tpr_final and QA metadata.
+    Calculates malaria TPR at facility and administrative levels and
+    applies structured fallback logic to derive proxy values when
+    confirmed or tested data are missing. Produces a complete, validated
+    TPR dataset used for incidence adjustment.
 
+  stages:
     - stage: 1
       name: Input validation and cleaning
       actions:
-        - "Ensure n_tested, n_positive, n_suspected are numeric and >= 0."
-        - "Flag impossible values (n_positive > n_tested)."
-        - "Convert n_tested == 0 to NA to prevent divide-by-zero."
-        - "Drop months with report_complete == 0."
-        - "Standardise date to first day of month; extract year, month."
+        - "Ensure conf, test, and pres are numeric and ≥ 0."
+        - "Flag impossible values (conf > test)."
+        - "Convert test == 0 to NA to avoid divide-by-zero."
+        - "Drop incomplete months (report_complete == 0)."
+        - "Standardise date to first day of month; extract year and month."
+        - "Maintain alignment for age-disaggregated variables
+          (e.g., conf_u5 ≤ test_u5)."
 
     - stage: 2
-      name: Primary TPR calculation
-      formula: "tpr_raw = n_positive / n_tested"
-      conditions:
-        - "Compute only if both n_tested and n_positive valid (>0)."
-        - "Exclude structural zeros (facilities without testing capacity)."
+      name: TPR calculation and proxy derivation
+      description: >
+        Calculate TPR directly where conf and test are valid. For missing
+        or invalid facility-months, derive proxy TPRs using a sequential
+        fallback hierarchy based on available data.
+      steps:
+        - "Compute tpr_raw = conf / test."
+        - "When tpr_raw is missing, assign proxy using the following order:
+          1. District (adm2_calc) TPR
+          2. Same month previous year (facility)
+          3. Regional (adm1_calc) TPR
+          4. National (adm0_calc) TPR."
+        - "Each fallback step uses only valid conf and test values from
+          contributing units."
       outputs:
-        - "tpr_raw"
-        - "flag_tpr_valid = TRUE if n_tested >= min_tests_facility"
+        - "tpr"
+        - "tpr_source"
+      notes:
+        - "All aggregated TPRs computed as sum(conf)/sum(test) using
+          weighted means (weights = test)."
+        - "For age-disaggregated datasets, apply logic separately for
+          conf_u5/test_u5 and other subgroups."
 
     - stage: 3
-      name: Handling sparsity and instability
-      methods:
-        - name: Rolling mean
-          window: 3
-          condition: "Use when n_tested < min_tests_facility but > 0."
-          output: "tpr_roll3"
-        - name: Temporal smoothing
-          type: "moving average (month_before + month_after)"
-          apply_to: "facility-level TPR series"
-      stability_metrics:
-        - name: coef_var
-          formula: "sd(tpr_raw)/mean(tpr_raw)"
-          threshold: 0.25
-          flag: "flag_high_variance"
-
-    - stage: 4
-      name: Aggregation
-      description: "Compute higher-level TPRs for fallback or validation."
-      levels:
-        - adm_analysis_2:
-            label: "District"
-            formula: "sum(n_positive)/sum(n_tested)"
-            min_tests: 30
-        - adm_analysis_1:
-            label: "Region"
-            formula: "sum(n_positive)/sum(n_tested)"
-            min_tests: 50
-        - adm_analysis_0:
-            label: "National"
-            formula: "sum(n_positive)/sum(n_tested)"
-            min_tests: 100
-      rules:
-        - "Use only facility-months with valid test and conf."
-        - "Weight by n_tested when computing averages."
-
-    - stage: 5
-      name: Proxy TPR derivation
-      description: >
-        Derive a valid proxy TPR when facility-month has presumed malaria
-        cases but missing n_tested or n_positive. Sequential fallback is
-        applied until a valid TPR is obtained.
-      algorithm:  # Embedded tpr_proxy_algorithm.yaml
-        steps:
-          - step: 1
-            name: Monthly moving average (facility)
-            description: >
-              Mean TPR using previous and next months for same facility if
-              both valid. Requires valid test and conf values in adjacent
-              months.
-            output_field: "tpr_proxy"
-            fallback_if_na: "next step"
-
-          - step: 2
-            name: District-level TPR (adm_analysis_2)
-            description: >
-              Use monthly aggregated TPR from district level (adm2) using
-              only facility-months with valid tests and confirmations.
-            output_field: "tpr_proxy"
-            fallback_if_na: "next step"
-
-          - step: 3
-            name: Same month previous year (facility)
-            description: >
-              Use TPR from same facility and month of previous year.
-              Analysts should consider contextual differences such as SMC
-              scale-up or IRS coverage.
-            output_field: "tpr_proxy"
-            fallback_if_na: "next step"
-
-          - step: 4
-            name: Regional-level TPR (adm_analysis_1)
-            description: >
-              Use monthly aggregated TPR from the region (adm1) based only
-              on valid test and confirmation data.
-            output_field: "tpr_proxy"
-            fallback_if_na: "next step"
-
-          - step: 5
-            name: National-level TPR (adm_analysis_0)
-            description: >
-              Use national average TPR from same month. Last fallback step;
-              must always return a valid value.
-            output_field: "tpr_proxy"
-            fallback_if_na: "none (final step)"
-
-        validity_rules:
-          - "Exclude facility-months with missing or zero tests."
-          - "Exclude missing confirmed cases."
-          - "Use weighted mean (weights = n_tested) when aggregating."
-          - "Store tpr_proxy_source to indicate fallback method."
-
-        output_fields:
-          - name: tpr_proxy
-            type: numeric
-          - name: tpr_proxy_source
-            type: character
-            values:
-              - "facility_ma"
-              - "adm2"
-              - "prev_year"
-              - "adm1"
-              - "adm0"
-
-    - stage: 6
-      name: Final TPR assignment
-      logic: >
-        tpr_final assigned in this order:
-          1. tpr_raw (valid)
-          2. tpr_roll3 (smoothed)
-          3. tpr_proxy (from fallback)
-          4. tpr_adm2 → adm1 → adm0 if proxy missing
-      classification:
-        - "Tier 1: Valid facility TPR"
-        - "Tier 2: Smoothed facility TPR"
-        - "Tier 3: Proxy or aggregated TPR"
-        - "Tier 4: Regional/National substitution"
-      outputs:
-        - "tpr_final"
-        - "tpr_source"
-        - "tpr_quality_tier"
-
-    - stage: 7
       name: Quality assurance and metadata
-      flags:
-        - flag_tpr_valid
-        - flag_tpr_low_tests
-        - flag_tpr_extreme
-        - flag_tpr_proxy
-        - flag_tpr_missing
-        - flag_high_variance
+      actions:
+        - "Flag facility-months with missing or extreme TPR values."
+        - "Mark proxy-derived TPRs with flag_tpr_proxy = TRUE."
+        - "Record tpr_source to indicate data origin (facility, adm2,
+          previous_year, adm1, or adm0)."
       metadata_fields:
-        - n_tested
-        - n_positive
-        - n_suspected
+        - hf_uid
+        - adm1
+        - adm2
+        - date
+        - test
+        - conf
+        - pres
         - report_complete
-        - hf_testing_profile
-        - adm_level
-        - year
-        - month
         - tpr_source
-        - tpr_quality_tier
-
-    - stage: 8
-      name: Integration with incidence adjustment
-      description: >
-        Provide tpr_final and quality tier for incidence modelling and
-        weighting. TPRs with higher reliability (Tier 1–2) should have
-        greater influence in adjustment procedures.
-      outputs:
-        - "tpr_final_weighted"
-      notes:
-        - "Weights can be proportional to n_tested or inverse variance."
-        - "Flag structural missingness separately (e.g. stock-outs)."
-
-  parameters:
-    - name: min_tests_facility
-      default: 10
-      description: "Minimum tests for facility-level validity."
-    - name: min_tests_adm2
-      default: 30
-      description: "Minimum tests for valid district-level TPR."
-    - name: min_tests_adm1
-      default: 50
-      description: "Minimum tests for valid regional TPR."
-    - name: rolling_window
-      default: 3
-      description: "Number of months for temporal smoothing."
-    - name: cv_threshold
-      default: 0.25
-      description: "Coefficient of variation threshold for stability flag."
-    - name: use_proxy
-      default: TRUE
-      description: "Apply proxy algorithm when TPR cannot be calculated."
 
   outputs:
-    - name: tpr_final
+    - name: tpr
       type: numeric
       description: "Final validated or proxy TPR per facility-month."
     - name: tpr_source
       type: character
       values:
         - facility_raw
-        - facility_roll3
-        - proxy_facility_ma
         - proxy_adm2
         - proxy_prev_year
         - proxy_adm1
         - proxy_adm0
-    - name: tpr_quality_tier
-      type: integer
-      description: "Quality tier (1–4) for reliability and aggregation level."
     - name: flags
       list:
         - flag_tpr_valid
-        - flag_tpr_low_tests
         - flag_tpr_extreme
         - flag_tpr_proxy
         - flag_tpr_missing
-        - flag_high_variance
-    - name: metadata
-      fields:
-        - hf_uid
-        - adm1
-        - adm2
-        - date
-        - n_tested
-        - n_positive
-        - n_suspected
-        - report_complete
-        - hf_testing_profile
