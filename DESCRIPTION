@@ -24,6 +24,7 @@ RoxygenNote: 7.3.3
 Imports:
     arrow,
     cli (>= 3.6.5),
+    DHS.rates,
     dplyr (>= 1.1.4),
     fs,
     haven (>= 2.5.5),
@@ -36,6 +37,7 @@ Imports:
     tibble
 Suggests:
     here,
+    stringr,
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
 Depends:

@@ -924,8 +924,13 @@ calc_pfpr_dhs <- function(
       -dhs_pfpr_mic_se
     )
 
+  # Detect and preserve admin name columns
+  admin_name_cols <- paste0(admin_level, "_name")
+  admin_name_cols <- admin_name_cols[admin_name_cols %in% names(shapefile)]
+  all_admin_cols <- c(admin_level, admin_name_cols)
+
   result_with_geometry <- shapefile |>
-    dplyr::select(dplyr::all_of(admin_level)) |>
+    dplyr::select(dplyr::all_of(all_admin_cols)) |>
     dplyr::distinct() |>
     dplyr::left_join(
       aggregated,
@@ -1052,8 +1057,13 @@ aggregate_pfpr_admin <- function(
       dhs_pfpr_mic = round(dhs_pfpr_mic, 1)
     )
 
+  # Detect and preserve admin name columns
+  admin_name_cols <- paste0(admin_level, "_name")
+  admin_name_cols <- admin_name_cols[admin_name_cols %in% names(shapefile)]
+  all_admin_cols <- c(admin_level, admin_name_cols)
+
   result_with_geometry <- shapefile |>
-    dplyr::select(dplyr::all_of(admin_level)) |>
+    dplyr::select(dplyr::all_of(all_admin_cols)) |>
     dplyr::distinct() |>
     dplyr::left_join(
       aggregated,

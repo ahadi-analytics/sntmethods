@@ -42,6 +42,9 @@ globalVariables(
     "tested_rdt",
     "dhs_pfpr_mic_se",
     "dhs_pfpr_rdt_se",
-    "n_clusters"
+    "n_clusters",
+    "dhs_u5mr_low",
+    ":=", "Class", "LCI", "R", "UCI", "dhs_n_births", "dhs_n_deaths", "dhs_u5mr",
+    "dhs_u5mr_upp"
   )
 )
