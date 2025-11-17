@@ -941,7 +941,7 @@ calc_pfpr_dhs <- function(
 
   # Return list with data, dictionary, and metadata
   list(
-    data = result_with_geometry,
+    data = dplyr::distinct(result_with_geometry),
     dict = sntutils::build_dictionary(result_with_geometry),
     metadata = metadata
   )

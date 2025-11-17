@@ -674,7 +674,7 @@ calc_u5mr_dhs <- function(
   )
 
   list(
-    data = u5mr_data,
+    data = dplyr::distinct(u5mr_data),
     dict = sntutils::build_dictionary(u5mr_data),
     metadata = metadata
   )

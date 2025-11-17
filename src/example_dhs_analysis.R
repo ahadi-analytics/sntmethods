@@ -20,6 +20,9 @@ admin_level <- c("adm1")
 # paths
 path_dhs_parquet <- here::here(ahadi_path(), "01_data/parquet")
 
+# set paths for projects
+paths <- sntutils::setup_project_paths()
+
 # shapefile
 shp_admin <- sntutils::download_shapefile(country_iso3)
 
@@ -106,8 +109,6 @@ csb_results <- calc_csb_dhs(
   admin_level = admin_level
 )
 
-devtools::load_all()
-
 # itn --------------------------------------------------------------------------
 itn_results <- calc_itn_dhs(
   dhs_hr = hr_dhs_2019,
@@ -124,4 +125,51 @@ wealth_results <- calc_wealth_dhs(
   gps_data = ge_dhs_2019,
   shapefile = shp_admin,
   admin_level = admin_level
+)
+
+## ---------------------------------------------------------------------------##
+# 4) Produce final metrics data ------------------------------------------------
+## ---------------------------------------------------------------------------##
+
+# join the datasets together
+dhs_indicators <- pfpr_results$data |>
+  dplyr::left_join(
+    u5mr_results$data,
+    by = "adm1"
+  ) |>
+  dplyr::left_join(
+    csb_results$data,
+    by = "adm1"
+  ) |>
+  dplyr::left_join(
+    itn_results$data,
+    by = "adm1"
+  ) |>
+  dplyr::left_join(
+    wealth_results$data,
+    by = "adm1"
+  )
+
+# make final data dictionary
+dhs_dict <- sntutils::build_dictionary(dhs_indicators)
+
+# save the datasets output
+sntutils::write_snt_data(
+  obj = list(
+    data = dhs_indicators,
+    dist = dhs_dict
+  ),
+  data_name = glue::glue("{iso3}_dhs_indicators_{admin_level}"),
+  path = here::here(paths$dhs, "processed"),
+  file_formats = c("qs2", "xlsx")
+)
+
+# Finished ---------------------------------------------------------------------
+
+# clean environment
+invisible(gc())
+
+cli::cli_rule(
+  left = "All Processing is Complete",
+  right = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
 )
