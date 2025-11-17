@@ -116,3 +116,12 @@ itn_results <- calc_itn_dhs(
   shapefile = shp_admin,
   admin_level = admin_level
 )
+
+# wealth quantile --------------------------------------------------------------
+
+wealth_results <- calc_wealth_dhs(
+  dhs_hr = hr_dhs_2019,
+  gps_data = ge_dhs_2019,
+  shapefile = shp_admin,
+  admin_level = admin_level
+)

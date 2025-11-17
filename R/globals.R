@@ -88,6 +88,25 @@ globalVariables(
     "level",
     "num_itns",
     "potential_users",
-    "sex"
+    "sex",
+    "cum_pop",
+    "cum_wealth",
+    "dhs_dominant_quintile",
+    "dhs_gini",
+    "dhs_gini_sample_size",
+    "dhs_n_households",
+    "dhs_prop_middle",
+    "dhs_prop_poorer",
+    "dhs_prop_poorest",
+    "dhs_prop_richer",
+    "dhs_prop_richest",
+    "dhs_weighted_households",
+    "group",
+    "group_pop",
+    "group_wealth",
+    "hh_members",
+    "wealth_quintile",
+    "wealth_score",
+    "weight"
   )
 )
