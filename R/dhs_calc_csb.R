@@ -124,7 +124,10 @@ calc_csb_dhs_core <- function(
   }
 
   cli::cli_alert_info(
-    "Found {nrow(kr_fever)} children with fever out of {nrow(kr_eligible)} eligible children"
+    paste0(
+      "Found {nrow(kr_fever)} children with fever out of {nrow(kr_eligible)} ",
+      "eligible children"
+    )
   )
 
   # ---- 3. Create care-seeking variables -------------------------------------

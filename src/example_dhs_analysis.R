@@ -1,73 +1,118 @@
+###########################  Process DHS data  #################################
+
+cli::cli_h1("Process DHS Data")
+
+## ---------------------------------------------------------------------------##
+# 1) Set-up paths and parameters -----------------------------------------------
+## ---------------------------------------------------------------------------##
+
 devtools::load_all()
 
-# Set country and survey parameters
-iso2 <- "SL" # Sierra Leone
-iso3 <- "SLE"
-survey_year <- 2019
+# country metadata
+country_iso2 <- "SL"
+country_iso3 <- "SLE"
+survey_year_dhs <- 2019
+survey_year_mis <- 2016
+# aggregation level
+# (rememebr survey is doen at adm1 level)
+admin_level <- c("adm1")
 
-# set path fr dhs data
-dhs_path <- here::here(ahadi_path(), "01_data/parquet")
+# paths
+path_dhs_parquet <- here::here(ahadi_path(), "01_data/parquet")
 
+# shapefile
+shp_admin <- sntutils::download_shapefile(country_iso3)
 
-# Download shapefile with admin boundaries
-shapefile <- sntutils::download_shapefile(iso3)
+## ---------------------------------------------------------------------------##
+# 2) Get DHS data --------------------------------------------------------------
+## ---------------------------------------------------------------------------##
 
-# get survey coords data
-gps_data_mis <- dhs_read(
-  path = dhs_path,
-  file_type = 'GE',
+# survey geolocation data -----------------------------------------------------
+ge_mis_2016 <- dhs_read(
+  path = path_dhs_parquet,
+  file_type = "GE",
   survey_type = "MIS",
-  country_code = iso2,
-  survey_year = 2016
+  country_code = country_iso2,
+  survey_year = survey_year_mis
 )
 
-gps_data_dhs <- dhs_read(
-  path = dhs_path,
-  file_type = 'GE',
+ge_dhs_2019 <- dhs_read(
+  path = path_dhs_parquet,
+  file_type = "GE",
   survey_type = "DHS",
-  country_code = iso2,
-  survey_year = 2019
+  country_code = country_iso2,
+  survey_year = survey_year_dhs
 )
 
-# get survey personal records data
-pr_data <- dhs_read(
-  path = dhs_path,
-  file_type = 'PR',
+# survey household & individual data -----------------------------------------
+pr_mis_2016 <- dhs_read(
+  path = path_dhs_parquet,
+  file_type = "PR",
   survey_type = "MIS",
-  country_code = iso2,
-  survey_year = 2016
+  country_code = country_iso2,
+  survey_year = survey_year_mis
 )
 
-# get survey children records data
-kr_data <- dhs_read(
-  path = dhs_path,
-  file_type = 'KR',
+pr_dhs_2019 <- dhs_read(
+  path = path_dhs_parquet,
+  file_type = "PR",
   survey_type = "DHS",
-  country_code = iso2,
-  survey_year = 2019
+  country_code = country_iso2,
+  survey_year = survey_year_dhs
 )
 
+hr_dhs_2019 <- dhs_read(
+  path = path_dhs_parquet,
+  file_type = "HR",
+  survey_type = "DHS",
+  country_code = country_iso2,
+  survey_year = survey_year_dhs
+)
+
+kr_dhs_2019 <- dhs_read(
+  path = path_dhs_parquet,
+  file_type = "KR",
+  survey_type = "DHS",
+  country_code = country_iso2,
+  survey_year = survey_year_dhs
+)
+
+## ---------------------------------------------------------------------------##
+# 3) Calculate metrics from DHS data -------------------------------------------
+## ---------------------------------------------------------------------------##
+
+# pfpr -------------------------------------------------------------------------
 pfpr_results <- calc_pfpr_dhs(
-  dhs_pr = pr_data,
-  gps_data = gps_data_mis,
-  shapefile = shapefile,
-  admin_level = c("adm1", "adm2"),
-  join_nearest = TRUE
+  dhs_pr = pr_mis_2016,
+  gps_data = ge_mis_2016,
+  shapefile = shp_admin,
+  admin_level = admin_level
 )
 
+# u5mr ------------------------------------------------------------------------
 u5mr_results <- calc_u5mr_dhs(
-  dhs_kr = kr_data,
+  dhs_kr = kr_dhs_2019,
   period_years = 5,
-  gps_data = gps_data_dhs,
-  shapefile = shapefile,
-  admin_level = c("adm1", "adm2"),
-  join_nearest = TRUE
+  gps_data = ge_dhs_2019,
+  shapefile = shp_admin,
+  admin_level = admin_level
 )
 
+# csb --------------------------------------------------------------------------
 csb_results <- calc_csb_dhs(
-  dhs_kr = kr_data,
-  gps_data = gps_data_dhs,
-  shapefile = shapefile,
-  admin_level = c("adm1", "adm2"),
-  join_nearest = TRUE
+  dhs_kr = kr_dhs_2019,
+  gps_data = ge_dhs_2019,
+  shapefile = shp_admin,
+  admin_level = admin_level
+)
+
+devtools::load_all()
+
+# itn --------------------------------------------------------------------------
+itn_results <- calc_itn_dhs(
+  dhs_hr = hr_dhs_2019,
+  dhs_pr = pr_dhs_2019,
+  gps_data = ge_dhs_2019,
+  shapefile = shp_admin,
+  admin_level = admin_level
 )
