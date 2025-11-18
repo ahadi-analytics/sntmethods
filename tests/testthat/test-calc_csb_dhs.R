@@ -39,29 +39,34 @@ test_that("calc_csb_dhs_core works with minimal valid data", {
   set.seed(123)
   n_children <- 200
 
+  # Create base data frame first
   kr_data <- data.frame(
     v021 = rep(1:20, each = 10),           # 20 clusters
     v005 = rep(1000000, n_children),       # Standard weight
     v022 = rep(1:4, each = 50),            # 4 strata
     v024 = rep(c("REGION1", "REGION2"), each = 100),  # 2 regions
     hw1 = sample(0:59, n_children, replace = TRUE),   # Age in months
-    h22 = sample(c(0, 1), n_children, replace = TRUE, prob = c(0.7, 0.3)),  # 30% had fever
-    h32 = ifelse(
-      kr_data$h22 == 1,
-      sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE, prob = c(0.3, 0.7)),
-      NA
-    ),  # 70% of fever cases sought care
-    h32a = ifelse(
-      kr_data$h22 == 1,
-      sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE, prob = c(0.7, 0.3)),
-      NA
-    ),  # 30% sought public care
-    h32b = ifelse(
-      kr_data$h22 == 1,
-      sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE, prob = c(0.5, 0.5)),
-      NA
-    )   # 50% sought private care
+    h22 = sample(c(0, 1), n_children, replace = TRUE, prob = c(0.7, 0.3))  # 30% had fever
   )
+
+  # Add conditional columns based on h22
+  kr_data$h32 <- ifelse(
+    kr_data$h22 == 1,
+    sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE, prob = c(0.3, 0.7)),
+    NA
+  )  # 70% of fever cases sought care
+
+  kr_data$h32a <- ifelse(
+    kr_data$h22 == 1,
+    sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE, prob = c(0.7, 0.3)),
+    NA
+  )  # 30% sought public care
+
+  kr_data$h32b <- ifelse(
+    kr_data$h22 == 1,
+    sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE, prob = c(0.5, 0.5)),
+    NA
+  )  # 50% sought private care
 
   result <- calc_csb_dhs_core(kr_data)
 

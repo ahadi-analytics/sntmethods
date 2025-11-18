@@ -22,23 +22,26 @@ Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
 Imports:
-    arrow,
     cli (>= 3.6.5),
     DHS.rates,
     dplyr (>= 1.1.4),
-    fs,
     haven (>= 2.5.5),
-    janitor,
-    purrr,
-    rlang,
-    sf,
     sntutils (>= 1.11.6),
     survey (>= 4.4.8),
-    tibble
+    ggplot2 (>= 4.0.0)
 Suggests:
-    here,
-    stringr,
-    testthat (>= 3.0.0)
+    here (>= 1.0.2),
+    arrow (>= 22.0.0),
+    fs (>= 1.6.6),
+    janitor (>= 2.2.1),
+    lubridate (>= 1.9.4),
+    purrr (>= 1.2.0),
+    rlang (>= 1.1.6),
+    sf (>= 1.0.22),
+    stringr (>= 1.6.0),
+    testthat (>= 3.0.0),
+    tibble (>= 3.3.0),
+    tidyr (>= 1.3.1)
 Config/testthat/edition: 3
 Depends:
     R (>= 4.2)

@@ -199,7 +199,8 @@ test_that("join_dhs_coords adds GPS coordinates correctly", {
 
   result <- join_dhs_coords(
     pr_data = pr_data,
-    gps_data = gps_data
+    gps_data = gps_data,
+    pr_vars = list(cluster = "v021")
   )
 
   # Check structure

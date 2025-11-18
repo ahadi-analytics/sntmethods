@@ -167,6 +167,7 @@ test_that("calc_wealth_dhs outputs only key columns", {
     "dhs_prop_richer",
     "dhs_prop_richest",
     "dhs_dominant_quintile",
+    "dhs_dominant_prop",
     "dhs_gini"
   )
 

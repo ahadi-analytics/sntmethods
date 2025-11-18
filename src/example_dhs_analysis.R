@@ -21,7 +21,7 @@ admin_level <- c("adm1")
 path_dhs_parquet <- here::here(ahadi_path(), "01_data/parquet")
 
 # set paths for projects
-paths <- sntutils::setup_project_paths()
+# paths <- sntutils::setup_project_paths()
 
 # shapefile
 shp_admin <- sntutils::download_shapefile(country_iso3)

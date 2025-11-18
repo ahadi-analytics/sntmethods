@@ -26,3 +26,8 @@ sntutils::detect_outliers
 #' @importFrom sntutils detect_outliers
 #' @export
 sntutils::detect_outliers
+
+#' @rdname sntutils_reexports
+#' @importFrom sntutils get_active_facilities
+#' @export
+sntutils::get_active_facilities

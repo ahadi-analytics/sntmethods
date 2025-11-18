@@ -1,94 +1,338 @@
 title: "TPR Computation and Proxy Framework"
-version: "1.0.0"
+version: "2.0.0"
 description: >
   Defines the method for calculating Test Positivity Rate (TPR) from
   routine malaria data and for deriving proxy values when direct
-  calculation is not possible. Ensures consistency across facilities and
-  administrative levels and provides a valid TPR for each reporting
-  period. The framework supports incidence estimation and adjustment in
-  SNT workflows by supplying a reliable indicator of diagnostic
-  completeness and malaria transmission intensity. Variables follow SNT
-  standard naming conventions, using `conf` for confirmed cases and
-  `test` for tested individuals. When age-disaggregated data are used
-  (e.g., `conf_u5`, `test_u5`), TPR is computed separately for each
-  subgroup.
+  calculation is not possible. Input data must be at the health
+  facility-month level, with one observation per facility per reporting
+  month. Ensures consistency across facilities and administrative levels
+  and provides a valid TPR for each reporting period. The framework
+  supports incidence estimation and adjustment in SNT workflows by
+  supplying a reliable indicator of diagnostic completeness and malaria
+  transmission intensity. Variables follow SNT standard naming
+  conventions, using `conf` for confirmed cases and `test` for tested
+  individuals. When age-disaggregated data are used (e.g., `conf_u5`,
+  `test_u5`), TPR is computed separately for each subgroup.
+
+  Version 2.0 introduces flexible fallback configuration, inactive
+  facility flagging (instead of removal), customizable triggers for
+  proxy application, and a validation framework for assessing proxy
+  quality.
 
 compute_tpr:
   description: >
     Calculates malaria TPR at facility and administrative levels and
-    applies structured fallback logic to derive proxy values when
-    confirmed or tested data are missing. Produces a complete, validated
-    TPR dataset used for incidence adjustment.
+    applies configurable fallback logic to derive proxy values when
+    confirmed or tested data are missing. Expects input data at the
+    health facility-month level (one row per facility per month).
+    Produces a complete, validated TPR dataset used for incidence
+    adjustment. Supports flexible fallback hierarchies, customizable
+    triggers for proxy application, and comprehensive quality flagging.
+
+  parameters:
+    - name: fallback_method
+      type: character vector
+      default: c("adm2", "adm1", "prev_year", "adm0")
+      description: >
+        Order of proxy fallback methods. Valid options: "adm2" (district),
+        "adm1" (region), "prev_year" (same facility, previous year), "adm0"
+        (national), "rolling" (3-month rolling average). Set to
+        character(0) to disable all fallbacks.
+    - name: prev_year_window
+      type: integer
+      default: 2
+      range: 0-6
+      description: >
+        Seasonal window in months for previous year fallback. 0 = exact
+        month match only, 1 = +/-1 month window (3-month average), 2 =
+        +/-2 months (5-month average), etc. Weighted by test counts.
+    - name: fallback_triggers
+      type: character vector
+      default: c("missing")
+      description: >
+        Conditions that trigger proxy fallback. Valid options: "missing"
+        (conf/test is NA), "extreme" (TPR outside extreme_threshold),
+        "low_test" (test < 5), "impossible" (conf > test), "low_reprate"
+        (reporting rate below reporting_threshold).
+    - name: reporting_threshold
+      type: numeric
+      default: 0.8
+      description: >
+        Minimum reporting rate threshold. Facility-months below this are
+        flagged as low_reprate.
+    - name: extreme_threshold
+      type: numeric vector (length 2)
+      default: c(0.01, 0.99)
+      description: >
+        Lower and upper bounds for extreme TPR values. Values outside
+        this range are flagged.
+    - name: include_flags
+      type: logical
+      default: FALSE
+      description: >
+        If TRUE, returns all quality flag columns. If FALSE, returns only
+        core columns.
+    - name: activity_method
+      type: integer
+      default: 3
+      description: >
+        Method for classifying facility activity. Passed to
+        sntutils::get_active_facilities().
+    - name: nonreport_window
+      type: integer
+      default: 6
+      description: >
+        Maximum months of non-reporting before flagging facility as
+        inactive. Passed to sntutils::get_active_facilities().
 
   stages:
     - stage: 1
-      name: Input validation and cleaning
+      name: Reporting rate calculation
+      description: >
+        Calculate reporting rate BEFORE identifying inactive facilities,
+        to ensure reporting metrics reflect the full dataset.
       actions:
-        - "Ensure conf, test, and pres are numeric and ≥ 0."
-        - "Flag impossible values (conf > test)."
-        - "Convert test == 0 to NA to avoid divide-by-zero."
-        - "Drop incomplete months (report_complete == 0)."
-        - "Standardise date to first day of month; extract year and month."
-        - "Maintain alignment for age-disaggregated variables
-          (e.g., conf_u5 ≤ test_u5)."
+        - "Calculate reporting rate using
+          sntutils::calculate_reporting_metrics()."
+        - "Join reporting rate back to main data by admin2 and date."
+        - "Flag facility-months with reprate < reporting_threshold."
 
     - stage: 2
+      name: Inactive facility identification
+      input_requirements:
+        - "Data must be at health facility-month level (one row per
+          facility per reporting month)."
+        - "Required columns: hf_uid, adm1, adm2, date, conf, test, pres."
+        - "Each row represents aggregated monthly totals for a single
+          health facility."
+      actions:
+        - "Identify inactive facility-months using
+          sntutils::get_active_facilities()."
+        - "FLAG (not remove) inactive facility-months with flag_inactive."
+        - "Inactive facilities will have NA TPR (no proxies applied)."
+
+    - stage: 3
+      name: Data validation and quality flagging
+      actions:
+        - "Verify data is at health facility-month level (unique hf_uid
+          and date combinations)."
+        - "Ensure conf, test, and pres are numeric and >= 0."
+        - "Flag impossible values (conf > test) with flag_conf_gt_test."
+        - "Convert test == 0 to NA to avoid divide-by-zero."
+        - "Flag test < 5 with flag_low_test."
+        - "Flag missing conf with flag_missing_conf."
+        - "Standardize date to first day of month; extract year and month."
+        - "Maintain alignment for age-disaggregated variables
+          (e.g., conf_u5 <= test_u5)."
+
+    - stage: 4
       name: TPR calculation and proxy derivation
       description: >
         Calculate TPR directly where conf and test are valid. For missing
-        or invalid facility-months, derive proxy TPRs using a sequential
-        fallback hierarchy based on available data.
+        or invalid facility-months, derive proxy TPRs using a configurable
+        fallback hierarchy based on available data and specified triggers.
       steps:
-        - "Compute tpr_raw = conf / test."
-        - "When tpr_raw is missing, assign proxy using the following order:
-          1. District (adm2_calc) TPR
-          2. Same month previous year (facility)
-          3. Regional (adm1_calc) TPR
-          4. National (adm0_calc) TPR."
-        - "Each fallback step uses only valid conf and test values from
-          contributing units."
+        - "Compute tpr_raw = conf / test for clean data (excluding
+          flag_conf_gt_test, flag_inactive, flag_low_reprate)."
+        - "Initialize tpr = tpr_raw, tpr_source = 'facility_raw' where
+          tpr_raw is available."
+        - "Build dynamic .should_fallback condition based on
+          fallback_triggers parameter:
+          - Always exclude inactive facilities (!flag_inactive)
+          - Optionally exclude conf > test (!flag_conf_gt_test)
+          - Apply if missing (is.na(tpr))
+          - Apply if extreme (flag_tpr_extreme)
+          - Apply if low test (flag_low_test)
+          - Apply if low reporting (flag_low_reprate)"
+        - "Apply fallbacks sequentially in order specified by
+          fallback_method parameter:
+          1. adm2: District (adm2) TPR - sum(conf)/sum(test) for all
+             facilities in district-month (leave-one-out for validation)
+          2. adm1: Regional (adm1) TPR - sum(conf)/sum(test) for all
+             facilities in region-month
+          3. prev_year: Same facility, previous year, with seasonal
+             window. When prev_year_window > 0, computes weighted average
+             across +/- window months.
+          4. adm0: National (adm0) TPR - sum(conf)/sum(test) for all
+             facilities in country-month
+          5. rolling: 3-month rolling average (+/-1 month) from same
+             facility, same year, weighted by test counts"
+        - "After each fallback, update .should_fallback to FALSE for
+          facility-months that received proxy values."
+        - "Each fallback uses only clean data (no conf > test, not
+          inactive, not low reprate)."
       outputs:
-        - "tpr"
-        - "tpr_source"
+        - "tpr: Final TPR value (raw or proxy)"
+        - "tpr_source: Origin of TPR value"
       notes:
-        - "All aggregated TPRs computed as sum(conf)/sum(test) using
-          weighted means (weights = test)."
+        - "All aggregated TPRs computed as sum(conf)/sum(test), using
+          test counts as implicit weights."
+        - "Inactive facilities and conf > test never receive proxy values
+          (always NA)."
         - "For age-disaggregated datasets, apply logic separately for
           conf_u5/test_u5 and other subgroups."
+        - "Fallback hierarchy is fully customizable via fallback_method
+          parameter."
 
-    - stage: 3
-      name: Quality assurance and metadata
+    - stage: 5
+      name: Quality assurance and final flagging
       actions:
-        - "Flag facility-months with missing or extreme TPR values."
-        - "Mark proxy-derived TPRs with flag_tpr_proxy = TRUE."
-        - "Record tpr_source to indicate data origin (facility, adm2,
-          previous_year, adm1, or adm0)."
-      metadata_fields:
+        - "Set flag_tpr_valid = TRUE for facility-months with valid
+          tpr_raw."
+        - "Set flag_tpr_proxy = TRUE for facility-months where
+          tpr_source != 'facility_raw'."
+        - "Set flag_tpr_extreme = TRUE for TPR values outside
+          extreme_threshold range."
+        - "Set flag_tpr_missing = TRUE for facility-months with NA TPR."
+        - "Record tpr_source to indicate data origin (facility_raw,
+          proxy_adm2, proxy_adm1, proxy_prev_year, proxy_adm0,
+          proxy_rolling)."
+        - "Report summary statistics:
+          - Count by tpr_source
+          - Count of missing TPR (split by: inactive, conf > test, other)
+          - Count of extreme TPR values"
+      core_output_fields:
         - hf_uid
+        - adm0
         - adm1
         - adm2
         - date
-        - test
+        - year
+        - month
         - conf
+        - test
         - pres
-        - report_complete
+        - reprate
+        - tpr
         - tpr_source
-
-  outputs:
-    - name: tpr
-      type: numeric
-      description: "Final validated or proxy TPR per facility-month."
-    - name: tpr_source
-      type: character
-      values:
-        - facility_raw
-        - proxy_adm2
-        - proxy_prev_year
-        - proxy_adm1
-        - proxy_adm0
-    - name: flags
-      list:
+      optional_flag_fields:
         - flag_tpr_valid
         - flag_tpr_extreme
         - flag_tpr_proxy
         - flag_tpr_missing
+        - flag_conf_gt_test
+        - flag_zero_test
+        - flag_low_test
+        - flag_missing_conf
+        - flag_inactive
+        - flag_low_reprate
+
+  outputs:
+    - name: tpr
+      type: numeric
+      description: >
+        Final validated or proxy TPR per facility-month. Ranges from 0 to
+        1 (proportion). Inactive facilities and conf > test have NA values.
+    - name: tpr_source
+      type: character
+      description: "Indicates the origin of the TPR value."
+      values:
+        - facility_raw: "Raw TPR calculated from facility's own conf/test"
+        - proxy_adm2: "District-level aggregate TPR"
+        - proxy_adm1: "Regional-level aggregate TPR"
+        - proxy_prev_year: "Same facility, previous year (with seasonal window)"
+        - proxy_adm0: "National-level aggregate TPR"
+        - proxy_rolling: "3-month rolling average from same facility"
+    - name: reprate
+      type: numeric
+      description: >
+        Reporting rate for the facility's district-month, ranging 0-1.
+        Calculated before inactive facility identification.
+    - name: flags
+      description: >
+        Quality flags for data validation and proxy usage. Returned only
+        if include_flags = TRUE.
+      list:
+        - flag_tpr_valid: "TRUE if raw TPR was successfully calculated"
+        - flag_tpr_extreme: "TRUE if TPR outside extreme_threshold range"
+        - flag_tpr_proxy: "TRUE if TPR is from proxy (not raw)"
+        - flag_tpr_missing: "TRUE if TPR is NA"
+        - flag_conf_gt_test: "TRUE if conf > test (impossible value)"
+        - flag_zero_test: "TRUE if test was originally 0"
+        - flag_low_test: "TRUE if test < 5"
+        - flag_missing_conf: "TRUE if conf is NA"
+        - flag_inactive: "TRUE if facility-month classified as inactive"
+        - flag_low_reprate: "TRUE if reprate < reporting_threshold"
+
+validate_tpr_proxies:
+  description: >
+    Validates the quality of TPR proxy estimates using leave-one-out
+    cross-validation. Evaluates how well each proxy level (adm2, adm1,
+    prev_year, rolling, adm0) can predict facility-level TPR values by
+    comparing proxy estimates against actual raw TPR values.
+
+  input_requirements:
+    - "Output from calc_tpr() with include_flags = TRUE"
+    - "Must contain tpr, tpr_source, and all quality flags"
+    - "Requires clean data with valid conf and test values"
+
+  method:
+    description: >
+      For each facility-month with valid raw TPR, compute what each proxy
+      level would have estimated using leave-one-out cross-validation
+      (i.e., excluding that facility from the aggregate calculation).
+      Compare proxy estimates to actual TPR values using multiple metrics.
+    steps:
+      - "Filter to clean data: exclude flag_conf_gt_test, flag_inactive,
+        flag_low_reprate, and NA conf/test values."
+      - "Calculate tpr_actual = conf / test for validation dataset."
+      - "For each proxy level, compute leave-one-out estimates:
+        - ADM2: (sum_conf_adm2 - conf) / (sum_test_adm2 - test)
+        - ADM1: (sum_conf_adm1 - conf) / (sum_test_adm1 - test)
+        - ADM0: (sum_conf_adm0 - conf) / (sum_test_adm0 - test)
+        - Previous year: Match same month or +/-1 month from previous year
+        - Rolling: Weighted 3-month average (+/-1 month), excluding target
+        - Adjacent month: Previous or next month from same facility"
+      - "Calculate validation metrics for each proxy level:
+        - n: Number of valid comparisons
+        - MAE: Mean absolute error
+        - RMSE: Root mean squared error
+        - Correlation: Pearson correlation between actual and proxy
+        - Bias: Mean error (proxy - actual)
+        - Calibration: Slope and intercept of proxy ~ actual"
+      - "Generate diagnostic plots (if generate_plots = TRUE):
+        - Scatter plots: Actual vs proxy TPR
+        - Error distribution: Density plots of (proxy - actual)
+        - MAE by reporting rate: How proxy quality varies with reprate"
+
+  outputs:
+    - name: metrics
+      type: data.frame
+      description: >
+        Validation metrics for each proxy level, with columns: proxy_level,
+        n, mae, rmse, correlation, bias.
+    - name: validation_data
+      type: data.frame
+      description: >
+        Full validation dataset with actual TPR and all proxy estimates for
+        each facility-month.
+    - name: plots
+      type: list
+      description: >
+        Diagnostic ggplot2 objects (if generate_plots = TRUE): scatter,
+        error_dist, mae_by_reprate.
+
+  interpretation:
+    - "Lower MAE and RMSE indicate better proxy accuracy."
+    - "Higher correlation indicates proxy captures TPR patterns."
+    - "Bias near 0 indicates unbiased estimates."
+    - "Calibration slope near 1 and intercept near 0 indicate good
+      calibration."
+    - "Compare metrics across proxy levels to select optimal fallback
+      hierarchy."
+    - "Use mae_by_reprate plot to understand how proxy quality varies
+      with data completeness."
+
+implementation_notes:
+  - "All calculations use tidyverse/dplyr for consistency with SNT
+    workflows."
+  - "Column names are parameterized to support different naming
+    conventions."
+  - "Weighted aggregations use test counts as implicit weights via
+    sum(conf)/sum(test)."
+  - "Leave-one-out validation ensures fair comparison (proxy never
+    includes target facility)."
+  - "Rolling proxy matches calc_tpr() implementation: weighted by test
+    counts, excludes target month."
+  - "Function designed to work with any combination of fallback_method
+    settings."
