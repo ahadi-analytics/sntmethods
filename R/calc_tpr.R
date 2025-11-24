@@ -6,11 +6,12 @@
 #' facility-month level, with one observation per facility per reporting month.
 #' Returns a validated TPR dataset with quality flags and source tracking.
 #'
-#' The fallback hierarchy for proxy TPR values is:
-#' 1. District (adm2) TPR from same month
-#' 2. Regional (adm1) TPR from same month
+#' The default fallback hierarchy for proxy TPR values is:
+#' 1. Rolling 3-month average from same facility (+/-1 month)
+#' 2. District (adm2) TPR from same month
 #' 3. Same month from previous year (facility-level)
-#' 4. National (adm0) TPR from same month
+#' 4. Regional (adm1) TPR from same month
+#' 5. National (adm0) TPR from same month
 #'
 #' @param data Routine health facility data at the facility-month level
 #'   (data.frame or tibble). Must contain one row per facility per month.
@@ -47,12 +48,12 @@
 #' @param nonreport_window Integer. Number of consecutive non-reporting periods
 #'   before a facility is considered inactive (for method 3). Default is 6.
 #' @param fallback_method Character vector specifying which proxy fallback
-#'   levels to use and their order. Valid options: "adm2" (district-level),
-#'   "adm1" (regional-level), "prev_year" (same month previous year), "adm0"
-#'   (national-level), "rolling" (3-month rolling average from same facility).
-#'   Default is `c("adm2", "adm1", "prev_year", "adm0")`. Proxies are applied
-#'   sequentially in the order specified. Set to `character(0)` to disable all
-#'   fallbacks.
+#'   levels to use and their order. Valid options: "rolling" (3-month rolling
+#'   average from same facility), "adm2" (district-level), "adm1" (regional-level),
+#'   "prev_year" (same month previous year), "adm0" (national-level).
+#'   Default is `c("rolling", "adm2", "prev_year", "adm1", "adm0")`. Proxies are
+#'   applied sequentially in the order specified. Set to `character(0)` to disable
+#'   all fallbacks.
 #' @param prev_year_window Integer specifying the seasonal window in months
 #'   for previous year fallback. 0 = exact month match only (default), 1 = +/-1
 #'   month window (3-month average), 2 = +/-2 months (5-month average), etc.
@@ -60,9 +61,12 @@
 #'   the window from the previous year, weighted by test counts.
 #' @param fallback_triggers Character vector specifying when to apply proxy
 #'   fallbacks. Valid options: "missing" (conf/test is NA), "extreme" (TPR
-#'   outside extreme_threshold), "low_test" (test < 5), "impossible" (conf >
-#'   test), "low_reprate" (reporting rate < threshold). Default is
-#'   `c("missing")`. Multiple triggers can be combined.
+#'   outside extreme_threshold), "low_test" (test < 5), "low_reprate"
+#'   (reporting rate < threshold). Default is
+#'   `c("missing", "extreme", "low_test", "low_reprate"`. Note: impossible
+#'   values (conf > test) are now included in fallback by default, along with
+#'   missing values. Inactive facilities are always excluded from fallback.
+#'   Multiple triggers can be combined.
 #'
 #' @return A list containing three elements:
 #'   \itemize{
@@ -130,9 +134,9 @@ calc_tpr <- function(
   activity_indicators = c("conf", "test"),
   activity_method = 3,
   nonreport_window = 6,
-  fallback_method = c("adm2", "prev_year", "adm1", "adm0"),
+  fallback_method = c("rolling", "adm2", "prev_year", "adm1", "adm0"),
   prev_year_window = 2,
-  fallback_triggers = c("missing")
+  fallback_triggers = c("missing", "extreme", "low_test", "low_reprate")
 ) {
   # ---- validate data -------------------------------------------------------
 
@@ -167,7 +171,7 @@ calc_tpr <- function(
 
   if (
     !is.numeric(extreme_threshold) ||
-      length(extreme_threshold) != 2
+    length(extreme_threshold) != 2
   ) {
     cli::cli_abort(
       "`extreme_threshold` must be numeric length 2."
@@ -208,7 +212,6 @@ calc_tpr <- function(
     "missing",
     "extreme",
     "low_test",
-    "impossible",
     "low_reprate"
   )
   invalid_triggers <- setdiff(fallback_triggers, valid_triggers)
@@ -227,118 +230,153 @@ calc_tpr <- function(
     "Processing {sntutils::big_mark(nrow(data))} facility-month records."
   )
 
-  # ---- calculate reporting rate --------------------------------------------
+  # ---- classify facility activity and calculate reporting rate -------------
 
-  cli::cli_alert_info("Calculating reporting rate...")
+  cli::cli_alert_info(
+    "Classifying facility activity (method {activity_method})..."
+  )
 
+  # Classify facility-month level activity status
   suppressMessages(
-    reporting_metrics <- sntutils::calculate_reporting_metrics(
+    activity_classification <- sntutils::classify_facility_activity(
       data = data,
+      method = activity_method,
       hf_col = hf_var,
-      key_indicators = activity_indicators[1],
-      vars_of_interest = activity_indicators,
-      x_var = date_var,
-      y_var = adm2_var
+      date_col = date_var,
+      key_indicators = activity_indicators,
+      binary_classification = TRUE,  # Get binary Active/Inactive classification
+      nonreport_window = nonreport_window
     )
+  )
+
+  # Join activity status back to main data
+  data <- data |>
+    dplyr::left_join(
+      activity_classification |>
+        dplyr::select(
+          !!hf_var,
+          !!date_var,
+          activity_status
+        ),
+      by = c(hf_var, date_var)
+    ) |>
+    dplyr::mutate(
+      flag_inactive = activity_status != "Active"
+    )
+
+  n_inactive <- sum(data$flag_inactive, na.rm = TRUE)
+  n_total <- nrow(data)
+
+  cli::cli_alert_info(
+    "{sntutils::big_mark(n_inactive)} of {sntutils::big_mark(n_total)} ",
+    "facility-months flagged as inactive."
+  )
+
+  # Calculate district-month level reporting rate from facility-level activity
+  cli::cli_alert_info("Calculating district-month reporting rates...")
+
+  reprate_by_district <- data |>
+  dplyr::group_by(!!rlang::sym(adm2_var), !!rlang::sym(date_var)) |>
+  dplyr::summarise(
+    n_total_facilities = dplyr::n(),
+    n_active_facilities = sum(!flag_inactive, na.rm = TRUE),
+    reprate = n_active_facilities / n_total_facilities,
+    .groups = "drop"
   )
 
   # Join reporting rate back to main data
   data <- data |>
-    dplyr::left_join(
-      reporting_metrics |>
-        dplyr::select(
-          !!adm2_var,
-          !!date_var,
-          reprate
-        ),
-      by = c(adm2_var, date_var)
+  dplyr::left_join(
+    reprate_by_district |>
+    dplyr::select(
+      !!adm2_var,
+      !!date_var,
+      reprate
+    ),
+    by = c(adm2_var, date_var)
+  )
+
+  # Diagnostics
+  n_na_reprate <- sum(is.na(data$reprate))
+  n_zero_reprate <- sum(data$reprate == 0, na.rm = TRUE)
+  n_low_reprate <- sum(!is.na(data$reprate) & data$reprate < reporting_threshold,
+                       na.rm = TRUE)
+
+  if (n_na_reprate > 0) {
+    cli::cli_alert_info(
+      "{sntutils::big_mark(n_na_reprate)} facility-months have NA reporting rate."
     )
+  }
 
-  # ---- flag inactive facilities --------------------------------------------
+  if (n_zero_reprate > 0) {
+    cli::cli_alert_info(
+      "{sntutils::big_mark(n_zero_reprate)} facility-months in districts ",
+      "with 0% reporting rate."
+    )
+  }
 
-  cli::cli_alert_info("Identifying inactive facilities...")
-
-  # Get active facility-months
-  active_data <- get_active_facilities(
-    data = data,
-    hf_col = hf_var,
-    date_col = date_var,
-    key_indicators = activity_indicators,
-    method = activity_method,
-    nonreport_window = nonreport_window,
-    return_summary = FALSE
-  )
-
-  # Create key for active facility-months
-
-  active_keys <- active_data |>
-    dplyr::mutate(
-      .active_key = paste(.data[[hf_var]], .data[[date_var]], sep = "_")
-    ) |>
-    dplyr::pull(.active_key)
-
-  # Flag inactive facility-months in original data
-  data <- data |>
-    dplyr::mutate(
-      .temp_key = paste(.data[[hf_var]], .data[[date_var]], sep = "_"),
-      flag_inactive = !.temp_key %in% active_keys
-    ) |>
-    dplyr::select(-.temp_key)
-
-  n_inactive <- sum(data$flag_inactive)
-  n_total <- nrow(data)
-
-  cli::cli_alert_info(
-    "{sntutils::big_mark(n_inactive)} of {sntutils::big_mark(n_total)} facility-months flagged as inactive."
-  )
+  if (n_low_reprate > 0) {
+    cli::cli_alert_info(
+      "{sntutils::big_mark(n_low_reprate)} facility-months in districts below ",
+      "{reporting_threshold * 100}% reporting threshold."
+    )
+  }
 
   # ---- rename vars internally ----------------------------------------------
 
   df <- data |>
-    dplyr::rename(
-      hf_uid = !!hf_var,
-      adm1 = !!adm1_var,
-      adm2 = !!adm2_var,
-      date_raw = !!date_var,
-      conf = !!conf_var,
-      test = !!test_var,
-      pres = !!pres_var
-    ) |>
-    dplyr::mutate(
-      conf = as.numeric(conf),
-      test = as.numeric(test),
-      pres = as.numeric(pres)
-    )
+  dplyr::rename(
+    hf_uid = !!hf_var,
+    adm1 = !!adm1_var,
+    adm2 = !!adm2_var,
+    date_raw = !!date_var,
+    conf = !!conf_var,
+    test = !!test_var,
+    pres = !!pres_var
+  ) |>
+  dplyr::mutate(
+    conf = as.numeric(conf),
+    test = as.numeric(test),
+    pres = as.numeric(pres)
+  )
 
   # ---- adm0 handling -------------------------------------------------------
 
   if (!is.null(adm0_var)) {
+    # Case 1: user provided adm0_var
     if (!adm0_var %in% names(data)) {
       cli::cli_abort("adm0_var not found in data.")
     }
+
     df <- df |>
-      dplyr::mutate(adm0 = .data[[adm0_var]])
+    dplyr::mutate(adm0 = .data[[adm0_var]])
+  } else if ("adm0" %in% names(data)) {
+    # Case 2: adm0_var not provided but adm0 exists → keep it as is
+    df <- df |>
+    dplyr::mutate(adm0 = .data$adm0)
   } else {
+    # Case 3: neither provided nor existing → default constant
     df <- df |>
-      dplyr::mutate(adm0 = "country")
+    dplyr::mutate(adm0 = "country")
   }
+
 
   # ---- date handling -------------------------------------------------------
 
   df <- df |>
-    dplyr::mutate(
-      date = as.Date(date_raw),
-      date = lubridate::floor_date(date, "month"),
-      year = lubridate::year(date),
-      month = lubridate::month(date)
-    )
+  dplyr::mutate(
+    date = as.Date(date_raw),
+    date = lubridate::floor_date(date, "month"),
+    year = lubridate::year(date),
+    month = lubridate::month(date)
+  )
 
   # ---- duplicate check -----------------------------------------------------
 
   n_dup <- df |>
-    dplyr::group_by(hf_uid, date) |>
-    dplyr::filter(dplyr::n() > 1) |>
-    nrow()
+  dplyr::group_by(hf_uid, date) |>
+  dplyr::filter(dplyr::n() > 1) |>
+  nrow()
 
   if (n_dup > 0) {
     cli::cli_alert_warning(
@@ -349,14 +387,14 @@ calc_tpr <- function(
   # ---- impossible values ---------------------------------------------------
 
   df <- df |>
-    dplyr::mutate(
-      flag_conf_gt_test = dplyr::if_else(
-        !is.na(conf) & !is.na(test) & conf > test,
-        TRUE,
-        FALSE,
-        missing = FALSE
-      )
+  dplyr::mutate(
+    flag_conf_gt_test = dplyr::if_else(
+      !is.na(conf) & !is.na(test) & conf > test,
+      TRUE,
+      FALSE,
+      missing = FALSE
     )
+  )
 
   n_imp <- sum(df$flag_conf_gt_test)
 
@@ -369,46 +407,38 @@ calc_tpr <- function(
   # ---- flags ---------------------------------------------------------------
 
   df <- df |>
-    dplyr::mutate(
-      flag_zero_test = test == 0,
-      flag_low_test = !is.na(test) & test < 5,
-      flag_missing_conf = is.na(conf),
-      flag_low_reprate = !is.na(reprate) & reprate < reporting_threshold,
-      test = dplyr::if_else(test == 0, NA_real_, test)
-    )
-
-  n_low_reprate <- sum(df$flag_low_reprate)
-  if (n_low_reprate > 0) {
-    cli::cli_alert_info(
-      "{sntutils::big_mark(n_low_reprate)} facility-months below ",
-      "{reporting_threshold * 100}% reporting."
-    )
-  }
+  dplyr::mutate(
+    flag_zero_test = test == 0,
+    flag_low_test = !is.na(test) & test < 5,
+    flag_missing_conf = is.na(conf),
+    flag_low_reprate = !is.na(reprate) & reprate < reporting_threshold,
+    test = dplyr::if_else(test == 0, NA_real_, test)
+  )
 
   # ---- clean dataset for proxies -------------------------------------------
   # Exclude: impossible values, inactive facilities, low reporting rate
 
   df_clean <- df |>
-    dplyr::filter(
-      !flag_conf_gt_test,
-      !flag_inactive,
-      !flag_low_reprate
-    )
+  dplyr::filter(
+    !flag_conf_gt_test,
+    !flag_inactive,
+    !flag_low_reprate
+  )
 
   # ---- raw tpr --------------------------------------------------------------
 
   df_raw <- df_clean |>
-    dplyr::mutate(
-      tpr_raw = dplyr::if_else(
-        !is.na(conf) & !is.na(test),
-        conf / test,
-        NA_real_
-      )
-    ) |>
-    dplyr::select(hf_uid, date, tpr_raw)
+  dplyr::mutate(
+    tpr_raw = dplyr::if_else(
+      !is.na(conf) & !is.na(test),
+      conf / test,
+      NA_real_
+    )
+  ) |>
+  dplyr::select(hf_uid, date, tpr_raw)
 
   df <- df |>
-    dplyr::left_join(df_raw, by = c("hf_uid", "date"))
+  dplyr::left_join(df_raw, by = c("hf_uid", "date"))
 
   n_raw <- sum(!is.na(df$tpr_raw))
 
@@ -417,309 +447,310 @@ calc_tpr <- function(
   )
 
   df <- df |>
-    dplyr::mutate(
-      tpr = tpr_raw,
-      tpr_source = dplyr::if_else(
-        !is.na(tpr_raw),
-        "facility_raw",
-        NA_character_
-      )
+  dplyr::mutate(
+    tpr = tpr_raw,
+    tpr_source = dplyr::if_else(
+      !is.na(tpr_raw),
+      "facility_raw",
+      NA_character_
+    ),
+    # Create extreme flag early for use in fallback triggers
+    flag_tpr_extreme = dplyr::if_else(
+      !is.na(tpr_raw),
+      tpr_raw < extreme_threshold[1] | tpr_raw > extreme_threshold[2],
+      FALSE
     )
+  )
 
   # ---- fallback proxies -----------------------------------------------------
   # Build dynamic condition for when to apply fallbacks
 
-  # Always exclude inactive facilities
+  # Always exclude inactive facilities only
+  # Impossible values (conf > test) now included in fallback by default
   df <- df |>
-    dplyr::mutate(.should_fallback = !flag_inactive)
-
-  # Handle each trigger
-  if (!"impossible" %in% fallback_triggers) {
-    df <- df |>
-      dplyr::mutate(.should_fallback = .should_fallback & !flag_conf_gt_test)
-  }
+  dplyr::mutate(.should_fallback = !flag_inactive)
 
   if ("missing" %in% fallback_triggers) {
     df <- df |>
-      dplyr::mutate(
-        .should_fallback = .should_fallback & is.na(tpr)
-      )
+    dplyr::mutate(
+      .should_fallback = .should_fallback & is.na(tpr)
+    )
   }
 
   if ("extreme" %in% fallback_triggers) {
     df <- df |>
-      dplyr::mutate(
-        .should_fallback = .should_fallback &
-          (is.na(tpr) | flag_tpr_extreme)
-      )
+    dplyr::mutate(
+      .should_fallback = .should_fallback &
+      (is.na(tpr) | flag_tpr_extreme)
+    )
   }
 
   if ("low_test" %in% fallback_triggers) {
     df <- df |>
-      dplyr::mutate(
-        .should_fallback = .should_fallback &
-          (is.na(tpr) | flag_low_test)
-      )
+    dplyr::mutate(
+      .should_fallback = .should_fallback &
+      (is.na(tpr) | flag_low_test)
+    )
   }
 
   if ("low_reprate" %in% fallback_triggers) {
     df <- df |>
-      dplyr::mutate(
-        .should_fallback = .should_fallback &
-          (is.na(tpr) | flag_low_reprate)
-      )
+    dplyr::mutate(
+      .should_fallback = .should_fallback &
+      (is.na(tpr) | flag_low_reprate)
+    )
   }
 
   # Define fallback helper functions
   apply_adm2_fallback <- function(df_main, df_clean_data) {
     adm2_tpr <- df_clean_data |>
-      dplyr::filter(!is.na(conf), !is.na(test)) |>
-      dplyr::group_by(adm2, year, month) |>
-      dplyr::summarise(
-        tpr_adm2 = sum(conf) / sum(test),
-        .groups = "drop"
-      )
+    dplyr::filter(!is.na(conf), !is.na(test)) |>
+    dplyr::group_by(adm2, year, month) |>
+    dplyr::summarise(
+      tpr_adm2 = sum(conf) / sum(test),
+      .groups = "drop"
+    )
 
     df_main |>
-      dplyr::left_join(adm2_tpr, by = c("adm2", "year", "month")) |>
-      dplyr::mutate(
-        tpr = dplyr::if_else(
-          .should_fallback & !is.na(tpr_adm2),
-          tpr_adm2,
-          tpr
-        ),
-        tpr_source = dplyr::if_else(
-          .should_fallback & !is.na(tpr_adm2),
-          "proxy_adm2",
-          tpr_source
-        ),
-        .should_fallback = dplyr::if_else(
-          !is.na(tpr_adm2),
-          FALSE,
-          .should_fallback
-        )
-      ) |>
-      dplyr::select(-tpr_adm2)
+    dplyr::left_join(adm2_tpr, by = c("adm2", "year", "month")) |>
+    dplyr::mutate(
+      tpr = dplyr::if_else(
+        .should_fallback & !is.na(tpr_adm2),
+        tpr_adm2,
+        tpr
+      ),
+      tpr_source = dplyr::if_else(
+        .should_fallback & !is.na(tpr_adm2),
+        "proxy_adm2",
+        tpr_source
+      ),
+      .should_fallback = dplyr::if_else(
+        !is.na(tpr_adm2),
+        FALSE,
+        .should_fallback
+      )
+    ) |>
+    dplyr::select(-tpr_adm2)
   }
 
   apply_adm1_fallback <- function(df_main, df_clean_data) {
     adm1_tpr <- df_clean_data |>
-      dplyr::filter(!is.na(conf), !is.na(test)) |>
-      dplyr::group_by(adm1, year, month) |>
-      dplyr::summarise(
-        tpr_adm1 = sum(conf) / sum(test),
-        .groups = "drop"
-      )
+    dplyr::filter(!is.na(conf), !is.na(test)) |>
+    dplyr::group_by(adm1, year, month) |>
+    dplyr::summarise(
+      tpr_adm1 = sum(conf) / sum(test),
+      .groups = "drop"
+    )
 
     df_main |>
-      dplyr::left_join(adm1_tpr, by = c("adm1", "year", "month")) |>
-      dplyr::mutate(
-        tpr = dplyr::if_else(
-          .should_fallback & !is.na(tpr_adm1),
-          tpr_adm1,
-          tpr
-        ),
-        tpr_source = dplyr::if_else(
-          .should_fallback & !is.na(tpr_adm1),
-          "proxy_adm1",
-          tpr_source
-        ),
-        .should_fallback = dplyr::if_else(
-          !is.na(tpr_adm1),
-          FALSE,
-          .should_fallback
-        )
-      ) |>
-      dplyr::select(-tpr_adm1)
+    dplyr::left_join(adm1_tpr, by = c("adm1", "year", "month")) |>
+    dplyr::mutate(
+      tpr = dplyr::if_else(
+        .should_fallback & !is.na(tpr_adm1),
+        tpr_adm1,
+        tpr
+      ),
+      tpr_source = dplyr::if_else(
+        .should_fallback & !is.na(tpr_adm1),
+        "proxy_adm1",
+        tpr_source
+      ),
+      .should_fallback = dplyr::if_else(
+        !is.na(tpr_adm1),
+        FALSE,
+        .should_fallback
+      )
+    ) |>
+    dplyr::select(-tpr_adm1)
   }
 
   apply_prev_year_fallback <- function(df_main, df_clean_data, window) {
     if (window == 0) {
       # Exact month match
       prev <- df_main |>
-        dplyr::filter(!is.na(tpr_raw), !flag_conf_gt_test) |>
-        dplyr::mutate(year = year + 1) |>
-        dplyr::select(hf_uid, year, month, tpr_prev_year = tpr_raw)
+      dplyr::filter(!is.na(tpr_raw), !flag_conf_gt_test) |>
+      dplyr::mutate(year = year + 1) |>
+      dplyr::select(hf_uid, year, month, tpr_prev_year = tpr_raw)
 
       df_main |>
-        dplyr::left_join(prev, by = c("hf_uid", "year", "month")) |>
-        dplyr::mutate(
-          tpr = dplyr::if_else(
-            .should_fallback & !is.na(tpr_prev_year),
-            tpr_prev_year,
-            tpr
-          ),
-          tpr_source = dplyr::if_else(
-            .should_fallback & !is.na(tpr_prev_year),
-            "proxy_prev_year",
-            tpr_source
-          ),
-          .should_fallback = dplyr::if_else(
-            !is.na(tpr_prev_year),
-            FALSE,
-            .should_fallback
-          )
-        ) |>
-        dplyr::select(-tpr_prev_year)
+      dplyr::left_join(prev, by = c("hf_uid", "year", "month")) |>
+      dplyr::mutate(
+        tpr = dplyr::if_else(
+          .should_fallback & !is.na(tpr_prev_year),
+          tpr_prev_year,
+          tpr
+        ),
+        tpr_source = dplyr::if_else(
+          .should_fallback & !is.na(tpr_prev_year),
+          "proxy_prev_year",
+          tpr_source
+        ),
+        .should_fallback = dplyr::if_else(
+          !is.na(tpr_prev_year),
+          FALSE,
+          .should_fallback
+        )
+      ) |>
+      dplyr::select(-tpr_prev_year)
     } else {
       # Seasonal window average
       prev <- df_main |>
-        dplyr::filter(!is.na(tpr_raw), !flag_conf_gt_test) |>
-        dplyr::select(hf_uid, year, month, conf, test, tpr_raw)
+      dplyr::filter(!is.na(tpr_raw), !flag_conf_gt_test) |>
+      dplyr::select(hf_uid, year, month, conf, test, tpr_raw)
 
       # Create all month combinations within window
       df_expanded <- df_main |>
-        dplyr::select(hf_uid, year, month) |>
-        dplyr::distinct() |>
-        tidyr::expand_grid(month_offset = -window:window) |>
-        dplyr::mutate(
-          prev_year = year - 1,
-          prev_month = month + month_offset,
-          prev_month = dplyr::case_when(
-            prev_month < 1 ~ prev_month + 12,
-            prev_month > 12 ~ prev_month - 12,
-            TRUE ~ prev_month
-          )
+      dplyr::select(hf_uid, year, month) |>
+      dplyr::distinct() |>
+      tidyr::expand_grid(month_offset = -window:window) |>
+      dplyr::mutate(
+        prev_year = year - 1,
+        prev_month = month + month_offset,
+        prev_month = dplyr::case_when(
+          prev_month < 1 ~ prev_month + 12,
+          prev_month > 12 ~ prev_month - 12,
+          TRUE ~ prev_month
         )
+      )
 
       # Join and average
       prev_avg <- df_expanded |>
-        dplyr::left_join(
-          prev |>
-            dplyr::rename(
-              prev_year = year,
-              prev_month = month,
-              prev_conf = conf,
-              prev_test = test
-            ),
-          by = c("hf_uid", "prev_year", "prev_month")
-        ) |>
-        dplyr::filter(!is.na(prev_conf), !is.na(prev_test)) |>
-        dplyr::group_by(hf_uid, year, month) |>
-        dplyr::summarise(
-          tpr_prev_year = sum(prev_conf) / sum(prev_test),
-          .groups = "drop"
-        )
+      dplyr::left_join(
+        prev |>
+        dplyr::rename(
+          prev_year = year,
+          prev_month = month,
+          prev_conf = conf,
+          prev_test = test
+        ),
+        by = c("hf_uid", "prev_year", "prev_month")
+      ) |>
+      dplyr::filter(!is.na(prev_conf), !is.na(prev_test)) |>
+      dplyr::group_by(hf_uid, year, month) |>
+      dplyr::summarise(
+        tpr_prev_year = sum(prev_conf) / sum(prev_test),
+        .groups = "drop"
+      )
 
       df_main |>
-        dplyr::left_join(prev_avg, by = c("hf_uid", "year", "month")) |>
-        dplyr::mutate(
-          tpr = dplyr::if_else(
-            .should_fallback & !is.na(tpr_prev_year),
-            tpr_prev_year,
-            tpr
-          ),
-          tpr_source = dplyr::if_else(
-            .should_fallback & !is.na(tpr_prev_year),
-            "proxy_prev_year",
-            tpr_source
-          ),
-          .should_fallback = dplyr::if_else(
-            !is.na(tpr_prev_year),
-            FALSE,
-            .should_fallback
-          )
-        ) |>
-        dplyr::select(-tpr_prev_year)
+      dplyr::left_join(prev_avg, by = c("hf_uid", "year", "month")) |>
+      dplyr::mutate(
+        tpr = dplyr::if_else(
+          .should_fallback & !is.na(tpr_prev_year),
+          tpr_prev_year,
+          tpr
+        ),
+        tpr_source = dplyr::if_else(
+          .should_fallback & !is.na(tpr_prev_year),
+          "proxy_prev_year",
+          tpr_source
+        ),
+        .should_fallback = dplyr::if_else(
+          !is.na(tpr_prev_year),
+          FALSE,
+          .should_fallback
+        )
+      ) |>
+      dplyr::select(-tpr_prev_year)
     }
   }
 
   apply_adm0_fallback <- function(df_main, df_clean_data) {
     adm0_tpr <- df_clean_data |>
-      dplyr::filter(!is.na(conf), !is.na(test)) |>
-      dplyr::group_by(adm0, year, month) |>
-      dplyr::summarise(
-        tpr_adm0 = sum(conf) / sum(test),
-        .groups = "drop"
-      )
+    dplyr::filter(!is.na(conf), !is.na(test)) |>
+    dplyr::group_by(adm0, year, month) |>
+    dplyr::summarise(
+      tpr_adm0 = sum(conf) / sum(test),
+      .groups = "drop"
+    )
 
     df_main |>
-      dplyr::left_join(adm0_tpr, by = c("adm0", "year", "month")) |>
-      dplyr::mutate(
-        tpr = dplyr::if_else(
-          .should_fallback & !is.na(tpr_adm0),
-          tpr_adm0,
-          tpr
-        ),
-        tpr_source = dplyr::if_else(
-          .should_fallback & !is.na(tpr_adm0),
-          "proxy_adm0",
-          tpr_source
-        ),
-        .should_fallback = dplyr::if_else(
-          !is.na(tpr_adm0),
-          FALSE,
-          .should_fallback
-        )
-      ) |>
-      dplyr::select(-tpr_adm0)
+    dplyr::left_join(adm0_tpr, by = c("adm0", "year", "month")) |>
+    dplyr::mutate(
+      tpr = dplyr::if_else(
+        .should_fallback & !is.na(tpr_adm0),
+        tpr_adm0,
+        tpr
+      ),
+      tpr_source = dplyr::if_else(
+        .should_fallback & !is.na(tpr_adm0),
+        "proxy_adm0",
+        tpr_source
+      ),
+      .should_fallback = dplyr::if_else(
+        !is.na(tpr_adm0),
+        FALSE,
+        .should_fallback
+      )
+    ) |>
+    dplyr::select(-tpr_adm0)
   }
 
   apply_rolling_fallback <- function(df_main, df_clean_data) {
     # 3-month rolling average (+/-1 month) from same facility, same year
     rolling_data <- df_main |>
-      dplyr::filter(!is.na(tpr_raw), !flag_conf_gt_test) |>
-      dplyr::select(hf_uid, year, month, conf, test, tpr_raw)
+    dplyr::filter(!is.na(tpr_raw), !flag_conf_gt_test) |>
+    dplyr::select(hf_uid, year, month, conf, test, tpr_raw)
 
     # Create expanded dataset with +/-1 month offsets
     df_expanded <- df_main |>
-      dplyr::select(hf_uid, year, month) |>
-      dplyr::distinct() |>
-      tidyr::expand_grid(month_offset = -1:1) |>
-      dplyr::mutate(
-        rolling_month = month + month_offset,
-        rolling_month = dplyr::case_when(
-          rolling_month < 1 ~ rolling_month + 12,
-          rolling_month > 12 ~ rolling_month - 12,
-          TRUE ~ rolling_month
-        )
+    dplyr::select(hf_uid, year, month) |>
+    dplyr::distinct() |>
+    tidyr::expand_grid(month_offset = -1:1) |>
+    dplyr::mutate(
+      rolling_month = month + month_offset,
+      rolling_month = dplyr::case_when(
+        rolling_month < 1 ~ rolling_month + 12,
+        rolling_month > 12 ~ rolling_month - 12,
+        TRUE ~ rolling_month
       )
+    )
 
     # Join and average (weighted by test counts)
     rolling_avg <- df_expanded |>
-      dplyr::left_join(
-        rolling_data |>
-          dplyr::rename(
-            rolling_year = year,
-            rolling_month = month,
-            rolling_conf = conf,
-            rolling_test = test
-          ),
-        by = c("hf_uid", "year" = "rolling_year", "rolling_month")
-      ) |>
-      dplyr::filter(
-        !is.na(rolling_conf),
-        !is.na(rolling_test),
-        month_offset != 0  # Exclude the target month itself
-      ) |>
-      dplyr::group_by(hf_uid, year, month) |>
-      dplyr::summarise(
-        tpr_rolling = sum(rolling_conf) / sum(rolling_test),
-        n_months_used = dplyr::n(),
-        .groups = "drop"
-      ) |>
-      dplyr::filter(n_months_used >= 1)  # At least 1 other month
+    dplyr::left_join(
+      rolling_data |>
+      dplyr::rename(
+        rolling_year = year,
+        rolling_month = month,
+        rolling_conf = conf,
+        rolling_test = test
+      ),
+      by = c("hf_uid", "year" = "rolling_year", "rolling_month")
+    ) |>
+    dplyr::filter(
+      !is.na(rolling_conf),
+      !is.na(rolling_test),
+      month_offset != 0  # Exclude the target month itself
+    ) |>
+    dplyr::group_by(hf_uid, year, month) |>
+    dplyr::summarise(
+      tpr_rolling = sum(rolling_conf) / sum(rolling_test),
+      n_months_used = dplyr::n(),
+      .groups = "drop"
+    ) |>
+    dplyr::filter(n_months_used >= 1)  # At least 1 other month
 
     df_main |>
-      dplyr::left_join(rolling_avg, by = c("hf_uid", "year", "month")) |>
-      dplyr::mutate(
-        tpr = dplyr::if_else(
-          .should_fallback & !is.na(tpr_rolling),
-          tpr_rolling,
-          tpr
-        ),
-        tpr_source = dplyr::if_else(
-          .should_fallback & !is.na(tpr_rolling),
-          "proxy_rolling",
-          tpr_source
-        ),
-        .should_fallback = dplyr::if_else(
-          !is.na(tpr_rolling),
-          FALSE,
-          .should_fallback
-        )
-      ) |>
-      dplyr::select(-tpr_rolling, -n_months_used)
+    dplyr::left_join(rolling_avg, by = c("hf_uid", "year", "month")) |>
+    dplyr::mutate(
+      tpr = dplyr::if_else(
+        .should_fallback & !is.na(tpr_rolling),
+        tpr_rolling,
+        tpr
+      ),
+      tpr_source = dplyr::if_else(
+        .should_fallback & !is.na(tpr_rolling),
+        "proxy_rolling",
+        tpr_source
+      ),
+      .should_fallback = dplyr::if_else(
+        !is.na(tpr_rolling),
+        FALSE,
+        .should_fallback
+      )
+    ) |>
+    dplyr::select(-tpr_rolling, -n_months_used)
   }
 
   # Apply fallbacks in user-specified order
@@ -752,23 +783,24 @@ calc_tpr <- function(
   # ---- quality flags --------------------------------------------------------
 
   df <- df |>
-    dplyr::mutate(
-      flag_tpr_valid = !is.na(tpr_raw),
-      flag_tpr_proxy = tpr_source != "facility_raw" &
-        !is.na(tpr_source),
-      flag_tpr_extreme = dplyr::if_else(
-        !is.na(tpr),
-        tpr < extreme_threshold[1] |
-          tpr > extreme_threshold[2],
-        FALSE
-      ),
-      flag_tpr_missing = is.na(tpr)
-    )
+  dplyr::mutate(
+    flag_tpr_valid = !is.na(tpr_raw),
+    flag_tpr_proxy = tpr_source != "facility_raw" &
+    !is.na(tpr_source),
+    # Update extreme flag to include any extreme values (raw or proxy)
+    flag_tpr_extreme = dplyr::if_else(
+      !is.na(tpr),
+      tpr < extreme_threshold[1] |
+      tpr > extreme_threshold[2],
+      flag_tpr_extreme  # Keep existing flag if tpr is still NA
+    ),
+    flag_tpr_missing = is.na(tpr)
+  )
 
   # ---- summary --------------------------------------------------------------
 
   proxy_counts <- df |>
-    dplyr::count(tpr_source)
+  dplyr::count(tpr_source)
 
   for (i in seq_len(nrow(proxy_counts))) {
     src <- proxy_counts$tpr_source[i]
@@ -904,8 +936,8 @@ calc_tpr <- function(
   final_cols <- intersect(final_cols, names(df))
 
   df_final <- df |>
-    dplyr::select(dplyr::all_of(final_cols)) |>
-    tibble::as_tibble()
+  dplyr::select(dplyr::all_of(final_cols)) |>
+  tibble::as_tibble()
 
   cli::cli_alert_success(
     "TPR calculation complete for {sntutils::big_mark(nrow(df_final))} rows."
@@ -1179,12 +1211,12 @@ validate_tpr_proxies <- function(
   rolling_avg <- df_expanded |>
   dplyr::left_join(
     rolling_data |>
-      dplyr::rename(
-        rolling_year = !!rlang::sym(year_var),
-        rolling_month_join = !!rlang::sym(month_var),
-        rolling_conf = !!rlang::sym(conf_var),
-        rolling_test = !!rlang::sym(test_var)
-      ),
+    dplyr::rename(
+      rolling_year = !!rlang::sym(year_var),
+      rolling_month_join = !!rlang::sym(month_var),
+      rolling_conf = !!rlang::sym(conf_var),
+      rolling_test = !!rlang::sym(test_var)
+    ),
     by = stats::setNames(
       c(hf_var, "rolling_year", "rolling_month_join"),
       c(hf_var, year_var, "rolling_month")
@@ -1196,7 +1228,7 @@ validate_tpr_proxies <- function(
     month_offset != 0  # Exclude the target month itself
   ) |>
   dplyr::group_by(!!rlang::sym(hf_var), !!rlang::sym(year_var),
-                  !!rlang::sym(month_var)) |>
+  !!rlang::sym(month_var)) |>
   dplyr::summarise(
     proxy_roll3 = sum(rolling_conf) / sum(rolling_test),
     n_months_used = dplyr::n(),
@@ -1226,6 +1258,7 @@ validate_tpr_proxies <- function(
   # error metrics -------------------------------------------------------------
   calc_metrics <- function(actual, proxy, name) {
     ok <- !is.na(actual) & !is.na(proxy)
+
     if (sum(ok) < 2) {
       return(
         tibble::tibble(
@@ -1238,7 +1271,8 @@ validate_tpr_proxies <- function(
           correlation = NA_real_,
           bias = NA_real_,
           cal_slope = NA_real_,
-          cal_intercept = NA_real_
+          cal_intercept = NA_real_,
+          median_tests = NA_real_
         )
       )
     }
@@ -1246,16 +1280,16 @@ validate_tpr_proxies <- function(
     a <- actual[ok]
     p <- proxy[ok]
     e <- p - a
+    t <- df_valid[[test_var]][ok]
 
-    # safe regression (handles near-zero variance)
     lm_fit <- try(stats::lm(p ~ a), silent = TRUE)
 
     if (inherits(lm_fit, "try-error")) {
       slope <- NA_real_
       intercept <- NA_real_
     } else {
-      slope <- stats:: coef(lm_fit)[2]
-      intercept <- stats:: coef(lm_fit)[1]
+      slope <- stats::coef(lm_fit)[2]
+      intercept <- stats::coef(lm_fit)[1]
     }
 
     tibble::tibble(
@@ -1268,17 +1302,18 @@ validate_tpr_proxies <- function(
       correlation = stats::cor(a, p),
       bias = mean(e),
       cal_slope = slope,
-      cal_intercept = intercept
+      cal_intercept = intercept,
+      median_tests = stats::median(t, na.rm = TRUE)
     )
   }
 
-    metrics <- dplyr::bind_rows(
-      calc_metrics(df_valid$tpr_actual, df_valid$proxy_adm2, "adm2"),
-      calc_metrics(df_valid$tpr_actual, df_valid$proxy_adm1, "adm1"),
-      calc_metrics(df_valid$tpr_actual, df_valid$proxy_prev_year, "prev_year"),
-      calc_metrics(df_valid$tpr_actual, df_valid$proxy_roll3, "rolling"),
-      calc_metrics(df_valid$tpr_actual, df_valid$proxy_adm0, "adm0")
-    )
+  metrics <- dplyr::bind_rows(
+    calc_metrics(df_valid$tpr_actual, df_valid$proxy_adm2, "adm2"),
+    calc_metrics(df_valid$tpr_actual, df_valid$proxy_adm1, "adm1"),
+    calc_metrics(df_valid$tpr_actual, df_valid$proxy_prev_year, "prev_year"),
+    calc_metrics(df_valid$tpr_actual, df_valid$proxy_roll3, "rolling"),
+    calc_metrics(df_valid$tpr_actual, df_valid$proxy_adm0, "adm0")
+  )
 
   cli::cli_alert_success("Computed validation metrics.")
   print(metrics)
@@ -1334,7 +1369,7 @@ validate_tpr_proxies <- function(
       long |> dplyr::filter(!is.na(proxy_value)),
       ggplot2::aes(tpr_actual, proxy_value)
     ) +
-    ggplot2::geom_point(alpha = 0.25, size = 0.5) +
+    ggplot2::geom_point(alpha = 0.25, size = 0.5, color = "steelblue") +
     ggplot2::geom_abline(
       slope = 1,
       intercept = 0,
@@ -1343,7 +1378,7 @@ validate_tpr_proxies <- function(
     ) +
     ggplot2::facet_wrap(~proxy_level) +
     ggplot2::labs(
-      title = "Actual vs Proxy TPR",
+      title = "Actual vs Proxy TP\n",
       y = "Proxy TPR Value\n\n",
       x = "\n\nActual TPR Value"
     ) +
@@ -1363,25 +1398,25 @@ validate_tpr_proxies <- function(
       long |> dplyr::filter(!is.na(error)),
       ggplot2::aes(x = error, fill = proxy_level)
     ) +
-      ggplot2::geom_density(alpha = 0.45, linewidth = 0.2) +
-      ggplot2::geom_vline(
-        xintercept = 0,
-        colour = "gray30",
-        linewidth = 0.6,
-        linetype = 3
-      ) +
-      ggplot2::theme_minimal() +
-      ggplot2::labs(
-        title = "Error Distribution",
-        subtitle = "Proxy TPR minus actual TPR",
-        x = "\n\nError",
-        y = "Density\n\n",
-        fill = "Proxy Level"
-      ) +
-      ggplot2::facet_wrap(
-        ~proxy_level
-      ) +
-      ggplot2::scale_fill_brewer(palette = "Spectral") +
+    ggplot2::geom_density(alpha = 0.45, linewidth = 0.2) +
+    ggplot2::geom_vline(
+      xintercept = 0,
+      colour = "gray30",
+      linewidth = 0.6,
+      linetype = 3
+    ) +
+    ggplot2::theme_minimal() +
+    ggplot2::labs(
+      title = "Error Distribution",
+      subtitle = "Proxy TPR minus actual TPR\n",
+      x = "\n\nError",
+      y = "Density\n\n",
+      fill = "Proxy Level"
+    ) +
+    ggplot2::facet_wrap(
+      ~proxy_level
+    ) +
+    ggplot2::scale_fill_brewer(palette = "Spectral") +
     ggplot2::guides(fill = "none") +
     ggplot2::theme(
       plot.margin = ggplot2::margin(15, 15, 15, 15),
@@ -1397,6 +1432,67 @@ validate_tpr_proxies <- function(
       plot.subtitle = ggplot2::element_text(size = 10),
       axis.title.x = ggplot2::element_text(margin = ggplot2::margin(t = 5)),
       axis.title.y = ggplot2::element_text(margin = ggplot2::margin(r = 5))
+    )
+
+    # MAE by denominator size -----------------------------------------------
+
+    # denominator bins
+    long <- long |>
+    dplyr::mutate(
+      test_bin = cut(
+        .data[[test_var]],
+        breaks = c(0, 5, 10, 20, 50, 100, 250, 500, Inf),
+        labels = c(
+          "0-5",
+          "6-10",
+          "11-20",
+          "21-50",
+          "51-100",
+          "101-250",
+          "251-500",
+          "500+"
+        ),
+        include.lowest = TRUE
+      ),
+      low_den_flag = .data[[test_var]] < 20
+    )
+
+    mae_by_tests <- long |>
+    dplyr::group_by(proxy_level, test_bin) |>
+    dplyr::summarise(
+      n = dplyr::n(),
+      mae = mean(abs(error), na.rm = TRUE),
+      medae = stats::median(abs(error), na.rm = TRUE),
+      .groups = "drop"
+    )
+
+    plots$mae_by_tests <- ggplot2::ggplot(
+      mae_by_tests,
+      ggplot2::aes(
+        x = test_bin,
+        y = mae,
+        group = proxy_level,
+        colour = proxy_level
+      )
+    ) +
+    ggplot2::geom_line(linewidth = 1) +
+    ggplot2::geom_point(size = 2) +
+    ggplot2::scale_color_brewer(palette = "Spectral") +
+    ggplot2::labs(
+      title = "MAE Across Denominator Bins",
+      subtitle = "Does proxy error increase at low test counts?\n",
+      x = "\n\nTest count bin",
+      y = "MAE\n\n",
+      color = "Proxy Level"
+    ) +
+    ggplot2::theme_minimal() +
+    ggplot2::theme(
+      axis.text.x = ggplot2::element_text(angle = 45, hjust = 1),
+      panel.border = ggplot2::element_rect(
+        colour = "black",
+        fill = NA,
+        linewidth = 1
+      )
     )
 
     # MAE vs reprate
@@ -1425,15 +1521,15 @@ validate_tpr_proxies <- function(
       mae_reprate,
       ggplot2::aes(reprate_bin, mae, colour = proxy_level, group = proxy_level)
     ) +
-      ggplot2::geom_line(size = 1.2) +
-      ggplot2::geom_point(size = 2) +
-      ggplot2::scale_color_brewer(palette = "Spectral") +
+    ggplot2::geom_line(linewidth = 1.2) +
+    ggplot2::geom_point(size = 2) +
+    ggplot2::scale_color_brewer(palette = "Spectral") +
     ggplot2::theme_minimal() +
     ggplot2::labs(
       title = "MAE by Reporting Rate",
-      subtitle = "Proxy TPR minus actual TPR",
-      y = "\n\nMAE",
-      x = "Reporting rate breaks\n\n",
+      subtitle = "Proxy TPR minus actual TPR\n",
+      y = "\n\nMAE\n\n",
+      x = "\n\nReporting rate breaks",
       color = "Proxy Level"
     ) +
     ggplot2::theme(
@@ -1443,6 +1539,61 @@ validate_tpr_proxies <- function(
         fill = NA,
         linewidth = 1
       )
+    )
+
+    plots$stability_map <- ggplot2::ggplot(
+      long |> dplyr::filter(!is.na(proxy_value)),
+      ggplot2::aes(
+        x = !!rlang::sym(test_var),
+        y = tpr_actual,
+        colour = error,
+        size = abs(error)
+      )
+    ) +
+    ggplot2::geom_point(
+      alpha = 0.37,
+      position = ggplot2::position_jitter(
+        width = 0.05,
+        height = 0.01
+      )
+    ) +
+    ggplot2::geom_hline(
+      yintercept = 0.5,
+      linetype = "dotted",
+      colour = "grey70"
+    ) +
+    ggplot2::scale_x_continuous(
+      labels = scales::comma
+    ) +
+    ggplot2::scale_colour_gradient2(
+      low = "steelblue",
+      mid = "grey90",
+      high = "firebrick",
+      midpoint = 0
+    ) +
+    ggplot2::facet_wrap(~proxy_level) +
+    ggplot2::labs(
+      title = "Extreme TPR Patterns",
+      subtitle = "Extreme values, denominator stability, and proxy bias\n",
+      x = "\n\nTest count",
+      y = "Actual TPR\n\n",
+      colour = "Error (proxy minus actual)",
+      size = "Absolute error size"
+    ) +
+    ggplot2::theme_minimal() +
+    ggplot2::theme(
+      plot.margin = ggplot2::margin(15, 15, 15, 15),
+      panel.border = ggplot2::element_rect(
+        colour = "black",
+        fill = NA,
+        linewidth = 1
+      ),
+      legend.title = ggplot2::element_text(size = 10),
+      legend.text = ggplot2::element_text(size = 9),
+      plot.title = ggplot2::element_text(size = 12, face = "bold"),
+      plot.subtitle = ggplot2::element_text(size = 10),
+      axis.title.x = ggplot2::element_text(margin = ggplot2::margin(t = 5)),
+      axis.title.y = ggplot2::element_text(margin = ggplot2::margin(r = 5))
     )
 
     cli::cli_alert_success("Diagnostic plots ready.")

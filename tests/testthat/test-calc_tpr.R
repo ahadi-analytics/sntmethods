@@ -326,7 +326,7 @@ test_that("calc_tpr flags inactive facilities correctly", {
   # Note: Actual inactive detection requires proper activity data
 })
 
-test_that("calc_tpr handles conf > test correctly", {
+test_that("calc_tpr handles conf > test correctly (now receives proxy by default)", {
   skip_if_not_installed("sntutils")
 
   test_data <- data.frame(
@@ -345,17 +345,22 @@ test_that("calc_tpr handles conf > test correctly", {
   expect_true(result$flag_conf_gt_test[1])
   expect_false(result$flag_conf_gt_test[2])
 
-  # HF001 should have NA TPR (not proxy)
-  expect_true(is.na(result$tpr[1]))
-  expect_false(result$flag_tpr_valid[1])
+  # HF001 should now GET a proxy TPR (behavior change)
+  # Impossible values now receive fallback values by default
+  expect_false(is.na(result$tpr[1]))
+  expect_false(result$flag_tpr_valid[1])  # Still not valid raw TPR
+  expect_true(result$flag_tpr_proxy[1])    # But has proxy
+  # Will get proxy_adm2 since rolling requires multiple months per facility
+  expect_equal(result$tpr_source[1], "proxy_adm2")
 
-  # HF001 should not receive proxy even with fallback enabled
+  # HF001 should receive proxy with fallback enabled (consistent behavior)
   result_with_fallback <- calc_tpr(
     test_data,
     fallback_method = c("adm2", "adm1", "adm0"),
     include_flags = TRUE
   )
-  expect_true(is.na(result_with_fallback$tpr[1]))
+  expect_false(is.na(result_with_fallback$tpr[1]))
+  expect_equal(result_with_fallback$tpr_source[1], "proxy_adm2")
 })
 
 test_that("calc_tpr flags extreme TPR values", {
@@ -572,7 +577,7 @@ test_that("calc_tpr extracts year and month correctly", {
   )
 })
 
-test_that("calc_tpr handles fallback_triggers correctly", {
+test_that("calc_tpr handles fallback_triggers correctly (impossible values now included by default)", {
   skip_if_not_installed("sntutils")
 
   test_data <- data.frame(
@@ -593,24 +598,18 @@ test_that("calc_tpr handles fallback_triggers correctly", {
     include_flags = TRUE
   )
 
-  # HF002 (conf > test) should NOT get proxy with default trigger
-  expect_true(is.na(result_default$tpr[2]))
+  # HF002 (conf > test) should NOW get proxy by default (behavior change)
+  # Impossible values are now included in fallback by default
+  expect_equal(result_default$tpr[2], 0.10)
+  expect_equal(result_default$tpr_source[2], "proxy_adm2")
 
   # HF003 (missing) should get proxy
   expect_equal(result_default$tpr[3], 0.10)
   expect_equal(result_default$tpr_source[3], "proxy_adm2")
 
-  # With impossible trigger added
-  result_impossible <- calc_tpr(
-    test_data,
-    fallback_method = "adm2",
-    fallback_triggers = c("missing", "impossible"),
-    include_flags = TRUE
-  )
-
-  # Now HF002 should get proxy
-  expect_equal(result_impossible$tpr[2], 0.10)
-  expect_equal(result_impossible$tpr_source[2], "proxy_adm2")
+  # Both facility-months should be flagged appropriately
+  expect_true(result_default$flag_conf_gt_test[2])  # HF002 impossible
+  expect_true(result_default$flag_missing_conf[3])  # HF003 missing
 })
 
 test_that("calc_tpr returns reprate column", {
