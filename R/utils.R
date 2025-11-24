@@ -69,6 +69,7 @@
 #' ahadi_path(refresh = TRUE, verbose = TRUE)
 #' }
 #'
+#' @importFrom utils head
 #' @export
 ahadi_path <- function(
   relative = NULL,

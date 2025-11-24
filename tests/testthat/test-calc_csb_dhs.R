@@ -62,7 +62,7 @@ test_that("calc_csb_dhs_core works with minimal valid data", {
     NA
   )  # 30% sought public care
 
-  kr_data$h32b <- ifelse(
+  kr_data$h32j <- ifelse(
     kr_data$h22 == 1,
     sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE, prob = c(0.5, 0.5)),
     NA
@@ -102,7 +102,7 @@ test_that("calc_csb_dhs_core handles children without fever correctly", {
     h22 = rep(0, 50),  # No fever
     h32 = rep(NA, 50),
     h32a = rep(NA, 50),
-    h32b = rep(NA, 50)
+    h32j = rep(NA, 50)
   )
 
   expect_error(
@@ -130,7 +130,7 @@ test_that("calc_csb_dhs returns list with data, dict, and metadata", {
     h22 = sample(c(0, 1), n_children, replace = TRUE, prob = c(0.6, 0.4)),  # 40% fever
     h32 = sample(c(0, 1, NA), n_children, replace = TRUE),
     h32a = sample(c(0, 1, NA), n_children, replace = TRUE),
-    h32b = sample(c(0, 1, NA), n_children, replace = TRUE)
+    h32j = sample(c(0, 1, NA), n_children, replace = TRUE)
   )
 
   result <- calc_csb_dhs(kr_data)
@@ -171,7 +171,7 @@ test_that("extract_dhs_metadata_csb extracts correct metadata", {
     kr_data,
     survey_vars = list(
       cluster = "v021",
-      age = "hw1",
+      kr_age = "hw1",
       fever = "h22"
     )
   )
@@ -201,7 +201,7 @@ test_that("calc_csb_dhs_core handles multiple admin levels", {
     h22 = sample(c(0, 1), n_children, replace = TRUE, prob = c(0.7, 0.3)),
     h32 = sample(c(0, 1, NA), n_children, replace = TRUE),
     h32a = sample(c(0, 1, NA), n_children, replace = TRUE),
-    h32b = sample(c(0, 1, NA), n_children, replace = TRUE)
+    h32j = sample(c(0, 1, NA), n_children, replace = TRUE)
   )
 
   # Create mock GPS data
@@ -321,10 +321,10 @@ test_that("aggregate_csb_admin works with mock data", {
   expect_true(all(result$dhs_n_fever > 0))
 })
 
-test_that("calc_csb_dhs_core handles missing care-seeking variables gracefully", {
+test_that("calc_csb_dhs_core errors when care-seeking variables are missing", {
   skip_if_not_installed("survey")
 
-  # Create data with only some care-seeking variables
+  # Create data without any h32 variables
   kr_data <- data.frame(
     v021 = rep(1:10, each = 10),
     v005 = rep(1000000, 100),
@@ -332,38 +332,15 @@ test_that("calc_csb_dhs_core handles missing care-seeking variables gracefully",
     v024 = rep("REGION1", 100),
     hw1 = sample(0:59, 100, replace = TRUE),
     h22 = sample(c(0, 1), 100, replace = TRUE, prob = c(0.6, 0.4)),
-    h32 = sample(c(0, 1), 100, replace = TRUE),  # Has general care-seeking
-    # Missing h32a and h32b
+    # Missing h32 variables
     stringsAsFactors = FALSE
   )
 
-  result <- calc_csb_dhs_core(
-    kr_data,
-    survey_vars = list(
-      cluster = "v021",
-      weight = "v005",
-      stratum = "v022",
-      age = "hw1",
-      fever = "h22",
-      sought_care = "h32",
-      public_sector = "h32a_missing",   # Not in data
-      private_sector = "h32b_missing"    # Not in data
-    )
+  # Should error when no h32 treatment-seeking variables found
+  expect_error(
+    calc_csb_dhs_core(kr_data),
+    "No h32 treatment-seeking variables found"
   )
-
-  # Should still calculate what it can
-  expect_s3_class(result, "tbl_df")
-  expect_true("dhs_csb_any" %in% names(result))
-  expect_true("dhs_csb_none" %in% names(result))
-  expect_true("dhs_n_fever" %in% names(result))
-
-  # Public and private should be NA if variables missing
-  if ("dhs_csb_public" %in% names(result)) {
-    expect_true(all(is.na(result$dhs_csb_public)))
-  }
-  if ("dhs_csb_private" %in% names(result)) {
-    expect_true(all(is.na(result$dhs_csb_private)))
-  }
 })
 
 test_that("calc_csb_dhs_core produces consistent results", {
@@ -382,7 +359,7 @@ test_that("calc_csb_dhs_core produces consistent results", {
     h22 = rep(c(0, 0, 1, 1, 1), 20),      # 60% with fever
     h32 = rep(c(NA, NA, 1, 1, 0), 20),    # Varied care-seeking
     h32a = rep(c(NA, NA, 1, 0, 0), 20),   # Public care
-    h32b = rep(c(NA, NA, 0, 1, 0), 20)    # Private care
+    h32j = rep(c(NA, NA, 0, 1, 0), 20)    # Private care
   )
 
   result1 <- calc_csb_dhs_core(kr_data)
