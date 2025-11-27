@@ -34,10 +34,21 @@
 #'   c("adm1", "adm2")). Auto-detected if NULL.
 #' @param join_nearest Logical; if TRUE, assigns unmatched clusters to nearest
 #'   polygon. Default TRUE.
+#' @param age_breaks Numeric vector of age group boundaries (e.g., c(0, 5, 15,
+#'   Inf)). If NULL (default), no age stratification is performed. Must be
+#'   strictly increasing and non-negative.
+#' @param age_labels Character vector of labels for age groups (e.g., c("0_4",
+#'   "5_14", "15_plus")). Must have length equal to length(age_breaks) - 1.
+#'   Used for column naming. Labels should contain only letters, numbers,
+#'   and underscores.
+#' @param min_sample_size Minimum sample size threshold for warnings when
+#'   calculating age-stratified estimates. Default 25.
 #'
 #' @return Tibble with ITN indicators by cluster (if GPS provided) or by
 #'   existing administrative levels, including ownership, access, usage,
-#'   and confidence intervals.
+#'   and confidence intervals. If age_breaks and age_labels are provided,
+#'   includes additional columns for age-stratified ITN use, access, and
+#'   use-if-access indicators with confidence intervals and sample sizes.
 #'
 #' @export
 calc_itn_dhs_core <- function(
@@ -65,7 +76,10 @@ calc_itn_dhs_core <- function(
   ),
   shapefile = NULL,
   admin_level = NULL,
-  join_nearest = TRUE
+  join_nearest = TRUE,
+  age_breaks = NULL,
+  age_labels = NULL,
+  min_sample_size = 25
 ) {
   # ---- 1. input validation ---------------------------------------------------
 
@@ -152,6 +166,20 @@ calc_itn_dhs_core <- function(
   cli::cli_alert_info(
     "Found {format(n_itn_vars, big.mark = ',')} ITN net variables in HR data"
   )
+
+  # ---- validate age stratification (if provided) ----------------------------
+  age_strat_config <- .validate_age_stratification(
+    age_breaks, age_labels, dhs_pr, min_sample_size
+  )
+
+  if (!is.null(age_strat_config)) {
+    cli::cli_alert_info(
+      paste0(
+        "Age stratification: ", age_strat_config$n_groups,
+        " groups (", paste(age_strat_config$labels, collapse = ", "), ")"
+      )
+    )
+  }
 
   # ---- 2. process hr data (household level) ---------------------------------
 
@@ -894,6 +922,72 @@ calc_itn_dhs_core <- function(
     preg_use <- NULL
   }
 
+  # ---- 7g. age-stratified indicators (if requested) -------------------------
+
+  age_results_list <- list()
+  age_samples_list <- list()
+
+  if (!is.null(age_strat_config)) {
+    cli::cli_alert_info(
+      "Calculating age-stratified ITN indicators..."
+    )
+
+    for (i in seq_along(age_strat_config$labels)) {
+      age_label <- age_strat_config$labels[i]
+      age_min <- age_strat_config$breaks[i]
+      age_max <- age_strat_config$breaks[i + 1]
+
+      age_result <- .calc_age_group_itn(
+        person_data = person_merged_data,
+        age_min = age_min,
+        age_max = age_max,
+        grouping_formula = grouping_formula,
+        grouping_vars = grouping_vars,
+        use_strata = use_strata,
+        age_label = age_label,
+        min_sample_size = age_strat_config$min_sample_size
+      )
+
+      if (!is.null(age_result)) {
+        age_results_list[[age_label]] <- age_result
+
+        # Calculate sample sizes
+        age_subset_data <- person_merged_data |>
+          dplyr::filter(
+            age >= age_min,
+            if (is.infinite(age_max)) TRUE else age < age_max
+          )
+
+        if (!is.null(grouping_vars)) {
+          age_samples <- age_subset_data |>
+            dplyr::group_by(
+              dplyr::across(dplyr::all_of(grouping_vars))
+            ) |>
+            dplyr::summarise(
+              !!paste0("dhs_n_individuals_", age_label) := dplyr::n(),
+              !!paste0("dhs_n_used_itn_", age_label) :=
+                base::sum(itn_used, na.rm = TRUE),
+              !!paste0("dhs_n_with_access_", age_label) :=
+                base::sum(itn_access, na.rm = TRUE),
+              .groups = "drop"
+            )
+        } else {
+          age_samples <- tibble::tibble(
+            level = "National",
+            !!paste0("dhs_n_individuals_", age_label) :=
+              nrow(age_subset_data),
+            !!paste0("dhs_n_used_itn_", age_label) :=
+              base::sum(age_subset_data$itn_used, na.rm = TRUE),
+            !!paste0("dhs_n_with_access_", age_label) :=
+              base::sum(age_subset_data$itn_access, na.rm = TRUE)
+          )
+        }
+
+        age_samples_list[[age_label]] <- age_samples
+      }
+    }
+  }
+
   # ---- 8. calculate sample sizes --------------------------------------------
 
   if (!is.null(grouping_vars)) {
@@ -1026,6 +1120,36 @@ calc_itn_dhs_core <- function(
         individual_samples,
         by = grouping_vars
       )
+
+    # ---- 9b. merge age-stratified results -----------------------------------
+
+    if (length(age_results_list) > 0) {
+      for (age_label in names(age_results_list)) {
+        age_res <- age_results_list[[age_label]]
+
+        # Merge use
+        itn_results <- itn_results |>
+          dplyr::left_join(age_res$use, by = grouping_vars)
+
+        # Merge access
+        itn_results <- itn_results |>
+          dplyr::left_join(age_res$access, by = grouping_vars)
+
+        # Merge use_if_access (may be NULL)
+        if (!is.null(age_res$use_if_access)) {
+          itn_results <- itn_results |>
+            dplyr::left_join(age_res$use_if_access, by = grouping_vars)
+        }
+      }
+
+      # Merge sample sizes
+      if (length(age_samples_list) > 0) {
+        for (age_label in names(age_samples_list)) {
+          itn_results <- itn_results |>
+            dplyr::left_join(age_samples_list[[age_label]], by = grouping_vars)
+        }
+      }
+    }
   } else {
     itn_results <- household_ownership |>
       dplyr::bind_cols(
@@ -1066,6 +1190,40 @@ calc_itn_dhs_core <- function(
         individual_samples |>
           dplyr::select(-level)
       )
+
+    # ---- 9b. merge age-stratified results (national level) ------------------
+
+    if (length(age_results_list) > 0) {
+      for (age_label in names(age_results_list)) {
+        age_res <- age_results_list[[age_label]]
+
+        # Merge use
+        itn_results <- itn_results |>
+          dplyr::bind_cols(age_res$use |> dplyr::select(-level))
+
+        # Merge access
+        itn_results <- itn_results |>
+          dplyr::bind_cols(age_res$access |> dplyr::select(-level))
+
+        # Merge use_if_access (may be NULL)
+        if (!is.null(age_res$use_if_access)) {
+          itn_results <- itn_results |>
+            dplyr::bind_cols(
+              age_res$use_if_access |> dplyr::select(-level)
+            )
+        }
+      }
+
+      # Merge sample sizes
+      if (length(age_samples_list) > 0) {
+        for (age_label in names(age_samples_list)) {
+          itn_results <- itn_results |>
+            dplyr::bind_cols(
+              age_samples_list[[age_label]] |> dplyr::select(-level)
+            )
+        }
+      }
+    }
   }
 
   # ---- 10. format results ----------------------------------------------------
@@ -1084,6 +1242,49 @@ calc_itn_dhs_core <- function(
     dhs_itn_use_low = "ci_l.itn_used",
     dhs_itn_use_upp = "ci_u.itn_used"
   )
+
+  # Add age-stratified renames
+  if (!is.null(age_strat_config)) {
+    for (age_label in age_strat_config$labels) {
+      # Build rename vectors
+      new_names <- c(
+        # Use
+        paste0("dhs_itn_use_", age_label),
+        paste0("dhs_itn_use_", age_label, "_low"),
+        paste0("dhs_itn_use_", age_label, "_upp"),
+        # Access
+        paste0("dhs_itn_access_", age_label),
+        paste0("dhs_itn_access_", age_label, "_low"),
+        paste0("dhs_itn_access_", age_label, "_upp"),
+        # Use if access
+        paste0("dhs_itn_use_if_access_", age_label),
+        paste0("dhs_itn_use_if_access_", age_label, "_low"),
+        paste0("dhs_itn_use_if_access_", age_label, "_upp")
+      )
+
+      old_names <- c(
+        # Use
+        paste0("itn_used_", age_label),
+        paste0("ci_l.itn_used_", age_label),
+        paste0("ci_u.itn_used_", age_label),
+        # Access
+        paste0("itn_access_", age_label),
+        paste0("ci_l.itn_access_", age_label),
+        paste0("ci_u.itn_access_", age_label),
+        # Use if access
+        paste0("itn_use_if_access_", age_label),
+        paste0("ci_l.itn_use_if_access_", age_label),
+        paste0("ci_u.itn_use_if_access_", age_label)
+      )
+
+      age_renames <- stats::setNames(
+        as.list(old_names),
+        new_names
+      )
+
+      rename_map <- c(rename_map, age_renames)
+    }
+  }
 
   for (new_name in names(rename_map)) {
     old_name <- rename_map[[new_name]]
@@ -1167,11 +1368,30 @@ calc_itn_dhs_core <- function(
     "dhs_itn_use",
     "dhs_itn_use_u5",
     "dhs_itn_use_preg",
+    # age-stratified indicators
+    if (!is.null(age_strat_config)) {
+      unlist(lapply(age_strat_config$labels, function(lbl) {
+        c(
+          paste0("dhs_itn_use_", lbl),
+          paste0("dhs_itn_access_", lbl),
+          paste0("dhs_itn_use_if_access_", lbl)
+        )
+      }))
+    },
     # sample sizes
     "dhs_n_households",
     "dhs_n_individuals",
     "dhs_n_under5",
     "dhs_n_pregnant",
+    if (!is.null(age_strat_config)) {
+      unlist(lapply(age_strat_config$labels, function(lbl) {
+        c(
+          paste0("dhs_n_individuals_", lbl),
+          paste0("dhs_n_used_itn_", lbl),
+          paste0("dhs_n_with_access_", lbl)
+        )
+      }))
+    },
     "dhs_n_hh_with_itn",
     "dhs_n_hh_sufficient",
     "dhs_n_with_access",
@@ -1190,7 +1410,19 @@ calc_itn_dhs_core <- function(
     "dhs_itn_use_u5_low",
     "dhs_itn_use_u5_upp",
     "dhs_itn_use_preg_low",
-    "dhs_itn_use_preg_upp"
+    "dhs_itn_use_preg_upp",
+    if (!is.null(age_strat_config)) {
+      unlist(lapply(age_strat_config$labels, function(lbl) {
+        c(
+          paste0("dhs_itn_use_", lbl, "_low"),
+          paste0("dhs_itn_use_", lbl, "_upp"),
+          paste0("dhs_itn_access_", lbl, "_low"),
+          paste0("dhs_itn_access_", lbl, "_upp"),
+          paste0("dhs_itn_use_if_access_", lbl, "_low"),
+          paste0("dhs_itn_use_if_access_", lbl, "_upp")
+        )
+      }))
+    }
   )
 
   column_order <- base::intersect(
@@ -1222,13 +1454,15 @@ calc_itn_dhs_core <- function(
 #' @param dhs_hr DHS Household Records dataset.
 #' @param dhs_pr DHS Person Records dataset.
 #' @param survey_vars Named list of survey variable mappings.
+#' @param age_strat_config Age stratification configuration from validation.
 #'
 #' @return List containing survey metadata.
 #' @noRd
 extract_dhs_metadata_itn <- function(
   dhs_hr,
   dhs_pr,
-  survey_vars = NULL
+  survey_vars = NULL,
+  age_strat_config = NULL
 ) {
   metadata <- list()
 
@@ -1324,6 +1558,34 @@ extract_dhs_metadata_itn <- function(
 
   metadata$variable_mapping <- survey_vars
 
+  # Age stratification info
+  if (!is.null(age_strat_config)) {
+    metadata$age_stratification <- list(
+      enabled = TRUE,
+      n_groups = age_strat_config$n_groups,
+      breaks = age_strat_config$breaks,
+      labels = age_strat_config$labels,
+      min_sample_size = age_strat_config$min_sample_size
+    )
+    metadata$indicators <- c(
+      metadata$indicators,
+      paste0(
+        "Age use: ",
+        paste(age_strat_config$labels, collapse = ", ")
+      ),
+      paste0(
+        "Age access: ",
+        paste(age_strat_config$labels, collapse = ", ")
+      ),
+      paste0(
+        "Age use|access: ",
+        paste(age_strat_config$labels, collapse = ", ")
+      )
+    )
+  } else {
+    metadata$age_stratification <- list(enabled = FALSE)
+  }
+
   metadata
 }
 
@@ -1342,13 +1604,33 @@ extract_dhs_metadata_itn <- function(
 #' @param shapefile Optional sf object with administrative boundaries.
 #' @param admin_level Character vector of admin columns in shapefile.
 #' @param join_nearest Logical; assign unmatched clusters to nearest polygon.
+#' @param age_breaks Numeric vector of age group boundaries for stratified
+#'   analysis (e.g., c(0, 5, 15, Inf)). Default NULL (no stratification).
+#' @param age_labels Character vector of age group labels (e.g., c("0_4",
+#'   "5_14", "15_plus")). Required if age_breaks is provided.
+#' @param min_sample_size Minimum sample size for age group estimates. Default 25.
 #'
 #' @return List containing:
 #'   \itemize{
-#'     \item data: Tibble with ITN indicators
+#'     \item data: Tibble with ITN indicators (includes age-stratified columns
+#'           if age_breaks/age_labels provided)
 #'     \item dict: Data dictionary
-#'     \item metadata: Survey metadata
+#'     \item metadata: Survey metadata (includes age stratification info)
 #'   }
+#'
+#' @examples
+#' \dontrun{
+#' # Basic usage without age stratification
+#' result <- calc_itn_dhs(dhs_hr = hr_data, dhs_pr = pr_data)
+#'
+#' # With custom age groups
+#' result <- calc_itn_dhs(
+#'   dhs_hr = hr_data,
+#'   dhs_pr = pr_data,
+#'   age_breaks = c(0, 5, 15, 25, Inf),
+#'   age_labels = c("0_4", "5_14", "15_24", "25_plus")
+#' )
+#' }
 #'
 #' @export
 calc_itn_dhs <- function(
@@ -1376,13 +1658,22 @@ calc_itn_dhs <- function(
   ),
   shapefile = NULL,
   admin_level = NULL,
-  join_nearest = TRUE
+  join_nearest = TRUE,
+  age_breaks = NULL,
+  age_labels = NULL,
+  min_sample_size = 25
 ) {
+  # validate age stratification to pass to metadata
+  age_strat_config <- .validate_age_stratification(
+    age_breaks, age_labels, dhs_pr, min_sample_size
+  )
+
   # extract metadata
   metadata <- extract_dhs_metadata_itn(
     dhs_hr = dhs_hr,
     dhs_pr = dhs_pr,
-    survey_vars = survey_vars
+    survey_vars = survey_vars,
+    age_strat_config = age_strat_config
   )
 
   # validate shapefile if provided
@@ -1411,7 +1702,10 @@ calc_itn_dhs <- function(
     gps_vars = gps_vars,
     shapefile = shapefile,
     admin_level = admin_level,
-    join_nearest = join_nearest
+    join_nearest = join_nearest,
+    age_breaks = age_breaks,
+    age_labels = age_labels,
+    min_sample_size = min_sample_size
   )
 
   # update metadata with aggregation info
@@ -1565,4 +1859,295 @@ aggregate_itn_admin <- function(
     dplyr::left_join(aggregated, by = admin_level)
 
   result
+}
+
+#' Calculate ITN indicators for specific age group
+#'
+#' Internal helper function to calculate ITN use, access, and use-if-access
+#' for a specific age range. Creates a survey design on the age subset and
+#' calculates weighted estimates with confidence intervals.
+#'
+#' @param person_data Person-level dataset with ITN variables
+#' @param age_min Lower age bound (inclusive)
+#' @param age_max Upper age bound (exclusive, can be Inf)
+#' @param grouping_formula Formula for grouping (from parent function)
+#' @param grouping_vars Character vector of grouping variables
+#' @param use_strata Logical; whether to use stratification in survey design
+#' @param age_label Character label for this age group (for column naming)
+#' @param min_sample_size Minimum sample size threshold for warnings
+#'
+#' @return List with use, access, use_if_access estimates and sample sizes,
+#'   or NULL if age group is empty
+#' @noRd
+.calc_age_group_itn <- function(
+  person_data, age_min, age_max, grouping_formula, grouping_vars,
+  use_strata, age_label, min_sample_size
+) {
+  # Filter to age range
+  age_subset <- if (is.infinite(age_max)) {
+    person_data |> dplyr::filter(age >= age_min)
+  } else {
+    person_data |> dplyr::filter(age >= age_min, age < age_max)
+  }
+
+  n_total <- nrow(age_subset)
+
+  # Check for data
+  if (n_total == 0) {
+    age_range_label <- if (is.infinite(age_max)) {
+      paste0("[", age_min, ", Inf)")
+    } else {
+      paste0("[", age_min, ", ", age_max, ")")
+    }
+    cli::cli_alert_warning(
+      "Age {age_range_label} has no data - skipping {age_label}"
+    )
+    return(NULL)
+  }
+
+  if (n_total < min_sample_size) {
+    cli::cli_alert_warning(
+      "Age {age_label}: only {n_total} individuals (< {min_sample_size})"
+    )
+  }
+
+  # Create survey design for this subset
+  tryCatch({
+    design_age <- if (use_strata) {
+      survey::svydesign(
+        ids = ~cluster_id,
+        strata = ~stratum_id,
+        weights = ~survey_weight,
+        data = age_subset,
+        nest = TRUE
+      )
+    } else {
+      survey::svydesign(
+        ids = ~cluster_id,
+        weights = ~survey_weight,
+        data = age_subset,
+        nest = TRUE
+      )
+    }
+
+    # Calculate ITN USE
+    itn_use <- if (!is.null(grouping_vars)) {
+      survey::svyby(
+        ~itn_used,
+        by = grouping_formula,
+        design = design_age,
+        FUN = survey::svymean,
+        vartype = "ci",
+        keep.names = FALSE
+      ) |>
+        tibble::as_tibble() |>
+        dplyr::rename(
+          !!paste0("itn_used_", age_label) := itn_used,
+          !!paste0("ci_l.itn_used_", age_label) := ci_l,
+          !!paste0("ci_u.itn_used_", age_label) := ci_u
+        )
+    } else {
+      mean_val <- survey::svymean(~itn_used, design = design_age)
+      ci_val <- stats::confint(mean_val)
+      tibble::tibble(
+        level = "National",
+        !!paste0("itn_used_", age_label) := base::as.numeric(mean_val),
+        !!paste0("ci_l.itn_used_", age_label) := ci_val[1, 1],
+        !!paste0("ci_u.itn_used_", age_label) := ci_val[1, 2]
+      )
+    }
+
+    # Calculate ITN ACCESS
+    itn_access <- if (!is.null(grouping_vars)) {
+      survey::svyby(
+        ~itn_access,
+        by = grouping_formula,
+        design = design_age,
+        FUN = survey::svymean,
+        vartype = "ci",
+        keep.names = FALSE,
+        na.rm = TRUE
+      ) |>
+        tibble::as_tibble() |>
+        dplyr::rename(
+          !!paste0("itn_access_", age_label) := itn_access,
+          !!paste0("ci_l.itn_access_", age_label) := ci_l,
+          !!paste0("ci_u.itn_access_", age_label) := ci_u
+        )
+    } else {
+      mean_val <- survey::svymean(
+        ~itn_access,
+        design = design_age,
+        na.rm = TRUE
+      )
+      ci_val <- stats::confint(mean_val)
+      tibble::tibble(
+        level = "National",
+        !!paste0("itn_access_", age_label) := base::as.numeric(mean_val),
+        !!paste0("ci_l.itn_access_", age_label) := ci_val[1, 1],
+        !!paste0("ci_u.itn_access_", age_label) := ci_val[1, 2]
+      )
+    }
+
+    # Calculate USE IF ACCESS (subset to those with access)
+    age_with_access <- age_subset |>
+      dplyr::filter(itn_access == 1)
+
+    itn_use_if_access <- if (nrow(age_with_access) > 0) {
+      design_access <- if (use_strata) {
+        survey::svydesign(
+          ids = ~cluster_id,
+          strata = ~stratum_id,
+          weights = ~survey_weight,
+          data = age_with_access,
+          nest = TRUE
+        )
+      } else {
+        survey::svydesign(
+          ids = ~cluster_id,
+          weights = ~survey_weight,
+          data = age_with_access,
+          nest = TRUE
+        )
+      }
+
+      if (!is.null(grouping_vars)) {
+        survey::svyby(
+          ~itn_used,
+          by = grouping_formula,
+          design = design_access,
+          FUN = survey::svymean,
+          vartype = "ci",
+          keep.names = FALSE
+        ) |>
+          tibble::as_tibble() |>
+          dplyr::rename(
+            !!paste0("itn_use_if_access_", age_label) := itn_used,
+            !!paste0("ci_l.itn_use_if_access_", age_label) := ci_l,
+            !!paste0("ci_u.itn_use_if_access_", age_label) := ci_u
+          )
+      } else {
+        mean_val <- survey::svymean(~itn_used, design = design_access)
+        ci_val <- stats::confint(mean_val)
+        tibble::tibble(
+          level = "National",
+          !!paste0("itn_use_if_access_", age_label) :=
+            base::as.numeric(mean_val),
+          !!paste0("ci_l.itn_use_if_access_", age_label) := ci_val[1, 1],
+          !!paste0("ci_u.itn_use_if_access_", age_label) := ci_val[1, 2]
+        )
+      }
+    } else {
+      NULL
+    }
+
+    # Return all results
+    list(
+      use = itn_use,
+      access = itn_access,
+      use_if_access = itn_use_if_access,
+      n_total = n_total,
+      n_used = base::sum(age_subset$itn_used, na.rm = TRUE),
+      n_with_access = base::sum(age_subset$itn_access, na.rm = TRUE)
+    )
+  },
+  error = function(e) {
+    cli::cli_alert_warning(
+      "Failed for age {age_label}: {conditionMessage(e)}"
+    )
+    NULL
+  })
+}
+
+#' Validate age stratification parameters
+#'
+#' Internal validation function for custom age group parameters. Ensures
+#' age_breaks and age_labels are properly formatted and compatible.
+#'
+#' @param age_breaks Numeric vector of age boundaries
+#' @param age_labels Character vector of age group labels
+#' @param person_data Person-level data for checking age range compatibility
+#' @param min_sample_size Minimum sample size threshold
+#'
+#' @return List with validated config, or NULL if not using age stratification
+#' @noRd
+.validate_age_stratification <- function(
+  age_breaks, age_labels, person_data, min_sample_size
+) {
+  # Return NULL if not using age stratification
+  if (is.null(age_breaks) && is.null(age_labels)) return(NULL)
+
+  # Check both provided together
+  if (xor(is.null(age_breaks), is.null(age_labels))) {
+    cli::cli_abort(
+      "Both `age_breaks` and `age_labels` must be provided together"
+    )
+  }
+
+  # Validate age_breaks: numeric, length >= 2, sorted, non-negative
+  if (!is.numeric(age_breaks) || length(age_breaks) < 2) {
+    cli::cli_abort(
+      "`age_breaks` must be numeric vector with at least 2 elements"
+    )
+  }
+
+  if (any(is.na(age_breaks)) || age_breaks[1] < 0) {
+    cli::cli_abort("`age_breaks` must be non-negative without NAs")
+  }
+
+  if (is.unsorted(age_breaks, strictly = TRUE)) {
+    cli::cli_abort(
+      c(
+        "`age_breaks` must be strictly increasing",
+        "i" = "Provided: {paste(age_breaks, collapse = ', ')}"
+      )
+    )
+  }
+
+  # Validate age_labels: correct length, valid characters, unique
+  expected_n <- length(age_breaks) - 1
+  if (length(age_labels) != expected_n) {
+    cli::cli_abort(
+      paste0(
+        "Length mismatch: expected ", expected_n,
+        " labels, got ", length(age_labels)
+      )
+    )
+  }
+
+  if (any(is.na(age_labels)) || any(age_labels == "")) {
+    cli::cli_abort("`age_labels` cannot contain NA or empty strings")
+  }
+
+  # Check valid column name format
+  invalid <- age_labels[!grepl("^[a-zA-Z0-9_]+$", age_labels)]
+  if (length(invalid) > 0) {
+    cli::cli_abort(
+      c(
+        paste0("Invalid labels: ", paste(invalid, collapse = ", ")),
+        "i" = "Use only letters, numbers, and underscores"
+      )
+    )
+  }
+
+  if (any(duplicated(age_labels))) {
+    cli::cli_abort("Duplicate age labels detected")
+  }
+
+  # Note: Skip age range validation here since person_data is the raw PR data
+  # and age variable hasn't been extracted yet. Will validate in the main loop.
+
+  # Validate min_sample_size
+  if (!is.numeric(min_sample_size) || length(min_sample_size) != 1 ||
+      min_sample_size < 1) {
+    cli::cli_abort("`min_sample_size` must be single number >= 1")
+  }
+
+  # Return validated config
+  list(
+    breaks = age_breaks,
+    labels = age_labels,
+    min_sample_size = base::as.integer(min_sample_size),
+    n_groups = length(age_labels)
+  )
 }

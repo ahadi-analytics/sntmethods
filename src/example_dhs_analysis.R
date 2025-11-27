@@ -9,9 +9,9 @@ cli::cli_h1("Process DHS Data")
 devtools::load_all()
 
 # country metadata
-country_iso2 <- "SL"
-country_iso3 <- "SLE"
-survey_year_dhs <- 2019
+country_iso2 <- "BF"
+country_iso3 <- "BFA"
+survey_year_dhs <- 2022
 survey_year_mis <- 2016
 # aggregation level
 # (rememebr survey is doen at adm1 level)
@@ -25,6 +25,10 @@ path_dhs_parquet <- here::here(ahadi_path(), "01_data/parquet")
 
 # shapefile
 shp_admin <- sntutils::download_shapefile(country_iso3)
+
+shp_admin <- sf::read_sf(
+  "/Users/mohamedyusuf/Downloads/burkina_MAP/70ds_from_nmcp_2019_numbered.shp"
+)
 
 ## ---------------------------------------------------------------------------##
 # 2) Get DHS data --------------------------------------------------------------
