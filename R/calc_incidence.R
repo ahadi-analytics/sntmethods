@@ -1,9 +1,10 @@
 #' Calculate Malaria Incidence from Routine Health Facility Data (N0-N3)
 #'
-#' Calculates malaria incidence at the health facility-month level using
-#' a structured cascade framework (N0 through N3) to adjust for testing gaps,
-#' reporting incompleteness, and care-seeking behavior. Returns a validated
-#' dataset with all incidence levels, quality flags, and source tracking.
+#' Calculates malaria incidence at the admin-month level (e.g., district-month)
+#' using a structured cascade framework (N0 through N3) to adjust for testing
+#' gaps, reporting incompleteness, and care-seeking behavior. Facility-level
+#' data is aggregated to admin level before calculating incidence. Returns a
+#' validated dataset with all incidence levels, quality flags, and source tracking.
 #'
 #' The incidence cascade framework:
 #' \itemize{
@@ -24,13 +25,16 @@
 #'     }
 #'   \item **N3 (Care-Seeking-Adjusted)**:
 #'     \itemize{
-#'       \item n3_cases = n2_cases + (n2_cases * cs_private / cs_public) + (n2_cases * cs_none / cs_public)
+#'       \item N3 uses annual aggregation of N2 before applying CSB adjustment
+#'       \item n3_annual = n2_annual * (1 + cs_private/cs_public + cs_none/cs_public)
+#'       \item n3_monthly = n3_annual * (n2_monthly / n2_annual)
 #'       \item n3_incidence = (n3_cases / pop) * scale_factor
 #'     }
 #' }
 #'
 #' Each level builds on the previous, with N3 representing the most complete
-#' estimate of true community-level malaria incidence.
+#' estimate of true community-level malaria incidence. N3 uses annual aggregation
+#' because care-seeking behavior (CSB) data from DHS/MIS is annual.
 #'
 #' @param data Routine health facility data at facility-month level
 #'   (data.frame or tibble). Must contain one row per facility per month.
@@ -73,29 +77,30 @@
 #'   in the output. If `FALSE` (default), returns only the core incidence
 #'   variables without flags.
 #'
-#' @return A tibble with incidence estimates per facility-month including:
+#' @return A tibble with incidence estimates per admin-month including:
 #'   \itemize{
-#'     \item `hf_uid`: Health facility identifier
 #'     \item `adm0`: National/country level
 #'     \item `adm1`: First administrative level
 #'     \item `adm2`: Second administrative level
 #'     \item `date`: Standardised date (first of month)
 #'     \item `year`: Year extracted from date
 #'     \item `month`: Month extracted from date
-#'     \item `pop`: Population denominator
-#'     \item `conf`: Confirmed cases
-#'     \item `test`: Number tested
-#'     \item `pres`: Presumed cases
-#'     \item `tpr`: Test positivity rate (0-1 scale)
-#'     \item `reprate`: Reporting rate (0-1 scale)
+#'     \item `pop`: Population denominator (summed across facilities)
+#'     \item `conf`: Confirmed cases (summed across facilities)
+#'     \item `test`: Number tested (summed across facilities)
+#'     \item `pres`: Presumed cases (summed across facilities)
+#'     \item `tpr`: Test positivity rate (recalculated at admin level)
+#'     \item `reprate`: Reporting rate (mean across facilities)
 #'     \item `n0_cases`: N0 case count (crude)
 #'     \item `n0_incidence`: N0 incidence per scale_factor
 #'     \item `n1_cases`: N1 case count (testing-adjusted)
 #'     \item `n1_incidence`: N1 incidence per scale_factor
 #'     \item `n2_cases`: N2 case count (reporting-adjusted)
 #'     \item `n2_incidence`: N2 incidence per scale_factor
-#'     \item `n3_cases`: N3 case count (care-seeking-adjusted)
+#'     \item `n3_cases`: N3 case count (care-seeking-adjusted, distributed from annual)
 #'     \item `n3_incidence`: N3 incidence per scale_factor
+#'     \item `adj_priv`: CSB adjustment factor for private care-seeking
+#'     \item `adj_none`: CSB adjustment factor for non-care-seeking
 #'     \item `incidence_level`: Highest level successfully calculated
 #'     \item Quality flags (if `include_flags = TRUE`):
 #'       \itemize{
@@ -346,7 +351,7 @@ calc_incidence <- function(
       month = lubridate::month(date)
     )
 
-  # ---- duplicate check -----------------------------------------------------
+  # ---- duplicate check (at facility-month level, before aggregation) -------
 
   n_dup <- df |>
     dplyr::group_by(hf_uid, date) |>
@@ -358,6 +363,21 @@ calc_incidence <- function(
       "Found {sntutils::big_mark(n_dup)} duplicate facility-months."
     )
   }
+
+  # ---- aggregate to admin-month level --------------------------------------
+
+  cli::cli_alert_info("Aggregating to admin-month level...")
+  n_facilities <- length(unique(df$hf_uid))
+  n_admins <- df |>
+    dplyr::distinct(adm0, adm1, adm2) |>
+    nrow()
+
+  df <- .aggregate_to_admin_month(df)
+
+  cli::cli_alert_success(
+    "Aggregated {sntutils::big_mark(n_facilities)} facilities to ",
+    "{sntutils::big_mark(n_admins)} admin units."
+  )
 
   # ---- create flags --------------------------------------------------------
 
@@ -488,8 +508,8 @@ calc_incidence <- function(
 
   # ---- select output columns -----------------------------------------------
 
+  # Note: Output is at admin-month level (no hf_uid)
   core_cols <- c(
-    "hf_uid",
     "adm0",
     "adm1",
     "adm2",
@@ -563,7 +583,8 @@ calc_incidence <- function(
     cli::cli_text("         n2_incidence = (n2_cases / {pop_var}) * {scale_factor}")
   }
   if ("N3" %in% levels) {
-    cli::cli_text("{.strong N3}: n3_cases = n2_cases + (n2_cases * {cs_private_var} / {cs_public_var}) + (n2_cases * {cs_none_var} / {cs_public_var})")
+    cli::cli_text("{.strong N3}: n3_annual = n2_annual * (1 + {cs_private_var}/{cs_public_var} + {cs_none_var}/{cs_public_var})")
+    cli::cli_text("         n3_monthly = n3_annual * (n2_monthly / n2_annual)")
     cli::cli_text("         n3_incidence = (n3_cases / {pop_var}) * {scale_factor}")
   }
 
@@ -779,6 +800,62 @@ calc_incidence <- function(
 # Internal helper functions for N0-N3 calculations
 # =============================================================================
 
+#' Aggregate Facility-Month Data to Admin-Month Level - Internal
+#'
+#' Aggregates facility-month level data to administrative unit-month level.
+#' This is used as the first step in the incidence cascade to produce
+#' output at the admin-month level rather than facility-month level.
+#'
+#' @param df Data frame with standardized column names at facility-month level
+#'
+#' @return Data frame aggregated to admin-month level with:
+#'   - Sum: pop, conf, test, pres
+#'   - Recalculated: tpr = sum(conf)/sum(test)
+#'   - Mean: reprate
+#'   - First: cs_public, cs_private, cs_none
+#'
+#' @keywords internal
+.aggregate_to_admin_month <- function(df) {
+  # Check which columns exist for conditional aggregation
+  has_cs <- all(c("cs_public", "cs_private", "cs_none") %in% names(df))
+  has_reprate <- "reprate" %in% names(df)
+  has_tpr <- "tpr" %in% names(df)
+
+  df_agg <- df |>
+    dplyr::group_by(adm0, adm1, adm2, year, month, date) |>
+    dplyr::summarise(
+      pop = sum(pop, na.rm = TRUE),
+      conf = sum(conf, na.rm = TRUE),
+      test = if ("test" %in% names(df)) sum(test, na.rm = TRUE) else NA_real_,
+      pres = if ("pres" %in% names(df)) sum(pres, na.rm = TRUE) else NA_real_,
+      # Recalculate TPR at admin level: total confirmed / total tested
+      tpr = if (has_tpr) {
+        sum(conf, na.rm = TRUE) / sum(test, na.rm = TRUE)
+      } else {
+        NA_real_
+      },
+      # Average reporting rate across facilities
+      reprate = if (has_reprate) mean(reprate, na.rm = TRUE) else NA_real_,
+      # Care-seeking proportions (should be same for all facilities in admin)
+      cs_public = if (has_cs) dplyr::first(cs_public) else NA_real_,
+      cs_private = if (has_cs) dplyr::first(cs_private) else NA_real_,
+      cs_none = if (has_cs) dplyr::first(cs_none) else NA_real_,
+      .groups = "drop"
+    )
+
+  # Handle Inf from division by zero in TPR
+
+  if (has_tpr) {
+    df_agg <- df_agg |>
+      dplyr::mutate(
+        tpr = dplyr::if_else(is.infinite(tpr) | is.nan(tpr), NA_real_, tpr)
+      )
+  }
+
+  df_agg
+}
+
+
 #' Calculate N0 (Crude Incidence) - Internal
 #'
 #' @param df Data frame with standardized column names
@@ -886,16 +963,34 @@ calc_incidence <- function(
 
 #' Calculate N3 (Care-Seeking-Adjusted Incidence) - Internal
 #'
-#' N3 = N2 + (N2 * CS_Priv / CS_Pub) + (N2 * CS_None / CS_Pub)
+#' Calculates N3 by aggregating N2 to annual level, applying the CSB adjustment
+#' once per year, then distributing the annual N3 back to monthly level
+#' proportionally based on each month's share of annual N2.
 #'
-#' @param df Data frame with standardized column names
+#' N3_annual = N2_annual * (1 + CS_Priv/CS_Pub + CS_None/CS_Pub)
+#' N3_monthly = N3_annual * (N2_monthly / N2_annual)
+#'
+#' @param df Data frame with standardized column names at admin-month level
 #' @param scale_factor Denominator for incidence rate
 #'
 #' @return Data frame with n3_cases and n3_incidence columns added
 #'
 #' @keywords internal
 .calc_n3_internal <- function(df, scale_factor) {
-  df |>
+  # Step 1: Aggregate N2 to admin-year level
+  annual_n2 <- df |>
+    dplyr::group_by(adm0, adm1, adm2, year) |>
+    dplyr::summarise(
+      n2_annual = sum(n2_cases, na.rm = TRUE),
+      # CSB should be the same for all months within admin-year
+      cs_public = dplyr::first(cs_public),
+      cs_private = dplyr::first(cs_private),
+      cs_none = dplyr::first(cs_none),
+      .groups = "drop"
+    )
+
+  # Step 2: Validate care-seeking proportions and apply CSB adjustment at annual level
+  annual_n3 <- annual_n2 |>
     dplyr::mutate(
       # Validate care-seeking proportions
       cs_public_clean = dplyr::case_when(
@@ -916,8 +1011,8 @@ calc_incidence <- function(
         cs_none > 1 ~ 1,
         TRUE ~ cs_none
       ),
-      # Calculate adjustments (rho parameter removed from formula)
-      adj_private = dplyr::if_else(
+      # Calculate adjustment factors
+      adj_priv = dplyr::if_else(
         !is.na(cs_public_clean) & cs_public_clean > 0,
         cs_private_clean / cs_public_clean,
         0
@@ -927,30 +1022,49 @@ calc_incidence <- function(
         cs_none_clean / cs_public_clean,
         0
       ),
-      # Calculate N3 cases
-      n3_cases = dplyr::if_else(
-        !is.na(n2_cases) & !is.na(cs_public_clean),
-        n2_cases + (n2_cases * adj_private) + (n2_cases * adj_none),
+      # Calculate annual N3 cases
+      n3_annual = dplyr::if_else(
+        !is.na(n2_annual) & !is.na(cs_public_clean),
+        n2_annual + (n2_annual * adj_priv) + (n2_annual * adj_none),
+        NA_real_
+      )
+    ) |>
+    dplyr::select(
+      adm0, adm1, adm2, year,
+      n2_annual, n3_annual, adj_priv, adj_none
+    )
+
+  # Step 3: Calculate each month's share of annual N2 and join annual N3
+  df <- df |>
+    dplyr::left_join(
+      annual_n3,
+      by = c("adm0", "adm1", "adm2", "year")
+    ) |>
+    dplyr::mutate(
+      # Calculate month's share of annual N2
+      n2_share = dplyr::if_else(
+        !is.na(n2_annual) & n2_annual > 0,
+        n2_cases / n2_annual,
         NA_real_
       ),
-      # Calculate N3 incidence
+      # Distribute annual N3 to months proportionally
+      n3_cases = dplyr::if_else(
+        !is.na(n3_annual) & !is.na(n2_share),
+        n3_annual * n2_share,
+        NA_real_
+      ),
+      # Calculate N3 incidence using monthly population
       n3_incidence = dplyr::if_else(
         pop > 0 & !is.na(pop) & !is.na(n3_cases),
         (n3_cases / pop) * scale_factor,
         NA_real_
       ),
       # Flag invalid N3
-      flag_n3_invalid = is.na(n3_incidence),
-      # Keep adjustment factors for debugging (rename for user-friendly output)
-      adj_priv = adj_private,
-      adj_none = adj_none
+      flag_n3_invalid = is.na(n3_incidence)
     ) |>
-    dplyr::select(
-      -cs_public_clean,
-      -cs_private_clean,
-      -cs_none_clean,
-      -adj_private
-    )
+    dplyr::select(-n2_annual, -n3_annual, -n2_share)
+
+  df
 }
 
 

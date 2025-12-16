@@ -92,21 +92,32 @@ levels:
   N3:
     name: "Care-Seeking-Adjusted Incidence"
     formula: >
-      N3 = N2 + (N2 × CS_Priv / CS_Pub) + (N2 × CS_None / CS_Pub)
+      N3_annual = N2_annual × (1 + CS_Priv/CS_Pub + CS_None/CS_Pub)
+      N3_monthly = N3_annual × (N2_monthly / N2_annual)
     where:
+      N2_annual: "Sum of N2 cases within admin unit for the year"
+      N2_monthly: "N2 cases for a specific admin-month"
       CS_Pub: "Proportion seeking care in public facilities"
       CS_Priv: "Proportion seeking care in private facilities"
       CS_None: "Proportion not seeking care"
-      rho: "Private capture share (portion already included in routine data)"
     scale: "per 1,000 population"
     purpose: >
       Adjusts for populations seeking care outside public facilities or not
       seeking care at all, using care-seeking proportions (CS_Pub, CS_Priv, CS_None)
       from national household surveys such as DHS or MIS.
+    temporal_note: >
+      N3 calculation aggregates N2 to annual level before applying CSB adjustment,
+      then distributes back to monthly level proportionally. This ensures the
+      annual CSB data from DHS/MIS is applied once per year, not 12 times.
+    aggregation_process:
+      - "Sum N2 cases within admin unit for the year"
+      - "Apply CSB adjustment to annual N2 totals"
+      - "Distribute annual N3 back to admin-month proportionally"
     assumptions:
       - Care-seeking fractions are representative for the analysis period.
       - Care-seeking among febrile adults approximates that of children.
       - CS_Pub + CS_Priv + CS_None ≈ 1.
+      - CSB is constant within an admin-year (annual survey data).
     uncertainty_points:
       - Survey years may differ from routine data period.
       - Care-seeking data usually available for <5 children only.
@@ -114,7 +125,8 @@ levels:
     outputs:
       - n3_cases
       - n3_incidence
-      - careseek_method
+      - adj_priv
+      - adj_none
     validation:
       - "All CS values within [0,1]"
       - "CS_Pub > 0"
@@ -123,6 +135,11 @@ levels:
 aggregation_rules:
   - "Variables use SNT standardized naming: conf, test, pres, treated, reprate,
     pop."
+  - "Output is at admin-month level (adm2-month). Facility-level data is
+    aggregated to admin level before calculating incidence."
+  - "N0, N1, N2 are calculated at admin-month level."
+  - "N3 uses annual aggregation of N2 before applying CSB adjustment, then
+    distributes back to admin-month level."
   - "When variables are age-disaggregated (e.g., conf_u5, conf_preg), matching
     denominators follow the same pattern (e.g., pop_u5, pop_preg_exp)."
   - "Aggregation across admin levels (adm1, adm2) uses weighted sums of cases

@@ -13,40 +13,35 @@ country_iso2 <- "BF"
 country_iso3 <- "BFA"
 survey_year_dhs <- 2021
 survey_year_mis <- 2017
-# aggregation level
-# (rememebr survey is doen at adm1 level)
-admin_level <- c("adm1")
+
+# admin levels to process
+admin_levels <- c("adm1", "adm2")
 
 # paths
 path_dhs_parquet <- here::here(ahadi_path(), "01_data/parquet")
 
-# set paths for projects
-# paths <- sntutils::setup_project_paths()
+# set paths
+paths <- here::here(
+  "/Users/mohamedyusuf/Downloads/burkina_MAP"
+)
 
 # shapefile
-shp_admin <- sntutils::download_shapefile(country_iso3)
-
 shp_admin <- sntutils::read(
-  "/Users/mohamedyusuf/Downloads/burkina_MAP/70ds_from_nmcp_2019_numbered.shp"
+  here::here(paths,
+  "70ds_from_nmcp_2019_numbered.shp")
 ) |>
   dplyr::mutate(
     adm0 = "BURKINA FASO",
     adm1 = NOMREGION,
     adm2 = NOMPROVINC,
-    adm3 = NOMDEP,
+    adm3 = NOMDEP
   ) |>
-  dplyr::select(
-    adm0,
-    adm1,
-    adm2,
-    adm3
-  )
+  dplyr::select(adm0, adm1, adm2, adm3)
 
 ## ---------------------------------------------------------------------------##
 # 2) Get DHS data --------------------------------------------------------------
 ## ---------------------------------------------------------------------------##
 
-# survey geolocation data -----------------------------------------------------
 ge_mis <- dhs_read(
   path = path_dhs_parquet,
   file_type = "GE",
@@ -63,7 +58,6 @@ ge_dhs <- dhs_read(
   survey_year = survey_year_dhs
 )
 
-# survey household & individual data -----------------------------------------
 pr_mis <- dhs_read(
   path = path_dhs_parquet,
   file_type = "PR",
@@ -105,108 +99,101 @@ ir_dhs <- dhs_read(
 )
 
 ## ---------------------------------------------------------------------------##
-# 3) Calculate metrics from DHS data -------------------------------------------
+# 3–4) Calculate metrics at adm1 and adm2 --------------------------------------
 ## ---------------------------------------------------------------------------##
 
-# pfpr -------------------------------------------------------------------------
-pfpr_results <- calc_pfpr_dhs(
-  dhs_pr = pr_mis,
-  gps_data = ge_mis,
-  shapefile = shp_admin,
-  admin_level = admin_level
-)
+admin_levels <- c("adm1", "adm2")
 
-# u5mr ------------------------------------------------------------------------
-u5mr_results <- calc_u5mr_dhs(
-  dhs_kr = kr_dhs,
-  period_years = 5,
-  gps_data = ge_dhs,
-  shapefile = shp_admin,
-  admin_level = admin_level
-)
+dhs_data_by_level <- list()
+dhs_dict_by_level <- list()
 
-# csb --------------------------------------------------------------------------
-csb_results <- calc_csb_dhs(
-  dhs_kr = kr_dhs,
-  gps_data = ge_dhs,
-  shapefile = shp_admin,
-  admin_level = admin_level
-)
+for (admin_level in admin_levels) {
+  cli::cli_h2(glue::glue("Processing DHS indicators at {admin_level}"))
 
-# itn --------------------------------------------------------------------------
-itn_results <- calc_itn_dhs(
-  dhs_hr = hr_dhs,
-  dhs_pr = pr_dhs,
-  gps_data = ge_dhs,
-  shapefile = shp_admin,
-  admin_level = admin_level
-)
-
-# wealth quantile --------------------------------------------------------------
-
-wealth_results <- calc_wealth_dhs(
-  dhs_hr = hr_dhs,
-  gps_data = ge_dhs,
-  shapefile = shp_admin,
-  admin_level = admin_level
-)
-
-# iptp -------------------------------------------------------------------------
-
-iptp_results <- calc_iptp_dhs(
-  dhs_ir = ir_dhs,
-  gps_data = ge_dhs,
-  shapefile = shp_admin,
-  admin_level = admin_level
-)
-
-## ---------------------------------------------------------------------------##
-# 4) Produce final metrics data ------------------------------------------------
-## ---------------------------------------------------------------------------##
-
-# join the datasets together
-dhs_indicators <- pfpr_results$data |>
-  dplyr::left_join(
-    u5mr_results$data,
-    by = "adm1"
-  ) |>
-  dplyr::left_join(
-    csb_results$data,
-    by = "adm1"
-  ) |>
-  dplyr::left_join(
-    itn_results$data,
-    by = "adm1"
-  ) |>
-  dplyr::left_join(
-    wealth_results$data,
-    by = "adm1"
-  ) |>
-  dplyr::left_join(
-    iptp_results$data,
-    by = "adm1"
+  pfpr_results <- calc_pfpr_dhs(
+    dhs_pr = pr_mis,
+    gps_data = ge_mis,
+    shapefile = shp_admin,
+    admin_level = admin_level
   )
 
-# make final data dictionary
-dhs_dict <- sntutils::build_dictionary(dhs_indicators)
+  u5mr_results <- calc_u5mr_dhs(
+    dhs_kr = kr_dhs,
+    period_years = 5,
+    gps_data = ge_dhs,
+    shapefile = shp_admin,
+    admin_level = admin_level
+  )
 
-# save the datasets output
-sntutils::write_snt_data(
-  obj = list(
-    data = dhs_indicators,
-    dist = dhs_dict
-  ),
-  data_name = glue::glue("{iso3}_dhs_indicators_{admin_level}"),
-  path = here::here(paths$dhs, "processed"),
-  file_formats = c("qs2", "xlsx")
+  csb_results <- calc_csb_dhs(
+    dhs_kr = kr_dhs,
+    gps_data = ge_dhs,
+    shapefile = shp_admin,
+    admin_level = admin_level
+  )
+
+  itn_results <- calc_itn_dhs(
+    dhs_hr = hr_dhs,
+    dhs_pr = pr_dhs,
+    gps_data = ge_dhs,
+    shapefile = shp_admin,
+    admin_level = admin_level
+  )
+
+  wealth_results <- calc_wealth_dhs(
+    dhs_hr = hr_dhs,
+    gps_data = ge_dhs,
+    shapefile = shp_admin,
+    admin_level = admin_level
+  )
+
+  iptp_results <- calc_iptp_dhs(
+    dhs_ir = ir_dhs,
+    gps_data = ge_dhs,
+    shapefile = shp_admin,
+    admin_level = admin_level
+  )
+
+  anemia_results <- calc_severe_anemia_dhs(
+    dhs_pr = pr_dhs,
+    gps_data = ge_dhs,
+    shapefile = shp_admin,
+    admin_level = admin_level,
+    altitude_adjusted = FALSE
+  )
+
+  join_key <- admin_level
+
+  dhs_indicators <-
+    pfpr_results$data |>
+    dplyr::left_join(u5mr_results$data, by = join_key) |>
+    dplyr::left_join(csb_results$data, by = join_key) |>
+    dplyr::left_join(itn_results$data, by = join_key) |>
+    dplyr::left_join(wealth_results$data, by = join_key) |>
+    dplyr::left_join(iptp_results$data, by = join_key) |>
+    dplyr::left_join(anemia_results$data, by = join_key)
+
+  dhs_data_by_level[[admin_level]] <- dhs_indicators
+}
+
+## ---------------------------------------------------------------------------##
+# 5) Build single final object and save once ----------------------------------
+## ---------------------------------------------------------------------------##
+
+dhs_dict <- sntutils::build_dictionary(
+  dhs_data_by_level[["adm2"]],
+  language = "fr"
 )
 
-# Finished ---------------------------------------------------------------------
+final_dhs_output <- list(
+  data_adm1 = dhs_data_by_level[["adm1"]],
+  data_adm2 = dhs_data_by_level[["adm2"]],
+  dict = dhs_dict
+)
 
-# clean environment
-invisible(gc())
-
-cli::cli_rule(
-  left = "All Processing is Complete",
-  right = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+sntutils::write_snt_data(
+  obj = final_dhs_output,
+  data_name = glue::glue("{country_iso3}_dhs_indicators"),
+  path = here::here(paths),
+  file_formats = c("qs2", "xlsx")
 )

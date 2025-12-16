@@ -308,6 +308,38 @@ globalVariables(
     "dhs_n_recent_births",
     "dhs_n_iptp_1plus",
     "dhs_n_iptp_2plus",
-    "dhs_n_iptp_3plus"
+    "dhs_n_iptp_3plus",
+    # Severe anemia indicators
+    "hemoglobin",
+    "tested_hb",
+    "severe_anemia",
+    "dhs_severe_anemia",
+    "dhs_severe_anemia_low",
+    "dhs_severe_anemia_upp",
+    "dhs_severe_anemia_se",
+    "dhs_n_tested_hb",
+    "dhs_n_severe_anemia",
+    # CSB indicators
+    "child_alive",
+    "care_category",
+    "is_public",
+    "is_private",
+    "is_none",
+    "ci_l.is_public",
+    "ci_u.is_public",
+    "ci_l.is_private",
+    "ci_u.is_private",
+    "ci_l.is_none",
+    "ci_u.is_none",
+    "dhs_csb_none_low",
+    "dhs_csb_none_upp",
+    "dhs_n_public",
+    "dhs_n_private",
+    "dhs_n_none",
+    # Incidence cascade
+    "n2_annual",
+    "adj_priv",
+    "n3_annual",
+    "n2_share"
   )
 )

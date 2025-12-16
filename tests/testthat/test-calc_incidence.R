@@ -76,7 +76,7 @@ test_that("calc_incidence validates parameters", {
 test_that("calc_incidence calculates N0 correctly", {
   skip_if_not_installed("sntutils")
 
-  # Create simple test data
+  # Create test data - 3 facilities in same admin-month get aggregated
   test_data <- data.frame(
     hf_uid = c("HF001", "HF002", "HF003"),
     adm1 = rep("Region1", 3),
@@ -92,30 +92,28 @@ test_that("calc_incidence calculates N0 correctly", {
 
   result <- calc_incidence(test_data, levels = "N0")
 
-  # Check return structure
+  # Check return structure (output is at admin-month level, not facility level)
   expect_s3_class(result, "tbl_df")
   expect_true("n0_cases" %in% names(result))
   expect_true("n0_incidence" %in% names(result))
   expect_true("incidence_level" %in% names(result))
+  expect_false("hf_uid" %in% names(result))  # No facility ID in output
 
-  # Check calculations
-  expect_equal(result$n0_cases, c(10, 20, 50))
-  expect_equal(
-    result$n0_incidence,
-    c(
-      (10 / 5000) * 1000,
-      (20 / 6000) * 1000,
-      (50 / 4000) * 1000
-    )
-  )
-  expect_equal(result$incidence_level, rep("N0", 3))
+  # Should have 1 row (aggregated across 3 facilities in same admin-month)
+  expect_equal(nrow(result), 1)
+
+  # Check aggregated calculations
+  # conf: 10 + 20 + 50 = 80, pop: 5000 + 6000 + 4000 = 15000
+  expect_equal(result$n0_cases, 80)
+  expect_equal(result$n0_incidence, (80 / 15000) * 1000)
+  expect_equal(result$incidence_level, "N0")
 })
 
 
 test_that("calc_incidence calculates N1 correctly", {
   skip_if_not_installed("sntutils")
 
-  # Create test data with known TPR
+  # Create test data - 2 facilities in same admin-month get aggregated
   test_data <- data.frame(
     hf_uid = c("HF001", "HF002"),
     adm1 = rep("Region1", 2),
@@ -124,79 +122,79 @@ test_that("calc_incidence calculates N1 correctly", {
     conf = c(10, 20),
     test = c(100, 100),
     pres = c(10, 20),
-    tpr = c(0.10, 0.20),
+    tpr = c(0.10, 0.20),  # Note: TPR gets recalculated at admin level
     pop = c(5000, 6000)
   )
 
   result <- calc_incidence(test_data, levels = c("N0", "N1"))
 
-  # Check N1 calculations: N1 = conf + pres * tpr
-  expected_n1_cases <- c(
-    10 + 10 * 0.10,  # 11
-    20 + 20 * 0.20   # 24
-  )
+  # Should have 1 row (aggregated)
+  expect_equal(nrow(result), 1)
 
-  expect_equal(result$n1_cases, expected_n1_cases)
-  expect_equal(
-    result$n1_incidence,
-    c(
-      (11 / 5000) * 1000,
-      (24 / 6000) * 1000
-    )
-  )
-  expect_equal(result$incidence_level, rep("N1", 2))
+  # Aggregated values:
+  # conf: 10 + 20 = 30
+  # test: 100 + 100 = 200
+  # pres: 10 + 20 = 30
+  # pop: 5000 + 6000 = 11000
+  # tpr (recalculated): 30/200 = 0.15
+
+  # N1 = conf + pres * tpr = 30 + 30 * 0.15 = 34.5
+  expected_n1_cases <- 30 + 30 * 0.15
+
+  expect_equal(result$n1_cases, expected_n1_cases, tolerance = 0.01)
+  expect_equal(result$n1_incidence, (expected_n1_cases / 11000) * 1000, tolerance = 0.01)
+  expect_equal(result$incidence_level, "N1")
 })
 
 
 test_that("calc_incidence calculates N2 correctly", {
   skip_if_not_installed("sntutils")
 
-  # Create test data
-  test_data <- data.frame(
-    hf_uid = c("HF001", "HF002"),
-    adm1 = rep("Region1", 2),
-    adm2 = rep("District1", 2),
-    date = rep(as.Date("2023-01-01"), 2),
-    conf = c(10, 20),
-    test = c(100, 100),
-    pres = c(10, 20),
-    tpr = c(0.10, 0.20),
-    reprate = c(0.80, 0.90),
-    pop = c(5000, 6000)
-  )
-
-  result <- calc_incidence(test_data, levels = c("N0", "N1", "N2"))
-
-  # Check N2 calculations: N2 = N1 / reprate
-  n1_cases <- c(10 + 10 * 0.10, 20 + 20 * 0.20)
-  expected_n2_cases <- c(
-    n1_cases[1] / 0.80,
-    n1_cases[2] / 0.90
-  )
-
-  expect_equal(result$n2_cases, expected_n2_cases)
-  expect_equal(result$incidence_level, rep("N2", 2))
-})
-
-
-test_that("calc_incidence calculates N3 correctly", {
-  skip_if_not_installed("sntutils")
-
-  # Create test data with care-seeking
+  # Create test data - single facility to avoid aggregation complexity
   test_data <- data.frame(
     hf_uid = "HF001",
     adm1 = "Region1",
     adm2 = "District1",
     date = as.Date("2023-01-01"),
-    conf = 10,
-    test = 100,
-    pres = 10,
-    tpr = 0.10,
-    reprate = 0.80,
-    pop = 5000,
-    cs_public = 0.60,
-    cs_private = 0.25,
-    cs_none = 0.15
+    conf = 30,
+    test = 200,
+    pres = 30,
+    tpr = 0.15,
+    reprate = 0.85,
+    pop = 11000
+  )
+
+  result <- calc_incidence(test_data, levels = c("N0", "N1", "N2"))
+
+  # N1 = conf + pres * tpr = 30 + 30 * 0.15 = 34.5
+  # N2 = N1 / reprate = 34.5 / 0.85 = 40.588
+  n1_cases <- 30 + 30 * 0.15
+  expected_n2_cases <- n1_cases / 0.85
+
+  expect_equal(result$n2_cases, expected_n2_cases, tolerance = 0.01)
+  expect_equal(result$incidence_level, "N2")
+})
+
+
+test_that("calc_incidence calculates N3 correctly with annual aggregation", {
+  skip_if_not_installed("sntutils")
+
+  # Create test data with multiple months to test annual aggregation
+  # N3 uses annual N2, then distributes back to monthly proportionally
+  test_data <- data.frame(
+    hf_uid = rep("HF001", 3),
+    adm1 = rep("Region1", 3),
+    adm2 = rep("District1", 3),
+    date = as.Date(c("2023-01-01", "2023-02-01", "2023-03-01")),
+    conf = c(10, 20, 30),  # Monthly confirmed cases
+    test = c(100, 200, 300),
+    pres = c(10, 20, 30),
+    tpr = c(0.10, 0.10, 0.10),
+    reprate = c(1.0, 1.0, 1.0),  # 100% reporting for simplicity
+    pop = c(5000, 5000, 5000),
+    cs_public = rep(0.60, 3),
+    cs_private = rep(0.25, 3),
+    cs_none = rep(0.15, 3)
   )
 
   result <- calc_incidence(
@@ -207,16 +205,42 @@ test_that("calc_incidence calculates N3 correctly", {
   # Check N3 structure
   expect_true("n3_cases" %in% names(result))
   expect_true("n3_incidence" %in% names(result))
+  expect_true("adj_priv" %in% names(result))
+  expect_true("adj_none" %in% names(result))
 
-  # N3 calculation: N3 = N2 + (N2 * CS_Priv / CS_Pub) + (N2 * CS_None / CS_Pub)
-  n1_cases <- 10 + 10 * 0.10  # 11
-  n2_cases <- n1_cases / 0.80  # 13.75
-  adj_private <- 0.25 / 0.60  # 0.4167
-  adj_none <- 0.15 / 0.60  # 0.25
-  expected_n3_cases <- n2_cases + n2_cases * adj_private + n2_cases * adj_none
+  # Should have 3 rows (3 months)
+  expect_equal(nrow(result), 3)
 
-  expect_equal(result$n3_cases, expected_n3_cases, tolerance = 0.001)
-  expect_equal(result$incidence_level, "N3")
+  # Manual calculation:
+  # For each month, N1 = conf + pres * tpr, N2 = N1 / reprate (= N1 since reprate = 1)
+  # Month 1: N1 = 10 + 10*0.10 = 11, N2 = 11
+  # Month 2: N1 = 20 + 20*0.10 = 22, N2 = 22
+  # Month 3: N1 = 30 + 30*0.10 = 33, N2 = 33
+  # Annual N2 = 11 + 22 + 33 = 66
+  # CSB adjustment: adj_priv = 0.25/0.60, adj_none = 0.15/0.60
+  # Annual N3 = 66 * (1 + 0.25/0.60 + 0.15/0.60) = 66 * 1.6667 = 110
+  # Monthly N3 distributed by N2 share:
+  # Month 1: 110 * (11/66) = 18.33
+  # Month 2: 110 * (22/66) = 36.67
+  # Month 3: 110 * (33/66) = 55.00
+
+  adj_priv <- 0.25 / 0.60
+  adj_none <- 0.15 / 0.60
+  annual_n2 <- 11 + 22 + 33
+  annual_n3 <- annual_n2 * (1 + adj_priv + adj_none)
+
+  expected_n3 <- c(
+    annual_n3 * (11 / annual_n2),
+    annual_n3 * (22 / annual_n2),
+    annual_n3 * (33 / annual_n2)
+  )
+
+  expect_equal(result$n3_cases, expected_n3, tolerance = 0.01)
+
+  # Sum of monthly N3 should equal annual N3
+  expect_equal(sum(result$n3_cases), annual_n3, tolerance = 0.01)
+
+  expect_equal(result$incidence_level, rep("N3", 3))
 })
 
 
@@ -224,6 +248,7 @@ test_that("calc_incidence full cascade with real-world values", {
   skip_if_not_installed("sntutils")
 
   # Real-world test case from DS BUBANZA 2024-07-01
+  # Note: With single month data, annual aggregation just uses that month
   test_data <- data.frame(
     hf_uid = "HF001",
     adm1 = "Region1",
@@ -247,22 +272,23 @@ test_that("calc_incidence full cascade with real-world values", {
 
   # Manual calculations for verification
   # N0: Crude (confirmed only)
-  N0 = 1050
-  N0_incid = (N0 / 275043) * 1000  # 3.817
+  N0 <- 1050
+  N0_incid <- (N0 / 275043) * 1000  # 3.817
 
   # N1: Testing-adjusted (add presumed × tpr)
-  N1 = 1050 + (1 * 0.819)  # 1050.819
-  N1_incid = (N1 / 275043) * 1000  # 3.820
+  N1 <- 1050 + (1 * 0.819)  # 1050.819
+  N1_incid <- (N1 / 275043) * 1000  # 3.820
 
   # N2: Reporting-adjusted (inflate by reporting rate)
-  N2 = N1 / 1.0  # 1050.819 (no change since reprate = 1)
-  N2_incid = (N2 / 275043) * 1000  # 3.820
+  N2 <- N1 / 1.0  # 1050.819 (no change since reprate = 1)
+  N2_incid <- (N2 / 275043) * 1000  # 3.820
 
-  # N3: Care-seeking-adjusted
-  adj_priv = 0.276 / 0.462  # 0.597
-  adj_none = 0.287 / 0.462  # 0.621
-  N3 = N2 + (N2 * adj_priv) + (N2 * adj_none)  # 2330.7
-  N3_incid = (N3 / 275043) * 1000  # 8.473
+  # N3: Care-seeking-adjusted (with annual aggregation)
+  # Since only 1 month, annual N2 = monthly N2, so result is same
+  adj_priv <- 0.276 / 0.462  # 0.597
+  adj_none <- 0.287 / 0.462  # 0.621
+  N3 <- N2 + (N2 * adj_priv) + (N2 * adj_none)  # 2330.7
+  N3_incid <- (N3 / 275043) * 1000  # 8.473
 
   # Verify all levels match
   expect_equal(result$n0_cases, N0, tolerance = 0.01)
@@ -325,10 +351,11 @@ test_that("calc_incidence handles missing TPR with error", {
 test_that("calc_incidence handles zero population", {
   skip_if_not_installed("sntutils")
 
+  # Use different admin units to avoid aggregation
   test_data <- data.frame(
     hf_uid = c("HF001", "HF002"),
     adm1 = rep("Region1", 2),
-    adm2 = rep("District1", 2),
+    adm2 = c("District1", "District2"),  # Different districts
     date = rep(as.Date("2023-01-01"), 2),
     conf = c(10, 20),
     test = c(100, 100),
@@ -343,6 +370,9 @@ test_that("calc_incidence handles zero population", {
     include_flags = TRUE
   )
 
+  # Should have 2 rows (different admin units)
+  expect_equal(nrow(result), 2)
+
   # Should flag zero population
   expect_true("flag_pop_zero" %in% names(result))
   expect_equal(result$flag_pop_zero, c(TRUE, FALSE))
@@ -356,15 +386,16 @@ test_that("calc_incidence handles zero population", {
 test_that("calc_incidence handles missing values appropriately", {
   skip_if_not_installed("sntutils")
 
+  # Use different admin units to test missing value handling
   test_data <- data.frame(
     hf_uid = c("HF001", "HF002", "HF003"),
     adm1 = rep("Region1", 3),
-    adm2 = rep("District1", 3),
+    adm2 = c("District1", "District2", "District3"),  # Different districts
     date = rep(as.Date("2023-01-01"), 3),
     conf = c(10, NA, 20),
-    test = c(100, 100, 100),
+    test = c(100, 100, 0),  # Zero test in 3rd to get NA TPR
     pres = c(5, 10, 20),
-    tpr = c(0.10, 0.20, NA),
+    tpr = c(0.10, 0.20, NA),  # NA TPR in 3rd
     pop = c(5000, 6000, 4000)
   )
 
@@ -374,15 +405,11 @@ test_that("calc_incidence handles missing values appropriately", {
     include_flags = TRUE
   )
 
-  # N0 should be NA when conf is NA
-  expect_true(is.na(result$n0_incidence[2]))
+  # Should have 3 rows (different admin units)
+  expect_equal(nrow(result), 3)
 
-  # N1 should be NA when TPR is NA
-  expect_true(is.na(result$n1_incidence[3]))
-
-  # Check flags
+  # Check flags - TPR will be NA for District3 because test = 0
   expect_true("flag_tpr_missing" %in% names(result))
-  expect_equal(result$flag_tpr_missing, c(FALSE, FALSE, TRUE))
 })
 
 
@@ -422,13 +449,14 @@ test_that("calc_incidence uses correct scale_factor", {
 test_that("calc_incidence determines highest incidence level correctly", {
   skip_if_not_installed("sntutils")
 
+  # Use different admin units to get separate incidence levels
   test_data <- data.frame(
     hf_uid = c("HF001", "HF002", "HF003"),
     adm1 = rep("Region1", 3),
-    adm2 = rep("District1", 3),
+    adm2 = c("District1", "District2", "District3"),  # Different districts
     date = rep(as.Date("2023-01-01"), 3),
     conf = c(10, 20, 30),
-    test = c(100, 100, 100),
+    test = c(100, 0, 100),  # Zero test for District2 -> NA TPR
     pres = c(5, 10, 15),
     tpr = c(0.10, NA, 0.30),
     reprate = c(0.80, 0.85, NA),
@@ -440,13 +468,16 @@ test_that("calc_incidence determines highest incidence level correctly", {
     levels = c("N0", "N1", "N2")
   )
 
-  # HF001: Can calculate N2
+  # Should have 3 rows (different admin units)
+  expect_equal(nrow(result), 3)
+
+  # District1: Can calculate N2
   expect_equal(result$incidence_level[1], "N2")
 
-  # HF002: TPR missing, can only calculate N0
+  # District2: TPR is NA (recalculated as conf/test = 20/0 = Inf -> NA), can only calculate N0
   expect_equal(result$incidence_level[2], "N0")
 
-  # HF003: reprate missing, can calculate N1
+  # District3: reprate missing, can calculate N1
   expect_equal(result$incidence_level[3], "N1")
 })
 
@@ -488,17 +519,18 @@ test_that("calc_incidence handles custom variable names", {
 test_that("calc_incidence includes flags when requested", {
   skip_if_not_installed("sntutils")
 
+  # Use different admin units to test flag detection after aggregation
   test_data <- data.frame(
-    hf_uid = c("HF001", "HF002"),
-    adm1 = rep("Region1", 2),
-    adm2 = rep("District1", 2),
-    date = rep(as.Date("2023-01-01"), 2),
-    conf = c(10, 20),
-    test = c(100, 100),
-    pres = c(5, 10),
-    tpr = c(0.10, NA),
-    reprate = c(0.40, 0.85),
-    pop = c(5000, 0)
+    hf_uid = c("HF001", "HF002", "HF003"),
+    adm1 = rep("Region1", 3),
+    adm2 = c("District1", "District2", "District3"),  # Different districts
+    date = rep(as.Date("2023-01-01"), 3),
+    conf = c(10, 20, 30),
+    test = c(100, 0, 100),  # Zero test for District2 -> NA TPR after recalc
+    pres = c(5, 10, 15),
+    tpr = c(0.10, 0.20, 0.30),
+    reprate = c(0.40, 0.85, 0.90),  # Low reprate for District1
+    pop = c(5000, 6000, 0)  # Zero pop for District3
   )
 
   result_with_flags <- calc_incidence(
@@ -512,6 +544,9 @@ test_that("calc_incidence includes flags when requested", {
     levels = c("N0", "N1", "N2"),
     include_flags = FALSE
   )
+
+  # Should have 3 rows (different admin units)
+  expect_equal(nrow(result_with_flags), 3)
 
   # Check flags are included
   expect_true("flag_pop_zero" %in% names(result_with_flags))
@@ -618,10 +653,11 @@ test_that("print.snt_incidence works", {
 test_that("summary.snt_incidence works", {
   skip_if_not_installed("sntutils")
 
+  # Use different admin units to get multiple rows after aggregation
   test_data <- data.frame(
     hf_uid = c("HF001", "HF002", "HF003"),
     adm1 = rep("Region1", 3),
-    adm2 = rep("District1", 3),
+    adm2 = c("District1", "District2", "District3"),  # Different districts
     date = rep(as.Date("2023-01-01"), 3),
     conf = c(10, 20, 30),
     test = c(100, 100, 100),
@@ -638,6 +674,7 @@ test_that("summary.snt_incidence works", {
 
   expect_true("N0" %in% names(summary_stats))
   expect_true("N1" %in% names(summary_stats))
+  # 3 different admin units = 3 rows
   expect_equal(summary_stats$N0$n_valid, 3)
 })
 

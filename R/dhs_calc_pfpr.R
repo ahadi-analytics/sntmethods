@@ -484,9 +484,9 @@ calc_pfpr_dhs_core <- function(
       dhs_pfpr_rdt_upp = ci_u
     ) |>
     dplyr::mutate(
-      dhs_pfpr_rdt = round(dhs_pfpr_rdt * 100, 1),
-      dhs_pfpr_rdt_low = round(dhs_pfpr_rdt_low * 100, 1),
-      dhs_pfpr_rdt_upp = round(dhs_pfpr_rdt_upp * 100, 1)
+      dhs_pfpr_rdt = round(dhs_pfpr_rdt * 100, 2),
+      dhs_pfpr_rdt_low = round(dhs_pfpr_rdt_low * 100, 2),
+      dhs_pfpr_rdt_upp = round(dhs_pfpr_rdt_upp * 100, 2)
     )
 
   # ---- pfpr (mic) ---------------------------------------------
@@ -506,9 +506,9 @@ calc_pfpr_dhs_core <- function(
       dhs_pfpr_mic_upp = ci_u
     ) |>
     dplyr::mutate(
-      dhs_pfpr_mic = round(dhs_pfpr_mic * 100, 1),
-      dhs_pfpr_mic_low = round(dhs_pfpr_mic_low * 100, 1),
-      dhs_pfpr_mic_upp = round(dhs_pfpr_mic_upp * 100, 1)
+      dhs_pfpr_mic = round(dhs_pfpr_mic * 100, 2),
+      dhs_pfpr_mic_low = round(dhs_pfpr_mic_low * 100, 2),
+      dhs_pfpr_mic_upp = round(dhs_pfpr_mic_upp * 100, 2)
     )
 
   # ---- denominators -------------------------------------------
@@ -524,6 +524,10 @@ calc_pfpr_dhs_core <- function(
     dplyr::rename(
       dhs_n_tested_rdt = tested_rdt,
       dhs_n_pos_rdt = rdt_pos
+    ) |>
+    dplyr::mutate(
+      dhs_n_tested_rdt = as.integer(round(dhs_n_tested_rdt)),
+      dhs_n_pos_rdt = as.integer(round(dhs_n_pos_rdt))
     )
 
   denom_mic <- survey::svyby(
@@ -537,6 +541,10 @@ calc_pfpr_dhs_core <- function(
     dplyr::rename(
       dhs_n_tested_mic = tested_mic,
       dhs_n_pos_mic = mic_pos
+    ) |>
+    dplyr::mutate(
+      dhs_n_tested_mic = as.integer(round(dhs_n_tested_mic)),
+      dhs_n_pos_mic = as.integer(round(dhs_n_pos_mic))
     )
 
   # ---- merge results ------------------------------------------
@@ -922,6 +930,18 @@ calc_pfpr_dhs <- function(
     dplyr::select(
       -dhs_pfpr_rdt_se,
       -dhs_pfpr_mic_se
+    ) |>
+    dplyr::mutate(
+      dhs_pfpr_rdt = round(dhs_pfpr_rdt, 2),
+      dhs_pfpr_rdt_low = round(dhs_pfpr_rdt_low, 2),
+      dhs_pfpr_rdt_upp = round(dhs_pfpr_rdt_upp, 2),
+      dhs_pfpr_mic = round(dhs_pfpr_mic, 2),
+      dhs_pfpr_mic_low = round(dhs_pfpr_mic_low, 2),
+      dhs_pfpr_mic_upp = round(dhs_pfpr_mic_upp, 2),
+      dhs_n_tested_rdt = as.integer(dhs_n_tested_rdt),
+      dhs_n_pos_rdt = as.integer(dhs_n_pos_rdt),
+      dhs_n_tested_mic = as.integer(dhs_n_tested_mic),
+      dhs_n_pos_mic = as.integer(dhs_n_pos_mic)
     )
 
   # Detect and preserve admin name columns
@@ -1053,8 +1073,12 @@ aggregate_pfpr_admin <- function(
 
   aggregated <- aggregated |>
     dplyr::mutate(
-      dhs_pfpr_rdt = round(dhs_pfpr_rdt, 1),
-      dhs_pfpr_mic = round(dhs_pfpr_mic, 1)
+      dhs_pfpr_rdt = round(dhs_pfpr_rdt, 2),
+      dhs_pfpr_mic = round(dhs_pfpr_mic, 2),
+      dhs_n_tested_rdt = as.integer(dhs_n_tested_rdt),
+      dhs_n_pos_rdt = as.integer(dhs_n_pos_rdt),
+      dhs_n_tested_mic = as.integer(dhs_n_tested_mic),
+      dhs_n_pos_mic = as.integer(dhs_n_pos_mic)
     )
 
   # Detect and preserve admin name columns
