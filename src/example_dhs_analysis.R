@@ -11,8 +11,8 @@ devtools::load_all()
 # country metadata
 country_iso2 <- "BF"
 country_iso3 <- "BFA"
-survey_year_dhs <- 2022
-survey_year_mis <- 2016
+survey_year_dhs <- 2021
+survey_year_mis <- 2017
 # aggregation level
 # (rememebr survey is doen at adm1 level)
 admin_level <- c("adm1")
@@ -26,16 +26,28 @@ path_dhs_parquet <- here::here(ahadi_path(), "01_data/parquet")
 # shapefile
 shp_admin <- sntutils::download_shapefile(country_iso3)
 
-shp_admin <- sf::read_sf(
+shp_admin <- sntutils::read(
   "/Users/mohamedyusuf/Downloads/burkina_MAP/70ds_from_nmcp_2019_numbered.shp"
-)
+) |>
+  dplyr::mutate(
+    adm0 = "BURKINA FASO",
+    adm1 = NOMREGION,
+    adm2 = NOMPROVINC,
+    adm3 = NOMDEP,
+  ) |>
+  dplyr::select(
+    adm0,
+    adm1,
+    adm2,
+    adm3
+  )
 
 ## ---------------------------------------------------------------------------##
 # 2) Get DHS data --------------------------------------------------------------
 ## ---------------------------------------------------------------------------##
 
 # survey geolocation data -----------------------------------------------------
-ge_mis_2016 <- dhs_read(
+ge_mis <- dhs_read(
   path = path_dhs_parquet,
   file_type = "GE",
   survey_type = "MIS",
@@ -43,7 +55,7 @@ ge_mis_2016 <- dhs_read(
   survey_year = survey_year_mis
 )
 
-ge_dhs_2019 <- dhs_read(
+ge_dhs <- dhs_read(
   path = path_dhs_parquet,
   file_type = "GE",
   survey_type = "DHS",
@@ -52,7 +64,7 @@ ge_dhs_2019 <- dhs_read(
 )
 
 # survey household & individual data -----------------------------------------
-pr_mis_2016 <- dhs_read(
+pr_mis <- dhs_read(
   path = path_dhs_parquet,
   file_type = "PR",
   survey_type = "MIS",
@@ -60,7 +72,7 @@ pr_mis_2016 <- dhs_read(
   survey_year = survey_year_mis
 )
 
-pr_dhs_2019 <- dhs_read(
+pr_dhs <- dhs_read(
   path = path_dhs_parquet,
   file_type = "PR",
   survey_type = "DHS",
@@ -68,7 +80,7 @@ pr_dhs_2019 <- dhs_read(
   survey_year = survey_year_dhs
 )
 
-hr_dhs_2019 <- dhs_read(
+hr_dhs <- dhs_read(
   path = path_dhs_parquet,
   file_type = "HR",
   survey_type = "DHS",
@@ -76,9 +88,17 @@ hr_dhs_2019 <- dhs_read(
   survey_year = survey_year_dhs
 )
 
-kr_dhs_2019 <- dhs_read(
+kr_dhs <- dhs_read(
   path = path_dhs_parquet,
   file_type = "KR",
+  survey_type = "DHS",
+  country_code = country_iso2,
+  survey_year = survey_year_dhs
+)
+
+ir_dhs <- dhs_read(
+  path = path_dhs_parquet,
+  file_type = "IR",
   survey_type = "DHS",
   country_code = country_iso2,
   survey_year = survey_year_dhs
@@ -90,34 +110,34 @@ kr_dhs_2019 <- dhs_read(
 
 # pfpr -------------------------------------------------------------------------
 pfpr_results <- calc_pfpr_dhs(
-  dhs_pr = pr_mis_2016,
-  gps_data = ge_mis_2016,
+  dhs_pr = pr_mis,
+  gps_data = ge_mis,
   shapefile = shp_admin,
   admin_level = admin_level
 )
 
 # u5mr ------------------------------------------------------------------------
 u5mr_results <- calc_u5mr_dhs(
-  dhs_kr = kr_dhs_2019,
+  dhs_kr = kr_dhs,
   period_years = 5,
-  gps_data = ge_dhs_2019,
+  gps_data = ge_dhs,
   shapefile = shp_admin,
   admin_level = admin_level
 )
 
 # csb --------------------------------------------------------------------------
 csb_results <- calc_csb_dhs(
-  dhs_kr = kr_dhs_2019,
-  gps_data = ge_dhs_2019,
+  dhs_kr = kr_dhs,
+  gps_data = ge_dhs,
   shapefile = shp_admin,
   admin_level = admin_level
 )
 
 # itn --------------------------------------------------------------------------
 itn_results <- calc_itn_dhs(
-  dhs_hr = hr_dhs_2019,
-  dhs_pr = pr_dhs_2019,
-  gps_data = ge_dhs_2019,
+  dhs_hr = hr_dhs,
+  dhs_pr = pr_dhs,
+  gps_data = ge_dhs,
   shapefile = shp_admin,
   admin_level = admin_level
 )
@@ -125,8 +145,17 @@ itn_results <- calc_itn_dhs(
 # wealth quantile --------------------------------------------------------------
 
 wealth_results <- calc_wealth_dhs(
-  dhs_hr = hr_dhs_2019,
-  gps_data = ge_dhs_2019,
+  dhs_hr = hr_dhs,
+  gps_data = ge_dhs,
+  shapefile = shp_admin,
+  admin_level = admin_level
+)
+
+# iptp -------------------------------------------------------------------------
+
+iptp_results <- calc_iptp_dhs(
+  dhs_ir = ir_dhs,
+  gps_data = ge_dhs,
   shapefile = shp_admin,
   admin_level = admin_level
 )
@@ -151,6 +180,10 @@ dhs_indicators <- pfpr_results$data |>
   ) |>
   dplyr::left_join(
     wealth_results$data,
+    by = "adm1"
+  ) |>
+  dplyr::left_join(
+    iptp_results$data,
     by = "adm1"
   )
 

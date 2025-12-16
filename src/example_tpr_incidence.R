@@ -48,7 +48,7 @@ shp_admin <- sntutils::read_snt_data(
 )$final_spat_vec$adm2
 
 # select the key vars we want
-vars_of_interest <- c("susp", "conf", "test", "pres", "maltreat")
+vars_of_interest <- c("susp", "conf", "test", "pres")
 
 # Get and prep CSB data --------------------------------------------------------
 

@@ -32,41 +32,58 @@ test_that("calc_csb_dhs_core validates input data", {
   )
 })
 
-test_that("calc_csb_dhs_core works with minimal valid data", {
+test_that("calc_csb_dhs_core errors when no h32 variables found", {
   skip_if_not_installed("survey")
 
-  # Create minimal mock KR data with fever cases
+  # Create data without any h32 variables
+  kr_data <- data.frame(
+    v021 = rep(1:10, each = 10),
+    v005 = rep(1000000, 100),
+    v022 = rep(1:2, each = 50),
+    v024 = rep("REGION1", 100),
+    hw1 = sample(0:59, 100, replace = TRUE),
+    h22 = sample(c(0, 1), 100, replace = TRUE, prob = c(0.6, 0.4)),
+    stringsAsFactors = FALSE
+  )
+
+  # Should error when no h32 treatment-seeking variables found
+  expect_error(
+    calc_csb_dhs_core(kr_data),
+    "No h32 treatment-seeking variables found"
+  )
+})
+
+test_that("calc_csb_dhs_core works with multiple h32 sources", {
+  skip_if_not_installed("survey")
+
+  # Create mock KR data with multiple h32 source variables
   set.seed(123)
   n_children <- 200
 
-  # Create base data frame first
   kr_data <- data.frame(
     v021 = rep(1:20, each = 10),           # 20 clusters
     v005 = rep(1000000, n_children),       # Standard weight
     v022 = rep(1:4, each = 50),            # 4 strata
     v024 = rep(c("REGION1", "REGION2"), each = 100),  # 2 regions
     hw1 = sample(0:59, n_children, replace = TRUE),   # Age in months
-    h22 = sample(c(0, 1), n_children, replace = TRUE, prob = c(0.7, 0.3))  # 30% had fever
+    h22 = sample(c(0, 1), n_children, replace = TRUE, prob = c(0.7, 0.3)),  # 30% had fever
+    b5 = rep(1, n_children)  # All children alive
   )
 
-  # Add conditional columns based on h22
-  kr_data$h32 <- ifelse(
-    kr_data$h22 == 1,
-    sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE, prob = c(0.3, 0.7)),
-    NA
-  )  # 70% of fever cases sought care
-
-  kr_data$h32a <- ifelse(
-    kr_data$h22 == 1,
-    sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE, prob = c(0.7, 0.3)),
-    NA
-  )  # 30% sought public care
-
-  kr_data$h32j <- ifelse(
-    kr_data$h22 == 1,
-    sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE, prob = c(0.5, 0.5)),
-    NA
-  )  # 50% sought private care
+  # Add h32 source variables (DHS standard facility codes)
+  # Public sources
+  kr_data$h32a <- ifelse(kr_data$h22 == 1,
+    sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE, prob = c(0.8, 0.2)), NA)
+  kr_data$h32b <- ifelse(kr_data$h22 == 1,
+    sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE, prob = c(0.7, 0.3)), NA)
+  # Private sources
+  kr_data$h32j <- ifelse(kr_data$h22 == 1,
+    sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE, prob = c(0.6, 0.4)), NA)
+  kr_data$h32k <- ifelse(kr_data$h22 == 1,
+    sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE, prob = c(0.5, 0.5)), NA)
+  # Traditional healer (excluded by default)
+  kr_data$h32t <- ifelse(kr_data$h22 == 1,
+    sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE, prob = c(0.9, 0.1)), NA)
 
   result <- calc_csb_dhs_core(kr_data)
 
@@ -87,6 +104,89 @@ test_that("calc_csb_dhs_core works with minimal valid data", {
   # Check that confidence intervals are within bounds
   expect_true(all(result$dhs_csb_any_low >= 0, na.rm = TRUE))
   expect_true(all(result$dhs_csb_any_upp <= 100, na.rm = TRUE))
+
+  # Check that sought_any + sought_none approximately equals 100
+  # (allowing for rounding)
+  expect_true(all(abs(result$dhs_csb_any + result$dhs_csb_none - 100) < 1, na.rm = TRUE))
+})
+
+test_that("calc_csb_dhs_core filters out deceased children", {
+  skip_if_not_installed("survey")
+
+  set.seed(456)
+  n_children <- 100
+
+  # Create data with some deceased children
+  kr_data <- data.frame(
+    v021 = rep(1:10, each = 10),
+    v005 = rep(1000000, n_children),
+    v022 = rep(1:2, each = 50),
+    v024 = rep("REGION1", n_children),
+    hw1 = sample(0:59, n_children, replace = TRUE),
+    h22 = sample(c(0, 1), n_children, replace = TRUE, prob = c(0.5, 0.5)),
+    b5 = sample(c(0, 1), n_children, replace = TRUE, prob = c(0.2, 0.8))  # 20% deceased
+  )
+
+  # Add h32 sources
+  kr_data$h32a <- ifelse(kr_data$h22 == 1,
+    sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE), NA)
+  kr_data$h32j <- ifelse(kr_data$h22 == 1,
+    sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE), NA)
+
+  # Count expected fever cases (living children only)
+  expected_fever <- sum(kr_data$h22 == 1 & kr_data$b5 == 1)
+
+  result <- calc_csb_dhs_core(kr_data)
+
+  # The sample size should reflect only living children
+  expect_equal(result$dhs_n_fever, expected_fever)
+})
+
+test_that("calc_csb_dhs_core handles custom source_config", {
+  skip_if_not_installed("survey")
+
+  set.seed(789)
+  n_children <- 150
+
+  kr_data <- data.frame(
+    v021 = rep(1:15, each = 10),
+    v005 = rep(1000000, n_children),
+    v022 = rep(1:3, each = 50),
+    hw1 = sample(0:59, n_children, replace = TRUE),
+    h22 = sample(c(0, 1), n_children, replace = TRUE, prob = c(0.6, 0.4)),
+    b5 = rep(1, n_children)
+  )
+
+  # Add many h32 sources
+  kr_data$h32a <- ifelse(kr_data$h22 == 1, sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE), NA)
+  kr_data$h32b <- ifelse(kr_data$h22 == 1, sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE), NA)
+  kr_data$h32c <- ifelse(kr_data$h22 == 1, sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE), NA)
+  kr_data$h32j <- ifelse(kr_data$h22 == 1, sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE), NA)
+  kr_data$h32k <- ifelse(kr_data$h22 == 1, sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE), NA)
+  kr_data$h32t <- ifelse(kr_data$h22 == 1, sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE), NA)
+
+  # Test with custom source_config
+  result <- calc_csb_dhs_core(
+    kr_data,
+    survey_vars = list(
+      cluster = "v021",
+      weight = "v005",
+      stratum = "v022",
+      age = "hw1",
+      fever = "h22",
+      alive = "b5"
+    ),
+    source_config = list(
+      public = c("h32a", "h32b"),  # Only use these as public
+      private = c("h32j"),          # Only use this as private
+      excluded = c("h32t", "h32k")  # Exclude pharmacy and traditional
+    )
+  )
+
+  expect_s3_class(result, "tbl_df")
+  expect_true("dhs_csb_any" %in% names(result))
+  expect_true("dhs_csb_public" %in% names(result))
+  expect_true("dhs_csb_private" %in% names(result))
 })
 
 test_that("calc_csb_dhs_core handles children without fever correctly", {
@@ -100,7 +200,7 @@ test_that("calc_csb_dhs_core handles children without fever correctly", {
     v024 = rep("REGION1", 50),
     hw1 = sample(0:59, 50, replace = TRUE),
     h22 = rep(0, 50),  # No fever
-    h32 = rep(NA, 50),
+    b5 = rep(1, 50),
     h32a = rep(NA, 50),
     h32j = rep(NA, 50)
   )
@@ -128,10 +228,13 @@ test_that("calc_csb_dhs returns list with data, dict, and metadata", {
     v024 = rep("WESTERN", n_children),     # Admin1
     hw1 = sample(0:59, n_children, replace = TRUE),
     h22 = sample(c(0, 1), n_children, replace = TRUE, prob = c(0.6, 0.4)),  # 40% fever
-    h32 = sample(c(0, 1, NA), n_children, replace = TRUE),
-    h32a = sample(c(0, 1, NA), n_children, replace = TRUE),
-    h32j = sample(c(0, 1, NA), n_children, replace = TRUE)
+    b5 = rep(1, n_children)
   )
+
+  # Add h32 sources
+  kr_data$h32a <- ifelse(kr_data$h22 == 1, sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE), NA)
+  kr_data$h32b <- ifelse(kr_data$h22 == 1, sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE), NA)
+  kr_data$h32j <- ifelse(kr_data$h22 == 1, sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE), NA)
 
   result <- calc_csb_dhs(kr_data)
 
@@ -152,6 +255,7 @@ test_that("calc_csb_dhs returns list with data, dict, and metadata", {
   expect_equal(result$metadata$file_type, "KR")
   expect_equal(result$metadata$analysis_type, "CSB (Care-Seeking Behavior)")
   expect_equal(result$metadata$age_group, "0-59 months")
+  expect_true(result$metadata$n_h32_sources > 0)
 
   # Check dictionary component
   expect_s3_class(result$dict, "data.frame")
@@ -164,15 +268,20 @@ test_that("extract_dhs_metadata_csb extracts correct metadata", {
     v007 = rep(2021, 150),
     v021 = rep(1:15, each = 10),
     hw1 = sample(0:59, 150, replace = TRUE),
-    h22 = sample(c(0, 1), 150, replace = TRUE, prob = c(0.6, 0.4))
+    h22 = sample(c(0, 1), 150, replace = TRUE, prob = c(0.6, 0.4)),
+    b5 = rep(1, 150),
+    h32a = sample(c(0, 1, NA), 150, replace = TRUE),
+    h32b = sample(c(0, 1, NA), 150, replace = TRUE),
+    h32j = sample(c(0, 1, NA), 150, replace = TRUE)
   )
 
   metadata <- extract_dhs_metadata_csb(
     kr_data,
     survey_vars = list(
       cluster = "v021",
-      kr_age = "hw1",
-      fever = "h22"
+      age = "hw1",
+      fever = "h22",
+      alive = "b5"
     )
   )
 
@@ -182,7 +291,9 @@ test_that("extract_dhs_metadata_csb extracts correct metadata", {
   expect_equal(metadata$total_records, 150)
   expect_equal(metadata$total_clusters, 15)
   expect_equal(metadata$total_eligible_children, 150)
-  expect_true(metadata$total_fever_cases > 0)  # Should have some fever cases
+  expect_true(metadata$total_fever_cases > 0)
+  expect_equal(metadata$n_h32_sources, 3)
+  expect_true(metadata$has_alive_var)
 })
 
 test_that("calc_csb_dhs_core handles multiple admin levels", {
@@ -199,10 +310,12 @@ test_that("calc_csb_dhs_core handles multiple admin levels", {
     v022 = rep(1:4, each = 50),
     hw1 = sample(0:59, n_children, replace = TRUE),
     h22 = sample(c(0, 1), n_children, replace = TRUE, prob = c(0.7, 0.3)),
-    h32 = sample(c(0, 1, NA), n_children, replace = TRUE),
-    h32a = sample(c(0, 1, NA), n_children, replace = TRUE),
-    h32j = sample(c(0, 1, NA), n_children, replace = TRUE)
+    b5 = rep(1, n_children)
   )
+
+  # Add h32 sources
+  kr_data$h32a <- ifelse(kr_data$h22 == 1, sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE), NA)
+  kr_data$h32j <- ifelse(kr_data$h22 == 1, sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE), NA)
 
   # Create mock GPS data
   gps_data <- data.frame(
@@ -321,28 +434,6 @@ test_that("aggregate_csb_admin works with mock data", {
   expect_true(all(result$dhs_n_fever > 0))
 })
 
-test_that("calc_csb_dhs_core errors when care-seeking variables are missing", {
-  skip_if_not_installed("survey")
-
-  # Create data without any h32 variables
-  kr_data <- data.frame(
-    v021 = rep(1:10, each = 10),
-    v005 = rep(1000000, 100),
-    v022 = rep(1:2, each = 50),
-    v024 = rep("REGION1", 100),
-    hw1 = sample(0:59, 100, replace = TRUE),
-    h22 = sample(c(0, 1), 100, replace = TRUE, prob = c(0.6, 0.4)),
-    # Missing h32 variables
-    stringsAsFactors = FALSE
-  )
-
-  # Should error when no h32 treatment-seeking variables found
-  expect_error(
-    calc_csb_dhs_core(kr_data),
-    "No h32 treatment-seeking variables found"
-  )
-})
-
 test_that("calc_csb_dhs_core produces consistent results", {
   skip_if_not_installed("survey")
 
@@ -357,9 +448,10 @@ test_that("calc_csb_dhs_core produces consistent results", {
     v024 = rep("REGION1", 100),
     hw1 = rep(c(6, 12, 24, 36, 48), 20),  # Fixed ages
     h22 = rep(c(0, 0, 1, 1, 1), 20),      # 60% with fever
-    h32 = rep(c(NA, NA, 1, 1, 0), 20),    # Varied care-seeking
-    h32a = rep(c(NA, NA, 1, 0, 0), 20),   # Public care
-    h32j = rep(c(NA, NA, 0, 1, 0), 20)    # Private care
+    b5 = rep(1, 100),                      # All alive
+    h32a = rep(c(NA, NA, 1, 0, 0), 20),   # Public source
+    h32b = rep(c(NA, NA, 0, 1, 0), 20),   # Public source
+    h32j = rep(c(NA, NA, 0, 1, 0), 20)    # Private source
   )
 
   result1 <- calc_csb_dhs_core(kr_data)
@@ -370,4 +462,71 @@ test_that("calc_csb_dhs_core produces consistent results", {
   expect_equal(result1$dhs_csb_public, result2$dhs_csb_public)
   expect_equal(result1$dhs_csb_private, result2$dhs_csb_private)
   expect_equal(result1$dhs_n_fever, result2$dhs_n_fever)
+})
+
+test_that("calc_csb_dhs_core calculates mutually exclusive categories with precedence", {
+  skip_if_not_installed("survey")
+
+  # Create data where we can verify the calculation
+  # 10 children with fever, each visited different combinations of sources
+  # With precedence rule: public > private > none
+  kr_data <- data.frame(
+    v021 = 1:10,
+    v005 = rep(1000000, 10),
+    v022 = rep(1, 10),
+    hw1 = rep(24, 10),
+    h22 = rep(1, 10),  # All have fever
+    b5 = rep(1, 10),   # All alive
+    # Child 1-3: visited public only (h32a or h32b) → category: "public"
+    # Child 4-6: visited private only (h32j) → category: "private"
+    # Child 7-8: visited BOTH public and private → category: "public" (precedence!)
+    # Child 9-10: visited none → category: "none"
+    h32a = c(1, 0, 0, 0, 0, 0, 1, 0, 0, 0),
+    h32b = c(0, 1, 1, 0, 0, 0, 0, 1, 0, 0),
+    h32j = c(0, 0, 0, 1, 1, 1, 1, 1, 0, 0)
+  )
+
+  result <- calc_csb_dhs_core(kr_data)
+
+  # Categories are MUTUALLY EXCLUSIVE:
+  # - Public: children 1,2,3,7,8 = 5/10 = 50%
+  # - Private: children 4,5,6 = 3/10 = 30% (NOT 50%, because 7,8 are counted as public!)
+  # - None: children 9,10 = 2/10 = 20%
+  # - Any: public + private = 80%
+
+  expect_equal(result$dhs_csb_public, 50)
+  expect_equal(result$dhs_csb_private, 30)
+  expect_equal(result$dhs_csb_none, 20)
+  expect_equal(result$dhs_csb_any, 80)
+
+  # CRITICAL: Categories must sum to 100% by construction
+  expect_equal(result$dhs_csb_public + result$dhs_csb_private + result$dhs_csb_none, 100)
+})
+
+test_that("care categories are mutually exclusive - all visited both sectors", {
+  skip_if_not_installed("survey")
+
+  # All children visited BOTH public AND private
+  # With precedence rule, all should be classified as "public"
+  kr_data <- data.frame(
+    v021 = 1:10,              # 10 clusters
+    v005 = rep(1000000, 10),
+    v022 = rep(1, 10),
+    hw1 = rep(24, 10),
+    h22 = rep(1, 10),
+    b5 = rep(1, 10),
+    h32a = rep(1, 10),  # All visited public
+    h32j = rep(1, 10)   # All also visited private
+  )
+
+  result <- calc_csb_dhs_core(kr_data)
+
+  # With public precedence, ALL should be classified as "public"
+  expect_equal(result$dhs_csb_public, 100)
+  expect_equal(result$dhs_csb_private, 0)
+  expect_equal(result$dhs_csb_none, 0)
+  expect_equal(result$dhs_csb_any, 100)
+
+  # Sum must be 100%
+  expect_equal(result$dhs_csb_public + result$dhs_csb_private + result$dhs_csb_none, 100)
 })

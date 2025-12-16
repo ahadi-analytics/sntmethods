@@ -285,6 +285,29 @@ globalVariables(
     "se",
     "mae_n2",
     "mae_n3",
-    "month_num"
+    "month_num",
+    # IPTp indicators
+    "iptp_1plus",
+    "iptp_2plus",
+    "iptp_3plus",
+    "sp_taken",
+    "sp_doses",
+    "birth_age",
+    "interview_cmc",
+    "birth_cmc",
+    "dhs_iptp_1",
+    "dhs_iptp_1_low",
+    "dhs_iptp_1_upp",
+    "dhs_iptp_2",
+    "dhs_iptp_2_low",
+    "dhs_iptp_2_upp",
+    "dhs_iptp_3",
+    "dhs_iptp_3_low",
+    "dhs_iptp_3_upp",
+    "dhs_n_women",
+    "dhs_n_recent_births",
+    "dhs_n_iptp_1plus",
+    "dhs_n_iptp_2plus",
+    "dhs_n_iptp_3plus"
   )
 )
