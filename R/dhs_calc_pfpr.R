@@ -484,9 +484,9 @@ calc_pfpr_dhs_core <- function(
       dhs_pfpr_rdt_upp = ci_u
     ) |>
     dplyr::mutate(
-      dhs_pfpr_rdt = round(dhs_pfpr_rdt * 100, 2),
-      dhs_pfpr_rdt_low = round(dhs_pfpr_rdt_low * 100, 2),
-      dhs_pfpr_rdt_upp = round(dhs_pfpr_rdt_upp * 100, 2)
+      dhs_pfpr_rdt = round(dhs_pfpr_rdt, 2),
+      dhs_pfpr_rdt_low = round(dhs_pfpr_rdt_low, 2),
+      dhs_pfpr_rdt_upp = round(dhs_pfpr_rdt_upp, 2)
     )
 
   # ---- pfpr (mic) ---------------------------------------------
@@ -506,9 +506,9 @@ calc_pfpr_dhs_core <- function(
       dhs_pfpr_mic_upp = ci_u
     ) |>
     dplyr::mutate(
-      dhs_pfpr_mic = round(dhs_pfpr_mic * 100, 2),
-      dhs_pfpr_mic_low = round(dhs_pfpr_mic_low * 100, 2),
-      dhs_pfpr_mic_upp = round(dhs_pfpr_mic_upp * 100, 2)
+      dhs_pfpr_mic = round(dhs_pfpr_mic, 2),
+      dhs_pfpr_mic_low = round(dhs_pfpr_mic_low, 2),
+      dhs_pfpr_mic_upp = round(dhs_pfpr_mic_upp, 2)
     )
 
   # ---- denominators -------------------------------------------
@@ -854,7 +854,7 @@ calc_pfpr_dhs <- function(
 
     if (any(unmatched)) {
       cli::cli_alert_info(
-        "assigning {sum(unmatched)} clusters to nearest admin units."
+        "Assigning {format(sum(unmatched), big.mark = ',')} clusters to nearest admin units."
       )
 
       nearest_idx <- sf::st_nearest_feature(

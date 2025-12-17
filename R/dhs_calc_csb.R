@@ -1,8 +1,7 @@
-#' Calculate Sector-Partitioned Care-Seeking Behavior from DHS Data
+#' Calculate Care-Seeking Behavior from DHS Data
 #'
-#' Estimates primary sector of care for febrile children using a mutually
-#' exclusive categorization. This is a DERIVED indicator, not a standard
-#' DHS care-seeking indicator.
+#' Estimates care-seeking behavior for febrile children under 5 using
+#' overlapping indicators matching standard DHS methodology.
 #'
 #' @param dhs_kr DHS children's recode (KR) dataset in tidy format
 #'   (data.frame or tibble).
@@ -13,17 +12,17 @@
 #'     \item `stratum`: Stratum variable (default: "v022")
 #'     \item `age`: Child's age in months (default: "hw1")
 #'     \item `fever`: Had fever in last 2 weeks (default: "h22")
-#'     \item `alive`: Child survival status (default: "b5")
+#'     \item `alive`: Child survival status (default: "b5", not used for filtering)
 #'   }
 #' @param source_config Named list specifying country-specific source
 #'   configuration:
 #'   \itemize{
 #'     \item `public`: Character vector of h32 codes for public sector
-#'       (default: h32a-h32i for govt hospital, health center, etc.)
-#'     \item `private`: Character vector of h32 codes for private sector
-#'       (default: h32j-h32s for private clinic, pharmacy, private doctor, etc.)
-#'     \item `excluded`: Character vector of h32 codes to exclude from any
-#'       care-seeking (default: c("h32t", "h32w") for traditional healers)
+#'       (default: h32a-h32i for govt hospital, health center, health post)
+#'     \item `private`: Character vector of h32 codes for private medical sector
+#'       (default: h32j-h32r for private hospital, clinic, pharmacy, doctor)
+#'     \item `excluded`: Character vector of h32 codes to exclude from care-seeking
+#'       (default: h32s-h32x for shop/market, traditional practitioners, other)
 #'   }
 #' @param gps_data Optional DHS GPS dataset with cluster coordinates.
 #' @param gps_vars Named list for GPS variables (cluster, lat, lon).
@@ -38,37 +37,32 @@
 #'   confidence intervals and sample sizes.
 #'
 #' @details
-#' \strong{Important:} This function implements sector-partitioned care-seeking,
-#' which differs from standard DHS methodology.
+#' This function uses overlapping indicators matching standard DHS methodology.
+#' A child visiting both public and private sources is counted in BOTH
+#' categories. This means public + private can exceed 100%.
 #'
-#' \strong{Standard DHS:} Binary indicator (sought care yes/no) plus independent
-#' source-specific indicators that can overlap (a child visiting both public
-#' and private sources is counted in both).
-#'
-#' \strong{This function:} Mutually exclusive categories (public/private/none)
-#' using a precedence rule. The sum of public + private + none = 100% by
-#' construction.
-#'
-#' \strong{Precedence Rule (public > private):}
+#' \strong{Indicator Definitions:}
 #' \itemize{
-#'   \item "Public" = Contact with ANY public sector source (even if private
-#'     was also used)
-#'   \item "Private" = Private sector ONLY (no public contact)
-#'   \item "None" = No care sought from any allowed source
+#'   \item "Public" = Contact with ANY public sector source (1=yes, 0=no)
+#'   \item "Private" = Contact with ANY private sector source (1=yes, 0=no)
+#'   \item "None" = No care sought from any source (1=yes, 0=no)
 #' }
 #'
 #' \strong{Interpretation:} A child who visited both a government clinic AND
-#' a pharmacy is categorized as "public" because public takes precedence.
-#' This means "private" represents children who ONLY sought private care.
+#' a pharmacy is counted in both dhs_csb_public AND dhs_csb_private.
+#' Only dhs_csb_none is mutually exclusive with the other two.
 #'
 #' \strong{Source Configuration:}
 #' The h32 variable meanings vary by country survey. Check your survey's
-#' documentation and adjust `source_config` accordingly. Default mappings:
+#' documentation and adjust `source_config` accordingly. Default mappings
+#' follow DHS-7 Recode Manual standards:
 #' \itemize{
-#'   \item Public (h32a-h32i): Government hospital, health center, etc.
-#'   \item Private (h32j-h32s): Private clinic, pharmacy, private doctor, etc.
-#'   \item Excluded (h32t, h32w): Traditional practitioners
+#'   \item Public (h32a-h32i): Government hospital, health center, health post
+#'   \item Private (h32j-h32r): Private hospital/clinic, pharmacy, private doctor
+#'   \item Excluded (h32s-h32x): Shop/market, traditional practitioners, other sources
 #' }
+#' Note: NGO medical sector (h32na-h32ne) was added in DHS-8. For surveys using
+#' DHS-8, you may need to add these to the private or public category as appropriate.
 #'
 #' @export
 calc_csb_dhs_core <- function(
@@ -83,8 +77,8 @@ calc_csb_dhs_core <- function(
   ),
   source_config = list(
     public = c("h32a", "h32b", "h32c", "h32d", "h32e", "h32f", "h32g", "h32h", "h32i"),
-    private = c("h32j", "h32k", "h32l", "h32m", "h32n", "h32o", "h32p", "h32q", "h32r", "h32s"),
-    excluded = c("h32t", "h32w")
+    private = c("h32j", "h32k", "h32l", "h32m", "h32n", "h32o", "h32p", "h32q", "h32r"),
+    excluded = c("h32s", "h32t", "h32u", "h32v", "h32w", "h32x")
   ),
   gps_data = NULL,
   gps_vars = list(
@@ -207,6 +201,10 @@ calc_csb_dhs_core <- function(
   }
 
   # Filter to children who had fever
+  # Note: We do NOT filter by child survival status (b5) because:
+  # 1. Fever in last 2 weeks implies the child was alive recently
+
+  # 2. This matches standard DHS analysis methodology
   kr_fever <- kr_eligible |>
     dplyr::filter(had_fever == 1)
 
@@ -216,36 +214,16 @@ calc_csb_dhs_core <- function(
     )
   }
 
-  # Filter to living children only (per DHS standard methodology)
-  if (has_alive) {
-    n_before <- nrow(kr_fever)
-    kr_fever <- kr_fever |>
-      dplyr::filter(is.na(child_alive) | child_alive == 1)
-    n_excluded <- n_before - nrow(kr_fever)
-    if (n_excluded > 0) {
-      cli::cli_alert_info(
-        "Excluded {n_excluded} deceased children (b5=0) per DHS methodology"
-      )
-    }
-  }
-
-  if (nrow(kr_fever) == 0) {
-    cli::cli_abort(
-      "No living children with fever found after applying survival filter."
-    )
-  }
-
   cli::cli_alert_info(
-    "Found {nrow(kr_fever)} children with fever out of {nrow(kr_eligible)} eligible children"
+    "Found {format(nrow(kr_fever), big.mark = ',')} children with fever out of {format(nrow(kr_eligible), big.mark = ',')} eligible children"
   )
 
   # ---- 3. Create care-seeking variables -------------------------------------
-  # IMPORTANT: This creates MUTUALLY EXCLUSIVE categories with a precedence rule.
-  # This is a DERIVED indicator, NOT standard DHS methodology.
-  # Precedence: public > private > none
-  # - "public" = child contacted ANY public source (even if also used private)
-  # - "private" = child contacted private sources ONLY (no public contact)
-  # - "none" = child did not seek care from any allowed source
+  # IMPORTANT: This creates OVERLAPPING indicators matching standard DHS methodology.
+  # - "is_public" = child contacted ANY public source (1=yes, 0=no)
+  # - "is_private" = child contacted ANY private source (1=yes, 0=no)
+  # - "is_none" = child did not seek care from any source (1=yes, 0=no)
+  # Note: public + private can exceed 100% if child sought both types of care
 
   # Helper function to check if ANY source in a set equals 1
   # Returns TRUE/FALSE (not 0/1) for use in logical operations
@@ -257,10 +235,10 @@ calc_csb_dhs_core <- function(
     })
   }
 
-  # Create mutually exclusive care_category with precedence rule
+  # Create overlapping care-seeking indicators (standard DHS methodology)
   kr_fever <- kr_fever |>
     dplyr::mutate(
-      # First, determine which sectors were contacted
+      # Determine which sectors were contacted (TRUE/FALSE)
       has_public = has_any_source(
         dplyr::pick(dplyr::all_of(public_cols)),
         public_cols
@@ -270,28 +248,21 @@ calc_csb_dhs_core <- function(
         private_cols
       ),
 
-      # Apply precedence rule: public > private > none
-      # This creates a SINGLE mutually exclusive category
-      care_category = dplyr::case_when(
-        has_public ~ "public",     # Public takes precedence (even if private also used)
-        has_private ~ "private",   # Private ONLY (no public contact)
-        TRUE ~ "none"              # Neither public nor private
-      ),
-
-      # Create dummy variables from the category for survey estimation
-      # These dummies sum to 1 by construction
-      is_public = as.numeric(care_category == "public"),
-      is_private = as.numeric(care_category == "private"),
-      is_none = as.numeric(care_category == "none")
+      # Create overlapping indicators directly from sector contact
+      # These are INDEPENDENT - a child can have is_public=1 AND is_private=1
+      is_public = as.numeric(.data$has_public),
+      is_private = as.numeric(.data$has_private),
+      is_none = as.numeric(!.data$has_public & !.data$has_private)
     )
 
-  # Log distribution for diagnostic purposes
-  cat_dist <- kr_fever |>
-    dplyr::count(care_category) |>
-    dplyr::mutate(pct = round(n / sum(n) * 100, 1))
+  # Log distribution for diagnostic purposes (unweighted)
+  n_total <- nrow(kr_fever)
+  n_public <- sum(kr_fever$is_public, na.rm = TRUE)
+  n_private <- sum(kr_fever$is_private, na.rm = TRUE)
+  n_none <- sum(kr_fever$is_none, na.rm = TRUE)
 
   cli::cli_alert_info(
-    "Care category distribution (unweighted): public={cat_dist$pct[cat_dist$care_category == 'public']}%, private={cat_dist$pct[cat_dist$care_category == 'private']}%, none={cat_dist$pct[cat_dist$care_category == 'none']}%"
+    "Care-seeking (unweighted): public={round(n_public/n_total*100, 1)}%, private={round(n_private/n_total*100, 1)}%, none={round(n_none/n_total*100, 1)}%"
   )
 
   # ---- 4. Join GPS and shapefile if provided --------------------------------
@@ -386,7 +357,7 @@ calc_csb_dhs_core <- function(
 
       if (any(unmatched)) {
         cli::cli_alert_info(
-          "Assigning {sum(unmatched)} clusters to nearest admin units"
+          "Assigning {format(sum(unmatched), big.mark = ',')} clusters to nearest admin units"
         )
 
         nearest_idx <- sf::st_nearest_feature(
@@ -477,7 +448,7 @@ calc_csb_dhs_core <- function(
 
   if (single_psu_strata > 0) {
     cli::cli_alert_info(
-      "Found {single_psu_strata} strata with single PSU; using certainty option"
+      "Found {format(single_psu_strata, big.mark = ',')} strata with single PSU; using certainty option"
     )
   }
 
@@ -636,27 +607,27 @@ calc_csb_dhs_core <- function(
       dhs_csb_none_upp = `ci_u.is_none`
     )
 
-  # Convert to percentages
+  # Round proportions (keep as 0-1 scale, not percentages)
   csb_cols <- names(csb_results)[grepl("^dhs_csb_", names(csb_results))]
 
   csb_results <- csb_results |>
     dplyr::mutate(
       dplyr::across(
         dplyr::all_of(csb_cols),
-        ~ round(.x * 100, 1)
+        ~ round(.x, 2)
       )
     )
 
-  # Derive "any care" = 100 - none (by construction, any = public + private)
+  # Derive "any care" = 1 - none (by construction, any = public OR private)
   csb_results <- csb_results |>
     dplyr::mutate(
-      dhs_csb_any = 100 - dhs_csb_none,
-      # CI is inverted: low of "any" = 100 - high of "none"
-      dhs_csb_any_low = 100 - dhs_csb_none_upp,
-      dhs_csb_any_upp = 100 - dhs_csb_none_low
+      dhs_csb_any = 1 - dhs_csb_none,
+      # CI is inverted: low of "any" = 1 - high of "none"
+      dhs_csb_any_low = 1 - dhs_csb_none_upp,
+      dhs_csb_any_upp = 1 - dhs_csb_none_low
     )
 
-  # Ensure confidence intervals stay within [0, 100]
+  # Ensure confidence intervals stay within [0, 1]
   csb_results <- csb_results |>
     dplyr::mutate(
       dplyr::across(
@@ -665,7 +636,7 @@ calc_csb_dhs_core <- function(
       ),
       dplyr::across(
         dplyr::matches("_upp$"),
-        ~ pmin(100, .)
+        ~ pmin(1, .)
       )
     )
 
@@ -726,6 +697,18 @@ calc_csb_dhs_core <- function(
   )
 
   col_order <- intersect(col_order, names(csb_results))
+
+  # Ensure count columns are integers
+  count_cols <- c("dhs_n_fever", "dhs_n_public", "dhs_n_private", "dhs_n_none")
+  count_cols <- intersect(count_cols, names(csb_results))
+
+  csb_results <- csb_results |>
+    dplyr::mutate(
+      dplyr::across(
+        dplyr::all_of(count_cols),
+        ~ as.integer(round(.x))
+      )
+    )
 
   # Exclude admin_class from final output (keep sample sizes though)
   exclude_cols <- c("admin_class")
@@ -919,8 +902,8 @@ calc_csb_dhs <- function(
   ),
   source_config = list(
     public = c("h32a", "h32b", "h32c", "h32d", "h32e", "h32f", "h32g", "h32h", "h32i"),
-    private = c("h32j", "h32k", "h32l", "h32m", "h32n", "h32o", "h32p", "h32q", "h32r", "h32s"),
-    excluded = c("h32t", "h32w")
+    private = c("h32j", "h32k", "h32l", "h32m", "h32n", "h32o", "h32p", "h32q", "h32r"),
+    excluded = c("h32s", "h32t", "h32u", "h32v", "h32w", "h32x")
   ),
   gps_data = NULL,
   gps_vars = list(

@@ -308,7 +308,7 @@ calc_severe_anemia_dhs_core <- function(
 
   n_severe <- sum(pr_tested$severe_anemia == 1, na.rm = TRUE)
   cli::cli_alert_info(
-    "Found {nrow(pr_tested)} children with valid Hb measurements; {n_severe} ({round(n_severe/nrow(pr_tested)*100, 1)}%) with severe anemia"
+    "Found {format(nrow(pr_tested), big.mark = ',')} children with valid Hb measurements; {format(n_severe, big.mark = ',')} ({round(n_severe/nrow(pr_tested)*100, 1)}%) with severe anemia"
   )
 
   # ---- 5. Survey design ---------------------------------------------------
@@ -367,9 +367,9 @@ calc_severe_anemia_dhs_core <- function(
       dhs_severe_anemia_upp = ci_u
     ) |>
     dplyr::mutate(
-      dhs_severe_anemia = round(dhs_severe_anemia * 100, 1),
-      dhs_severe_anemia_low = pmax(0, round(dhs_severe_anemia_low * 100, 1)),
-      dhs_severe_anemia_upp = pmin(100, round(dhs_severe_anemia_upp * 100, 1))
+      dhs_severe_anemia = round(dhs_severe_anemia, 2),
+      dhs_severe_anemia_low = pmax(0, round(dhs_severe_anemia_low, 2)),
+      dhs_severe_anemia_upp = pmin(1, round(dhs_severe_anemia_upp, 2))
     )
 
   # ---- 8. Calculate sample sizes ------------------------------------------
@@ -704,7 +704,7 @@ calc_severe_anemia_dhs <- function(
 
     if (any(unmatched)) {
       cli::cli_alert_info(
-        "Assigning {sum(unmatched)} clusters to nearest admin units."
+        "Assigning {format(sum(unmatched), big.mark = ',')} clusters to nearest admin units."
       )
 
       nearest_idx <- sf::st_nearest_feature(
@@ -745,23 +745,22 @@ calc_severe_anemia_dhs <- function(
     ) |>
     dplyr::mutate(
       dhs_severe_anemia_se = sqrt(
-        (dhs_severe_anemia / 100 * (1 - dhs_severe_anemia / 100)) /
-          dhs_n_tested_hb
-      ) * 100,
+        (dhs_severe_anemia * (1 - dhs_severe_anemia)) / dhs_n_tested_hb
+      ),
       dhs_severe_anemia_low = pmax(
         0,
         dhs_severe_anemia - 1.96 * dhs_severe_anemia_se
       ),
       dhs_severe_anemia_upp = pmin(
-        100,
+        1,
         dhs_severe_anemia + 1.96 * dhs_severe_anemia_se
       )
     ) |>
     dplyr::select(-dhs_severe_anemia_se) |>
     dplyr::mutate(
-      dhs_severe_anemia = round(dhs_severe_anemia, 1),
-      dhs_severe_anemia_low = round(dhs_severe_anemia_low, 1),
-      dhs_severe_anemia_upp = round(dhs_severe_anemia_upp, 1),
+      dhs_severe_anemia = round(dhs_severe_anemia, 2),
+      dhs_severe_anemia_low = round(dhs_severe_anemia_low, 2),
+      dhs_severe_anemia_upp = round(dhs_severe_anemia_upp, 2),
       dhs_n_tested_hb = as.integer(dhs_n_tested_hb),
       dhs_n_severe_anemia = as.integer(dhs_n_severe_anemia)
     )

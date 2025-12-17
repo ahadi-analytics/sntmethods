@@ -63,8 +63,8 @@ test_that("calc_severe_anemia_dhs_core calculates correct prevalence", {
   expect_true("dhs_n_tested_hb" %in% names(result))
   expect_true("dhs_n_severe_anemia" %in% names(result))
 
-  # Check values
-  expect_equal(result$dhs_severe_anemia, 30)
+  # Check values (proportions 0-1)
+  expect_equal(result$dhs_severe_anemia, 0.30)
   expect_equal(result$dhs_n_tested_hb, 10)
   expect_equal(result$dhs_n_severe_anemia, 3)
 })

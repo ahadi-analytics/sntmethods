@@ -456,7 +456,7 @@ calc_wealth_dhs_core <- function(
 
       if (any(unmatched)) {
         cli::cli_alert_info(
-          "assigning {sum(unmatched)} clusters to nearest admin units."
+          "Assigning {format(sum(unmatched), big.mark = ',')} clusters to nearest admin units."
         )
 
         nearest_idx <- sf::st_nearest_feature(
@@ -602,12 +602,12 @@ calc_wealth_dhs_core <- function(
       )
   }
 
-  # Convert proportions to percentages and round
+  # Round proportions (keep as 0-1 scale)
   wealth_dist <- wealth_dist |>
     dplyr::mutate(
       dplyr::across(
         dplyr::all_of(quintile_labels),
-        ~ round(.x * 100, 1)
+        ~ round(.x, 2)
       ),
       dhs_gini = round(dhs_gini, 3),
       dhs_gini_reliable = dhs_gini_sample_size >= 25

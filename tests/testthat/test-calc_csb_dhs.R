@@ -95,22 +95,22 @@ test_that("calc_csb_dhs_core works with multiple h32 sources", {
   expect_true("dhs_csb_none" %in% names(result))
   expect_true("dhs_n_fever" %in% names(result))
 
-  # Check that all percentages are between 0 and 100
-  expect_true(all(result$dhs_csb_any >= 0 & result$dhs_csb_any <= 100, na.rm = TRUE))
-  expect_true(all(result$dhs_csb_public >= 0 & result$dhs_csb_public <= 100, na.rm = TRUE))
-  expect_true(all(result$dhs_csb_private >= 0 & result$dhs_csb_private <= 100, na.rm = TRUE))
-  expect_true(all(result$dhs_csb_none >= 0 & result$dhs_csb_none <= 100, na.rm = TRUE))
+  # Check that all proportions are between 0 and 1
+  expect_true(all(result$dhs_csb_any >= 0 & result$dhs_csb_any <= 1, na.rm = TRUE))
+  expect_true(all(result$dhs_csb_public >= 0 & result$dhs_csb_public <= 1, na.rm = TRUE))
+  expect_true(all(result$dhs_csb_private >= 0 & result$dhs_csb_private <= 1, na.rm = TRUE))
+  expect_true(all(result$dhs_csb_none >= 0 & result$dhs_csb_none <= 1, na.rm = TRUE))
 
   # Check that confidence intervals are within bounds
   expect_true(all(result$dhs_csb_any_low >= 0, na.rm = TRUE))
-  expect_true(all(result$dhs_csb_any_upp <= 100, na.rm = TRUE))
+  expect_true(all(result$dhs_csb_any_upp <= 1, na.rm = TRUE))
 
-  # Check that sought_any + sought_none approximately equals 100
+  # Check that sought_any + sought_none approximately equals 1
   # (allowing for rounding)
-  expect_true(all(abs(result$dhs_csb_any + result$dhs_csb_none - 100) < 1, na.rm = TRUE))
+  expect_true(all(abs(result$dhs_csb_any + result$dhs_csb_none - 1) < 0.01, na.rm = TRUE))
 })
 
-test_that("calc_csb_dhs_core filters out deceased children", {
+test_that("calc_csb_dhs_core includes all children with fever (no survival filter)", {
   skip_if_not_installed("survey")
 
   set.seed(456)
@@ -133,12 +133,13 @@ test_that("calc_csb_dhs_core filters out deceased children", {
   kr_data$h32j <- ifelse(kr_data$h22 == 1,
     sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE), NA)
 
-  # Count expected fever cases (living children only)
-  expected_fever <- sum(kr_data$h22 == 1 & kr_data$b5 == 1)
+  # Count ALL children with fever (no survival filter per standard DHS methodology)
+  expected_fever <- sum(kr_data$h22 == 1)
 
   result <- calc_csb_dhs_core(kr_data)
 
-  # The sample size should reflect only living children
+  # The sample size should include all children with fever
+  # (fever in last 2 weeks implies child was alive recently)
   expect_equal(result$dhs_n_fever, expected_fever)
 })
 
@@ -380,15 +381,15 @@ test_that("calc_csb_dhs_core handles multiple admin levels", {
 test_that("aggregate_csb_admin works with mock data", {
   skip_if_not_installed("sf")
 
-  # Create mock cluster results
+  # Create mock cluster results (proportions 0-1)
   cluster_results <- data.frame(
     cluster_id = 1:6,
     lat = c(-8.5, -8.3, -8.7, -8.4, -8.6, -8.2),
     lon = c(-11.2, -11.0, -11.5, -11.3, -11.1, -11.4),
-    dhs_csb_any = c(65.2, 72.1, 58.3, 70.5, 62.8, 68.9),
-    dhs_csb_public = c(25.5, 30.2, 22.1, 28.7, 24.3, 27.5),
-    dhs_csb_private = c(45.2, 50.1, 38.5, 48.3, 41.2, 46.8),
-    dhs_csb_none = c(34.8, 27.9, 41.7, 29.5, 37.2, 31.1),
+    dhs_csb_any = c(0.652, 0.721, 0.583, 0.705, 0.628, 0.689),
+    dhs_csb_public = c(0.255, 0.302, 0.221, 0.287, 0.243, 0.275),
+    dhs_csb_private = c(0.452, 0.501, 0.385, 0.483, 0.412, 0.468),
+    dhs_csb_none = c(0.348, 0.279, 0.417, 0.295, 0.372, 0.311),
     dhs_n_fever = c(25, 30, 28, 22, 26, 24)
   )
 
@@ -429,8 +430,8 @@ test_that("aggregate_csb_admin works with mock data", {
   expect_true("adm1_name" %in% names(result))
   expect_equal(nrow(result), 2)  # Two regions
 
-  # Check that aggregated values are reasonable
-  expect_true(all(result$dhs_csb_any >= 0 & result$dhs_csb_any <= 100))
+  # Check that aggregated values are reasonable (proportions 0-1)
+  expect_true(all(result$dhs_csb_any >= 0 & result$dhs_csb_any <= 1))
   expect_true(all(result$dhs_n_fever > 0))
 })
 
@@ -464,12 +465,13 @@ test_that("calc_csb_dhs_core produces consistent results", {
   expect_equal(result1$dhs_n_fever, result2$dhs_n_fever)
 })
 
-test_that("calc_csb_dhs_core calculates mutually exclusive categories with precedence", {
+test_that("calc_csb_dhs_core calculates overlapping indicators (standard DHS methodology)", {
   skip_if_not_installed("survey")
 
   # Create data where we can verify the calculation
   # 10 children with fever, each visited different combinations of sources
-  # With precedence rule: public > private > none
+  # With OVERLAPPING indicators (standard DHS methodology):
+  # - A child can be counted in BOTH public AND private if they visited both
   kr_data <- data.frame(
     v021 = 1:10,
     v005 = rep(1000000, 10),
@@ -477,10 +479,10 @@ test_that("calc_csb_dhs_core calculates mutually exclusive categories with prece
     hw1 = rep(24, 10),
     h22 = rep(1, 10),  # All have fever
     b5 = rep(1, 10),   # All alive
-    # Child 1-3: visited public only (h32a or h32b) → category: "public"
-    # Child 4-6: visited private only (h32j) → category: "private"
-    # Child 7-8: visited BOTH public and private → category: "public" (precedence!)
-    # Child 9-10: visited none → category: "none"
+    # Child 1-3: visited public only (h32a or h32b)
+    # Child 4-6: visited private only (h32j)
+    # Child 7-8: visited BOTH public and private
+    # Child 9-10: visited none
     h32a = c(1, 0, 0, 0, 0, 0, 1, 0, 0, 0),
     h32b = c(0, 1, 1, 0, 0, 0, 0, 1, 0, 0),
     h32j = c(0, 0, 0, 1, 1, 1, 1, 1, 0, 0)
@@ -488,26 +490,28 @@ test_that("calc_csb_dhs_core calculates mutually exclusive categories with prece
 
   result <- calc_csb_dhs_core(kr_data)
 
-  # Categories are MUTUALLY EXCLUSIVE:
-  # - Public: children 1,2,3,7,8 = 5/10 = 50%
-  # - Private: children 4,5,6 = 3/10 = 30% (NOT 50%, because 7,8 are counted as public!)
-  # - None: children 9,10 = 2/10 = 20%
-  # - Any: public + private = 80%
+  # With OVERLAPPING indicators (standard DHS methodology):
+  # - Public: children 1,2,3,7,8 = 5/10 = 0.5
+  # - Private: children 4,5,6,7,8 = 5/10 = 0.5 (includes children who visited BOTH!)
+  # - None: children 9,10 = 2/10 = 0.2
+  # - Any: all who visited any = 8/10 = 0.8
 
-  expect_equal(result$dhs_csb_public, 50)
-  expect_equal(result$dhs_csb_private, 30)
-  expect_equal(result$dhs_csb_none, 20)
-  expect_equal(result$dhs_csb_any, 80)
+  expect_equal(result$dhs_csb_public, 0.5)
+  expect_equal(result$dhs_csb_private, 0.5)  # Overlapping - includes children 7,8
 
-  # CRITICAL: Categories must sum to 100% by construction
-  expect_equal(result$dhs_csb_public + result$dhs_csb_private + result$dhs_csb_none, 100)
+  expect_equal(result$dhs_csb_none, 0.2)
+  expect_equal(result$dhs_csb_any, 0.8)
+
+  # NOTE: With overlapping indicators, public + private + none does NOT need to sum to 1
+  # (public + private can exceed 1 when children visit both sectors)
+  expect_equal(result$dhs_csb_public + result$dhs_csb_private + result$dhs_csb_none, 1.2)
 })
 
-test_that("care categories are mutually exclusive - all visited both sectors", {
+test_that("overlapping indicators - all visited both sectors", {
   skip_if_not_installed("survey")
 
   # All children visited BOTH public AND private
-  # With precedence rule, all should be classified as "public"
+  # With overlapping indicators (standard DHS), they are counted in BOTH categories
   kr_data <- data.frame(
     v021 = 1:10,              # 10 clusters
     v005 = rep(1000000, 10),
@@ -521,12 +525,13 @@ test_that("care categories are mutually exclusive - all visited both sectors", {
 
   result <- calc_csb_dhs_core(kr_data)
 
-  # With public precedence, ALL should be classified as "public"
-  expect_equal(result$dhs_csb_public, 100)
-  expect_equal(result$dhs_csb_private, 0)
+  # With overlapping indicators (standard DHS methodology):
+  # ALL children are counted in BOTH public AND private
+  expect_equal(result$dhs_csb_public, 1)
+  expect_equal(result$dhs_csb_private, 1)  # Also 1 - overlapping!
   expect_equal(result$dhs_csb_none, 0)
-  expect_equal(result$dhs_csb_any, 100)
+  expect_equal(result$dhs_csb_any, 1)
 
-  # Sum must be 100%
-  expect_equal(result$dhs_csb_public + result$dhs_csb_private + result$dhs_csb_none, 100)
+  # With overlapping indicators, sum exceeds 1 when children visit both sectors
+  expect_equal(result$dhs_csb_public + result$dhs_csb_private + result$dhs_csb_none, 2)
 })

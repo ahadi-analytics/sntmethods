@@ -183,7 +183,8 @@ for (admin_level in admin_levels) {
 dhs_dict <- sntutils::build_dictionary(
   dhs_data_by_level[["adm2"]],
   language = "fr"
-)
+) |>
+  dplyr::select(variable, type, label_en, label_fr)
 
 final_dhs_output <- list(
   data_adm1 = dhs_data_by_level[["adm1"]],

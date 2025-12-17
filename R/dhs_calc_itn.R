@@ -1321,7 +1321,7 @@ calc_itn_dhs_core <- function(
     dplyr::mutate(
       dplyr::across(
         dplyr::all_of(itn_indicator_cols),
-        ~ round(.x * 100, 1)
+        ~ round(.x, 2)
       )
     )
 
@@ -1333,7 +1333,7 @@ calc_itn_dhs_core <- function(
       ),
       dplyr::across(
         dplyr::matches("_upp$"),
-        ~ base::pmin(100, .)
+        ~ base::pmin(1, .)
       )
     )
 

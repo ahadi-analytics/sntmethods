@@ -160,14 +160,14 @@ test_that("calc_itn_dhs calculates correct indicators at cluster level", {
   expect_true("lat" %in% names(result$data))
   expect_true("lon" %in% names(result$data))
 
-  # Ownership should be 2/3 for cluster 1, 3/3 for cluster 2
+  # Ownership should be 2/3 for cluster 1, 3/3 for cluster 2 (proportions 0-1)
   expect_equal(
-    round(result$data$dhs_itn_ownership[result$data$cluster_id == 1], 0),
-    67
+    round(result$data$dhs_itn_ownership[result$data$cluster_id == 1], 2),
+    0.67
   )
   expect_equal(
-    round(result$data$dhs_itn_ownership[result$data$cluster_id == 2], 0),
-    100
+    round(result$data$dhs_itn_ownership[result$data$cluster_id == 2], 2),
+    1.00
   )
 
   # Check sample sizes

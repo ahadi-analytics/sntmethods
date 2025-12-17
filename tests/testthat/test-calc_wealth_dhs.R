@@ -56,11 +56,12 @@ test_that("calc_wealth_dhs calculates correct proportions", {
 
   result <- calc_wealth_dhs(dhs_hr = mock_hr)
 
-  expect_equal(result$data$dhs_prop_poorest, 20)
-  expect_equal(result$data$dhs_prop_poorer, 20)
-  expect_equal(result$data$dhs_prop_middle, 20)
-  expect_equal(result$data$dhs_prop_richer, 20)
-  expect_equal(result$data$dhs_prop_richest, 20)
+  # Proportions are 0-1 scale
+  expect_equal(result$data$dhs_prop_poorest, 0.20)
+  expect_equal(result$data$dhs_prop_poorer, 0.20)
+  expect_equal(result$data$dhs_prop_middle, 0.20)
+  expect_equal(result$data$dhs_prop_richer, 0.20)
+  expect_equal(result$data$dhs_prop_richest, 0.20)
 })
 
 test_that("calc_wealth_dhs identifies dominant quintile correctly", {
