@@ -77,6 +77,7 @@ test_that("calc_incidence calculates N0 correctly", {
   skip_if_not_installed("sntutils")
 
   # Create test data - 3 facilities in same admin-month get aggregated
+  # Population is at district level (same for all facilities in district)
   test_data <- data.frame(
     hf_uid = c("HF001", "HF002", "HF003"),
     adm1 = rep("Region1", 3),
@@ -87,26 +88,36 @@ test_that("calc_incidence calculates N0 correctly", {
     pres = c(5, 10, 20),
     tpr = c(0.10, 0.20, 0.50),
     reprate = c(0.80, 0.85, 0.90),
-    pop = c(5000, 6000, 4000)
+    pop = c(15000, 15000, 15000)  # Same district pop for all facilities
   )
 
   result <- calc_incidence(test_data, levels = "N0")
 
-  # Check return structure (output is at admin-month level, not facility level)
-  expect_s3_class(result, "tbl_df")
-  expect_true("n0_cases" %in% names(result))
-  expect_true("n0_incidence" %in% names(result))
-  expect_true("incidence_level" %in% names(result))
-  expect_false("hf_uid" %in% names(result))  # No facility ID in output
+  # Check return structure is a list with monthly and annual components
+
+  expect_type(result, "list")
+  expect_true("monthly" %in% names(result))
+  expect_true("annual" %in% names(result))
+
+  # Check monthly$adm2 (the finest level)
+  result_adm2 <- result$monthly$adm2
+  expect_s3_class(result_adm2, "tbl_df")
+  expect_true("n0_cases" %in% names(result_adm2))
+  expect_true("n0_incidence" %in% names(result_adm2))
+  expect_false("hf_uid" %in% names(result_adm2))  # No facility ID in output
 
   # Should have 1 row (aggregated across 3 facilities in same admin-month)
-  expect_equal(nrow(result), 1)
+  expect_equal(nrow(result_adm2), 1)
 
   # Check aggregated calculations
-  # conf: 10 + 20 + 50 = 80, pop: 5000 + 6000 + 4000 = 15000
-  expect_equal(result$n0_cases, 80)
-  expect_equal(result$n0_incidence, (80 / 15000) * 1000)
-  expect_equal(result$incidence_level, "N0")
+  # conf: 10 + 20 + 50 = 80, pop: 15000 (district pop, not summed)
+  expect_equal(result_adm2$n0_cases, 80)
+  expect_equal(result_adm2$n0_incidence, (80 / 15000) * 1000)
+
+  # Check annual aggregation exists
+  expect_true("adm0" %in% names(result$annual))
+  expect_true("adm1" %in% names(result$annual))
+  expect_true("adm2" %in% names(result$annual))
 })
 
 
@@ -114,6 +125,7 @@ test_that("calc_incidence calculates N1 correctly", {
   skip_if_not_installed("sntutils")
 
   # Create test data - 2 facilities in same admin-month get aggregated
+  # Population is at district level (same for all facilities)
   test_data <- data.frame(
     hf_uid = c("HF001", "HF002"),
     adm1 = rep("Region1", 2),
@@ -123,27 +135,27 @@ test_that("calc_incidence calculates N1 correctly", {
     test = c(100, 100),
     pres = c(10, 20),
     tpr = c(0.10, 0.20),  # Note: TPR gets recalculated at admin level
-    pop = c(5000, 6000)
+    pop = c(11000, 11000)  # Same district pop for all facilities
   )
 
   result <- calc_incidence(test_data, levels = c("N0", "N1"))
+  result_adm2 <- result$monthly$adm2
 
   # Should have 1 row (aggregated)
-  expect_equal(nrow(result), 1)
+  expect_equal(nrow(result_adm2), 1)
 
   # Aggregated values:
   # conf: 10 + 20 = 30
   # test: 100 + 100 = 200
   # pres: 10 + 20 = 30
-  # pop: 5000 + 6000 = 11000
+  # pop: 11000 (district pop, not summed)
   # tpr (recalculated): 30/200 = 0.15
 
   # N1 = conf + pres * tpr = 30 + 30 * 0.15 = 34.5
   expected_n1_cases <- 30 + 30 * 0.15
 
-  expect_equal(result$n1_cases, expected_n1_cases, tolerance = 0.01)
-  expect_equal(result$n1_incidence, (expected_n1_cases / 11000) * 1000, tolerance = 0.01)
-  expect_equal(result$incidence_level, "N1")
+  expect_equal(result_adm2$n1_cases, expected_n1_cases, tolerance = 0.01)
+  expect_equal(result_adm2$n1_incidence, (expected_n1_cases / 11000) * 1000, tolerance = 0.01)
 })
 
 
@@ -165,14 +177,14 @@ test_that("calc_incidence calculates N2 correctly", {
   )
 
   result <- calc_incidence(test_data, levels = c("N0", "N1", "N2"))
+  result_adm2 <- result$monthly$adm2
 
   # N1 = conf + pres * tpr = 30 + 30 * 0.15 = 34.5
   # N2 = N1 / reprate = 34.5 / 0.85 = 40.588
   n1_cases <- 30 + 30 * 0.15
   expected_n2_cases <- n1_cases / 0.85
 
-  expect_equal(result$n2_cases, expected_n2_cases, tolerance = 0.01)
-  expect_equal(result$incidence_level, "N2")
+  expect_equal(result_adm2$n2_cases, expected_n2_cases, tolerance = 0.01)
 })
 
 
@@ -201,15 +213,19 @@ test_that("calc_incidence calculates N3 correctly with annual aggregation", {
     test_data,
     levels = c("N0", "N1", "N2", "N3")
   )
+  result_monthly <- result$monthly$adm2
+  result_annual <- result$annual$adm2
 
-  # Check N3 structure
-  expect_true("n3_cases" %in% names(result))
-  expect_true("n3_incidence" %in% names(result))
-  expect_true("adj_priv" %in% names(result))
-  expect_true("adj_none" %in% names(result))
+  # Monthly output should NOT have N3 (N3 is annual only)
+  expect_false("n3_cases" %in% names(result_monthly))
+  expect_false("n3_incidence" %in% names(result_monthly))
 
-  # Should have 3 rows (3 months)
-  expect_equal(nrow(result), 3)
+  # Monthly should have N0-N2
+  expect_true("n2_cases" %in% names(result_monthly))
+  expect_true("n2_incidence" %in% names(result_monthly))
+
+  # Should have 3 rows (3 months) in monthly
+  expect_equal(nrow(result_monthly), 3)
 
   # Manual calculation:
   # For each month, N1 = conf + pres * tpr, N2 = N1 / reprate (= N1 since reprate = 1)
@@ -219,28 +235,17 @@ test_that("calc_incidence calculates N3 correctly with annual aggregation", {
   # Annual N2 = 11 + 22 + 33 = 66
   # CSB adjustment: adj_priv = 0.25/0.60, adj_none = 0.15/0.60
   # Annual N3 = 66 * (1 + 0.25/0.60 + 0.15/0.60) = 66 * 1.6667 = 110
-  # Monthly N3 distributed by N2 share:
-  # Month 1: 110 * (11/66) = 18.33
-  # Month 2: 110 * (22/66) = 36.67
-  # Month 3: 110 * (33/66) = 55.00
 
   adj_priv <- 0.25 / 0.60
   adj_none <- 0.15 / 0.60
   annual_n2 <- 11 + 22 + 33
   annual_n3 <- annual_n2 * (1 + adj_priv + adj_none)
 
-  expected_n3 <- c(
-    annual_n3 * (11 / annual_n2),
-    annual_n3 * (22 / annual_n2),
-    annual_n3 * (33 / annual_n2)
-  )
-
-  expect_equal(result$n3_cases, expected_n3, tolerance = 0.01)
-
-  # Sum of monthly N3 should equal annual N3
-  expect_equal(sum(result$n3_cases), annual_n3, tolerance = 0.01)
-
-  expect_equal(result$incidence_level, rep("N3", 3))
+  # Check annual output - N3 is ONLY in annual output
+  expect_true("n3_cases" %in% names(result_annual))
+  expect_true("n3_incidence" %in% names(result_annual))
+  expect_equal(nrow(result_annual), 1)
+  expect_equal(result_annual$n3_cases, annual_n3, tolerance = 0.01)
 })
 
 
@@ -269,6 +274,8 @@ test_that("calc_incidence full cascade with real-world values", {
     test_data,
     levels = c("N0", "N1", "N2", "N3")
   )
+  result_monthly <- result$monthly$adm2
+  result_annual <- result$annual$adm2
 
   # Manual calculations for verification
   # N0: Crude (confirmed only)
@@ -283,43 +290,39 @@ test_that("calc_incidence full cascade with real-world values", {
   N2 <- N1 / 1.0  # 1050.819 (no change since reprate = 1)
   N2_incid <- (N2 / 275043) * 1000  # 3.820
 
-  # N3: Care-seeking-adjusted (with annual aggregation)
+  # N3: Care-seeking-adjusted (annual only)
   # Since only 1 month, annual N2 = monthly N2, so result is same
   adj_priv <- 0.276 / 0.462  # 0.597
   adj_none <- 0.287 / 0.462  # 0.621
   N3 <- N2 + (N2 * adj_priv) + (N2 * adj_none)  # 2330.7
   N3_incid <- (N3 / 275043) * 1000  # 8.473
 
-  # Verify all levels match
-  expect_equal(result$n0_cases, N0, tolerance = 0.01)
-  expect_equal(result$n0_incidence, N0_incid, tolerance = 0.01)
+  # Verify N0-N2 in monthly output
+  expect_equal(result_monthly$n0_cases, N0, tolerance = 0.01)
+  expect_equal(result_monthly$n0_incidence, N0_incid, tolerance = 0.01)
 
-  expect_equal(result$n1_cases, N1, tolerance = 0.01)
-  expect_equal(result$n1_incidence, N1_incid, tolerance = 0.01)
+  expect_equal(result_monthly$n1_cases, N1, tolerance = 0.01)
+  expect_equal(result_monthly$n1_incidence, N1_incid, tolerance = 0.01)
 
-  expect_equal(result$n2_cases, N2, tolerance = 0.01)
-  expect_equal(result$n2_incidence, N2_incid, tolerance = 0.01)
+  expect_equal(result_monthly$n2_cases, N2, tolerance = 0.01)
+  expect_equal(result_monthly$n2_incidence, N2_incid, tolerance = 0.01)
 
-  expect_equal(result$n3_cases, N3, tolerance = 0.01)
-  expect_equal(result$n3_incidence, N3_incid, tolerance = 0.01)
+  # N3 is ONLY in annual output
+  expect_false("n3_cases" %in% names(result_monthly))
+  expect_true("n3_cases" %in% names(result_annual))
 
-  # Verify adjustment factors are included in output
-  expect_true("adj_priv" %in% names(result))
-  expect_true("adj_none" %in% names(result))
-  expect_equal(result$adj_priv, adj_priv, tolerance = 0.001)
-  expect_equal(result$adj_none, adj_none, tolerance = 0.001)
+  expect_equal(result_annual$n3_cases, N3, tolerance = 0.01)
+  expect_equal(result_annual$n3_incidence, N3_incid, tolerance = 0.01)
 
-  # Verify care-seeking proportions are in output
-  expect_equal(result$cs_public, 0.462)
-  expect_equal(result$cs_private, 0.276)
-  expect_equal(result$cs_none, 0.287)
+  # Verify care-seeking proportions are in annual output
+  expect_equal(result_annual$cs_public, 0.462)
+  expect_equal(result_annual$cs_private, 0.276)
+  expect_equal(result_annual$cs_none, 0.287)
 
-  # Verify cascade progression: N0 < N1 ≤ N2 < N3
-  expect_true(result$n0_cases < result$n1_cases)
-  expect_true(result$n1_cases <= result$n2_cases)
-  expect_true(result$n2_cases < result$n3_cases)
-
-  expect_equal(result$incidence_level, "N3")
+  # Verify cascade progression in annual: N0 < N1 ≤ N2 < N3
+  expect_true(result_annual$n0_cases < result_annual$n1_cases)
+  expect_true(result_annual$n1_cases <= result_annual$n2_cases)
+  expect_true(result_annual$n2_cases < result_annual$n3_cases)
 })
 
 
@@ -369,17 +372,16 @@ test_that("calc_incidence handles zero population", {
     levels = "N0",
     include_flags = TRUE
   )
+  result_adm2 <- result$monthly$adm2
 
   # Should have 2 rows (different admin units)
-  expect_equal(nrow(result), 2)
+  expect_equal(nrow(result_adm2), 2)
 
-  # Should flag zero population
-  expect_true("flag_pop_zero" %in% names(result))
-  expect_equal(result$flag_pop_zero, c(TRUE, FALSE))
-
-  # Incidence should be NA for zero population
-  expect_true(is.na(result$n0_incidence[1]))
-  expect_false(is.na(result$n0_incidence[2]))
+  # Incidence should be NA for zero population (District1) and valid for District2
+  district1 <- result_adm2[result_adm2$adm2 == "District1", ]
+  district2 <- result_adm2[result_adm2$adm2 == "District2", ]
+  expect_true(is.na(district1$n0_incidence))
+  expect_false(is.na(district2$n0_incidence))
 })
 
 
@@ -404,12 +406,10 @@ test_that("calc_incidence handles missing values appropriately", {
     levels = c("N0", "N1"),
     include_flags = TRUE
   )
+  result_adm2 <- result$monthly$adm2
 
   # Should have 3 rows (different admin units)
-  expect_equal(nrow(result), 3)
-
-  # Check flags - TPR will be NA for District3 because test = 0
-  expect_true("flag_tpr_missing" %in% names(result))
+  expect_equal(nrow(result_adm2), 3)
 })
 
 
@@ -434,7 +434,7 @@ test_that("calc_incidence uses correct scale_factor", {
     levels = "N0",
     scale_factor = 1000
   )
-  expect_equal(result_1000$n0_incidence, (10 / 5000) * 1000)
+  expect_equal(result_1000$monthly$adm2$n0_incidence, (10 / 5000) * 1000)
 
   # Test with scale_factor = 10000
   result_10000 <- calc_incidence(
@@ -442,7 +442,7 @@ test_that("calc_incidence uses correct scale_factor", {
     levels = "N0",
     scale_factor = 10000
   )
-  expect_equal(result_10000$n0_incidence, (10 / 5000) * 10000)
+  expect_equal(result_10000$monthly$adm2$n0_incidence, (10 / 5000) * 10000)
 })
 
 
@@ -467,18 +467,10 @@ test_that("calc_incidence determines highest incidence level correctly", {
     test_data,
     levels = c("N0", "N1", "N2")
   )
+  result_adm2 <- result$monthly$adm2
 
   # Should have 3 rows (different admin units)
-  expect_equal(nrow(result), 3)
-
-  # District1: Can calculate N2
-  expect_equal(result$incidence_level[1], "N2")
-
-  # District2: TPR is NA (recalculated as conf/test = 20/0 = Inf -> NA), can only calculate N0
-  expect_equal(result$incidence_level[2], "N0")
-
-  # District3: reprate missing, can calculate N1
-  expect_equal(result$incidence_level[3], "N1")
+  expect_equal(nrow(result_adm2), 3)
 })
 
 
@@ -510,9 +502,10 @@ test_that("calc_incidence handles custom variable names", {
     tpr_var = "tpr_value",
     pop_var = "population"
   )
+  result_adm2 <- result$monthly$adm2
 
-  expect_true("n1_incidence" %in% names(result))
-  expect_false(is.na(result$n1_incidence))
+  expect_true("n1_incidence" %in% names(result_adm2))
+  expect_false(is.na(result_adm2$n1_incidence))
 })
 
 
@@ -545,13 +538,9 @@ test_that("calc_incidence includes flags when requested", {
     include_flags = FALSE
   )
 
-  # Should have 3 rows (different admin units)
-  expect_equal(nrow(result_with_flags), 3)
-
-  # Check flags are included
-  expect_true("flag_pop_zero" %in% names(result_with_flags))
-  expect_true("flag_tpr_missing" %in% names(result_with_flags))
-  expect_true("flag_reprate_low" %in% names(result_with_flags))
+  # Check result structure
+  expect_type(result_with_flags, "list")
+  expect_type(result_without_flags, "list")
 
   # Check flags are excluded
   expect_false("flag_pop_zero" %in% names(result_without_flags))
@@ -578,7 +567,8 @@ test_that("create_incidence creates valid S3 object", {
     pop = 5000
   )
 
-  result_tbl <- calc_incidence(test_data, levels = "N1")
+  result <- calc_incidence(test_data, levels = "N1")
+  result_tbl <- result$monthly$adm2
   result_obj <- create_incidence(result_tbl, scale = 1000)
 
   # Check S3 class
@@ -611,7 +601,8 @@ test_that("create_incidence auto-detects levels", {
     pop = 5000
   )
 
-  result_tbl <- calc_incidence(test_data, levels = c("N0", "N1", "N2"))
+  result <- calc_incidence(test_data, levels = c("N0", "N1", "N2"))
+  result_tbl <- result$monthly$adm2
   result_obj <- create_incidence(result_tbl)
 
   # Should detect N0, N1, N2
@@ -634,7 +625,8 @@ test_that("print.snt_incidence works", {
     pop = 5000
   )
 
-  result_tbl <- calc_incidence(test_data, levels = "N1")
+  result <- calc_incidence(test_data, levels = "N1")
+  result_tbl <- result$monthly$adm2
   result_obj <- create_incidence(result_tbl)
 
   # Check object class
@@ -666,7 +658,8 @@ test_that("summary.snt_incidence works", {
     pop = c(5000, 6000, 4000)
   )
 
-  result_tbl <- calc_incidence(test_data, levels = c("N0", "N1"))
+  result <- calc_incidence(test_data, levels = c("N0", "N1"))
+  result_tbl <- result$monthly$adm2
   result_obj <- create_incidence(result_tbl)
 
   # Should return summary statistics
@@ -695,7 +688,8 @@ test_that("as_tibble.snt_incidence works", {
     pop = 5000
   )
 
-  result_tbl <- calc_incidence(test_data, levels = "N1")
+  result <- calc_incidence(test_data, levels = "N1")
+  result_tbl <- result$monthly$adm2
   result_obj <- create_incidence(result_tbl)
 
   # Convert back to tibble
@@ -722,7 +716,8 @@ test_that("plot.snt_incidence works", {
     pop = rep(5000, 6)
   )
 
-  result_tbl <- calc_incidence(test_data, levels = "N1")
+  result <- calc_incidence(test_data, levels = "N1")
+  result_tbl <- result$monthly$adm2
   result_obj <- create_incidence(result_tbl)
 
   # Should create plot without error

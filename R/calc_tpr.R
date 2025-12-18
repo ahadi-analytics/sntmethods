@@ -28,12 +28,12 @@
 #'   (default: "conf").
 #' @param test_var Column name for number of individuals tested
 #'   (default: "test").
-#' @param pres_var Column name for number of presumed cases (default: "pres").
 #' @param reporting_threshold Numeric threshold for minimum reporting rate
 #'   used when calculating district-level proxies. Facility-months from
 #'   districts with reporting rate below this value are excluded from proxy
-#'   calculations but kept in output. Default is 0.8 (80%). Reporting rate
-#'   is calculated internally using `sntutils::calculate_reporting_metrics()`.
+#'   calculations but kept in output. Default is 0.8 (80%). Set to NULL to
+#'   disable reporting rate threshold checks. Reporting rate is calculated
+#'   internally using `sntutils::calculate_reporting_metrics()`.
 #' @param extreme_threshold Numeric vector of length 2 specifying lower and
 #'   upper bounds for flagging extreme TPR values (default: `c(0.01, 0.99)`).
 #' @param include_flags Logical; if `TRUE`, includes all quality flag columns
@@ -52,8 +52,8 @@
 #'   average from same facility), "adm2" (district-level), "adm1" (regional-level),
 #'   "prev_year" (same month previous year), "adm0" (national-level).
 #'   Default is `c("rolling", "adm2", "prev_year", "adm1", "adm0")`. Proxies are
-#'   applied sequentially in the order specified. Set to `character(0)` to disable
-#'   all fallbacks.
+#'   applied sequentially in the order specified. Set to NULL to disable
+#'   all fallbacks (raw TPR only).
 #' @param prev_year_window Integer specifying the seasonal window in months
 #'   for previous year fallback. 0 = exact month match only (default), 1 = +/-1
 #'   month window (3-month average), 2 = +/-2 months (5-month average), etc.
@@ -63,10 +63,10 @@
 #'   fallbacks. Valid options: "missing" (conf/test is NA), "extreme" (TPR
 #'   outside extreme_threshold), "low_test" (test < 5), "low_reprate"
 #'   (reporting rate < threshold). Default is
-#'   `c("missing", "extreme", "low_test", "low_reprate"`. Note: impossible
-#'   values (conf > test) are now included in fallback by default, along with
-#'   missing values. Inactive facilities are always excluded from fallback.
-#'   Multiple triggers can be combined.
+#'   `c("missing", "extreme", "low_test", "low_reprate")`. Set to NULL to
+#'   disable all triggers (keep raw TPR values without replacement).
+#'   Note: impossible values (conf > test) are always included in fallback
+#'   along with missing values. Inactive facilities are always excluded.
 #'
 #' @return A list containing three elements:
 #'   \itemize{
@@ -81,7 +81,6 @@
 #'         \item `month`: Month extracted from date
 #'         \item `conf`: Confirmed cases
 #'         \item `test`: Number tested
-#'         \item `pres`: Presumed cases
 #'         \item `reprate`: Reporting rate (0-1 scale)
 #'         \item `tpr`: Final validated or proxy TPR (0-1 scale)
 #'         \item `tpr_source`: Source of TPR value (facility_raw, proxy_adm2,
@@ -108,7 +107,6 @@
 #' #   date = as.Date(c("2023-01-01", "2023-02-01", "2023-01-01")),
 #' #   conf = c(10, 15, NA),
 #' #   test = c(100, 120, 80),
-#' #   pres = c(5, 8, 10),
 #' #   report_complete = c(1, 1, 1)
 #' # )
 #' #
@@ -127,8 +125,7 @@ calc_tpr <- function(
   date_var = "date",
   conf_var = "conf",
   test_var = "test",
-  pres_var = "pres",
-  reporting_threshold = .80,
+  reporting_threshold = 0.80,
   extreme_threshold = c(0.01, 0.99),
   include_flags = FALSE,
   activity_indicators = c("conf", "test"),
@@ -154,8 +151,7 @@ calc_tpr <- function(
     adm2_var,
     date_var,
     conf_var,
-    test_var,
-    pres_var
+    test_var
   )
 
   missing_cols <- setdiff(required, names(data))
@@ -184,6 +180,12 @@ calc_tpr <- function(
     )
   }
 
+
+  # Handle NULL for fallback_method (treat as disabled)
+  if (is.null(fallback_method)) {
+    fallback_method <- character(0)
+  }
+
   # Validate fallback_method
   valid_methods <- c("adm2", "adm1", "prev_year", "adm0", "rolling")
   invalid_methods <- setdiff(fallback_method, valid_methods)
@@ -205,6 +207,11 @@ calc_tpr <- function(
 
   if (prev_year_window < 0 || prev_year_window > 6) {
     cli::cli_abort("`prev_year_window` must be between 0 and 6.")
+  }
+
+  # Handle NULL for fallback_triggers (treat as disabled)
+  if (is.null(fallback_triggers)) {
+    fallback_triggers <- character(0)
   }
 
   # Validate fallback_triggers
@@ -299,8 +306,15 @@ calc_tpr <- function(
   # Diagnostics
   n_na_reprate <- sum(is.na(data$reprate))
   n_zero_reprate <- sum(data$reprate == 0, na.rm = TRUE)
-  n_low_reprate <- sum(!is.na(data$reprate) & data$reprate < reporting_threshold,
-                       na.rm = TRUE)
+
+  if (!is.null(reporting_threshold)) {
+    n_low_reprate <- sum(
+      !is.na(data$reprate) & data$reprate < reporting_threshold,
+      na.rm = TRUE
+    )
+  } else {
+    n_low_reprate <- 0
+  }
 
   if (n_na_reprate > 0) {
     cli::cli_alert_info(
@@ -315,7 +329,7 @@ calc_tpr <- function(
     )
   }
 
-  if (n_low_reprate > 0) {
+  if (n_low_reprate > 0 && !is.null(reporting_threshold)) {
     cli::cli_alert_info(
       "{sntutils::big_mark(n_low_reprate)} facility-months in districts below ",
       "{reporting_threshold * 100}% reporting threshold."
@@ -331,13 +345,11 @@ calc_tpr <- function(
     adm2 = !!adm2_var,
     date_raw = !!date_var,
     conf = !!conf_var,
-    test = !!test_var,
-    pres = !!pres_var
+    test = !!test_var
   ) |>
   dplyr::mutate(
     conf = as.numeric(conf),
-    test = as.numeric(test),
-    pres = as.numeric(pres)
+    test = as.numeric(test)
   )
 
   # ---- adm0 handling -------------------------------------------------------
@@ -411,7 +423,11 @@ calc_tpr <- function(
     flag_zero_test = test == 0,
     flag_low_test = !is.na(test) & test < 5,
     flag_missing_conf = is.na(conf),
-    flag_low_reprate = !is.na(reprate) & reprate < reporting_threshold,
+    flag_low_reprate = if (!is.null(reporting_threshold)) {
+      !is.na(reprate) & reprate < reporting_threshold
+    } else {
+      FALSE
+    },
     test = dplyr::if_else(test == 0, NA_real_, test)
   )
 
@@ -894,7 +910,6 @@ calc_tpr <- function(
     "month",
     "conf",
     "test",
-    "pres",
     "reprate",
     "tpr",
     "tpr_source"

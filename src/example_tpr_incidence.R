@@ -175,7 +175,7 @@ validate_tpr_proxies(
 
 
   # Step 2: Create S3 object
-  incid_obj <- create_incidence(incid, scale = 1000, )
+  incid_obj <- create_incidence(incid, scale = 1000)
 
   # Step 3: Explore
   print(incid_obj)        # Overview
