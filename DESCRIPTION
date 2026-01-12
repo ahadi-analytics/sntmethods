@@ -1,6 +1,6 @@
 Package: sntmethods
 Title: Analytical Methods for Sub-National Tailoring Workflows
-Version: 0.0.1
+Version: 0.7.1
 Authors@R: c(
     person("Mohamed A.", "Yusuf",
            role = c("aut", "cre"),
@@ -35,6 +35,7 @@ Suggests:
     fs (>= 1.6.6),
     janitor (>= 2.2.1),
     lubridate (>= 1.9.4),
+    zoo (>= 1.8.15),
     purrr (>= 1.2.0),
     rlang (>= 1.1.6),
     sf (>= 1.0.22),

@@ -1,7 +1,7 @@
-#' Calculate Care-Seeking Behavior from DHS Data
+#' Calculate Care-Seeking Behavior from DHS Data (WMR Methodology)
 #'
 #' Estimates care-seeking behavior for febrile children under 5 using
-#' overlapping indicators matching standard DHS methodology.
+#' the WHO World Malaria Report (WMR) methodology with overlapping indicators.
 #'
 #' @param dhs_kr DHS children's recode (KR) dataset in tidy format
 #'   (data.frame or tibble).
@@ -12,17 +12,25 @@
 #'     \item `stratum`: Stratum variable (default: "v022")
 #'     \item `age`: Child's age in months (default: "hw1")
 #'     \item `fever`: Had fever in last 2 weeks (default: "h22")
-#'     \item `alive`: Child survival status (default: "b5", not used for filtering)
+#'     \item `alive`: Child survival status (default: "b5"). NOTE: WMR
+#'       methodology assumes filtering to living children (b5 == 1) is done
+#'       upstream. This function does NOT filter by alive status.
 #'   }
-#' @param source_config Named list specifying country-specific source
-#'   configuration:
+#' @param csb_classification Data frame specifying h32 variable to CSB category
+#'   mapping. Must have columns:
+#'   \itemize{
+#'     \item `variable`: h32 variable name (e.g., "h32a", "h32j")
+#'     \item `csb`: Category - one of: "public", "chw", "private_formal",
+#'       "private_informal", "pharmacy"
+#'   }
+#'   If NULL, uses default WMR classification. See Details for category
+#'   meanings.
+#' @param source_config **Deprecated**. Use `csb_classification` instead.
+#'   Legacy parameter for backwards compatibility. Named list with:
 #'   \itemize{
 #'     \item `public`: Character vector of h32 codes for public sector
-#'       (default: h32a-h32i for govt hospital, health center, health post)
-#'     \item `private`: Character vector of h32 codes for private medical sector
-#'       (default: h32j-h32r for private hospital, clinic, pharmacy, doctor)
-#'     \item `excluded`: Character vector of h32 codes to exclude from care-seeking
-#'       (default: h32s-h32x for shop/market, traditional practitioners, other)
+#'     \item `private`: Character vector of h32 codes for private sector
+#'     \item `excluded`: Character vector of h32 codes to exclude
 #'   }
 #' @param gps_data Optional DHS GPS dataset with cluster coordinates.
 #' @param gps_vars Named list for GPS variables (cluster, lat, lon).
@@ -37,32 +45,41 @@
 #'   confidence intervals and sample sizes.
 #'
 #' @details
-#' This function uses overlapping indicators matching standard DHS methodology.
-#' A child visiting both public and private sources is counted in BOTH
-#' categories. This means public + private can exceed 100%.
+#' This function implements the WHO World Malaria Report (WMR) methodology
+#' for care-seeking behavior analysis.
 #'
-#' \strong{Indicator Definitions:}
+#' \strong{WMR 5-Category Classification:}
 #' \itemize{
-#'   \item "Public" = Contact with ANY public sector source (1=yes, 0=no)
-#'   \item "Private" = Contact with ANY private sector source (1=yes, 0=no)
-#'   \item "None" = No care sought from any source (1=yes, 0=no)
+#'   \item `public`: Government health facilities (hospitals, health
+#'     centers, posts)
+#'   \item `chw`: Community health workers (often NGO sector in DHS-8)
+#'   \item `private_formal`: Private hospitals, clinics, and doctors
+#'   \item `private_informal`: Traditional practitioners and other
+#'     informal sources
+#'   \item `pharmacy`: Pharmacies and drug shops
 #' }
 #'
-#' \strong{Interpretation:} A child who visited both a government clinic AND
-#' a pharmacy is counted in both dhs_csb_public AND dhs_csb_private.
-#' Only dhs_csb_none is mutually exclusive with the other two.
-#'
-#' \strong{Source Configuration:}
-#' The h32 variable meanings vary by country survey. Check your survey's
-#' documentation and adjust `source_config` accordingly. Default mappings
-#' follow DHS-7 Recode Manual standards:
+#' \strong{Derived Indicators (OVERLAPPING):}
+#' These indicators are NOT mutually exclusive. A child can be counted in
+#' multiple categories if they visited multiple source types.
 #' \itemize{
-#'   \item Public (h32a-h32i): Government hospital, health center, health post
-#'   \item Private (h32j-h32r): Private hospital/clinic, pharmacy, private doctor
-#'   \item Excluded (h32s-h32x): Shop/market, traditional practitioners, other sources
+#'   \item `dhs_csb_public`: Public sector care (public OR chw)
+#'   \item `dhs_csb_private`: Any private sector care (private_formal OR
+#'     private_informal OR pharmacy)
+#'   \item `dhs_csb_trained`: Trained provider (public OR private_formal
+#'     OR pharmacy)
+#'   \item `dhs_csb_any`: Any treatment sought (public OR private)
+#'   \item `dhs_csb_none`: No treatment sought (NOT any)
 #' }
-#' Note: NGO medical sector (h32na-h32ne) was added in DHS-8. For surveys using
-#' DHS-8, you may need to add these to the private or public category as appropriate.
+#'
+#' \strong{Important:} Only `dhs_csb_any` and `dhs_csb_none` are mutually
+#' exclusive. The equation `dhs_csb_any + dhs_csb_none = 1` always holds.
+#' However, `dhs_csb_public + dhs_csb_private + dhs_csb_none` may exceed
+#' 1.0 when children visit both public and private sources.
+#'
+#' @references
+#' WHO. World Malaria Report. Geneva: World Health Organization.
+#' \url{https://www.who.int/teams/global-malaria-programme/reports}
 #'
 #' @export
 calc_csb_dhs_core <- function(
@@ -75,11 +92,8 @@ calc_csb_dhs_core <- function(
     fever = "h22",
     alive = "b5"
   ),
-  source_config = list(
-    public = c("h32a", "h32b", "h32c", "h32d", "h32e", "h32f", "h32g", "h32h", "h32i"),
-    private = c("h32j", "h32k", "h32l", "h32m", "h32n", "h32o", "h32p", "h32q", "h32r"),
-    excluded = c("h32s", "h32t", "h32u", "h32v", "h32w", "h32x")
-  ),
+  csb_classification = NULL,
+  source_config = NULL,
   gps_data = NULL,
   gps_vars = list(
     cluster = "DHSCLUST",
@@ -125,52 +139,101 @@ calc_csb_dhs_core <- function(
   }
 
   # Auto-detect available h32 treatment source variables
-  available_h32 <- grep("^h32[a-z]$", names(dhs_kr), value = TRUE)
+  # Pattern includes digits for DHS-8 NGO sector variables (h32na, h32nb, etc.)
+  available_h32 <- grep("^h32[a-z0-9]+$", names(dhs_kr), value = TRUE)
 
   if (length(available_h32) == 0) {
     cli::cli_abort(
       c(
         "No h32 treatment-seeking variables found in data.",
         "i" = "Expected variables like h32a, h32b, h32c, etc.",
-        "i" = "Check that your DHS KR data includes care-seeking source variables"
+        "i" = "Check your DHS KR data includes care-seeking variables"
       )
     )
   }
 
   cli::cli_alert_info(
-    "Detected {length(available_h32)} h32 source variables: {paste(available_h32, collapse = ', ')}"
+    "Detected {length(available_h32)} h32 source variables"
   )
 
-  # Determine which sources to use for each sector from source_config
-  public_cols <- intersect(source_config$public, available_h32)
-  private_cols <- intersect(source_config$private, available_h32)
-  excluded_cols <- intersect(source_config$excluded, available_h32)
+  # ---- 2. Handle classification parameter ------------------------------------
 
-  if (length(public_cols) == 0) {
+  # Handle backwards compatibility and defaults
+  if (!is.null(source_config) && is.null(csb_classification)) {
+    # Legacy source_config provided - convert to classification
     cli::cli_alert_warning(
-      "No public sector sources found in data from source_config$public"
+      "source_config is deprecated. Use csb_classification instead."
     )
-  }
-  if (length(private_cols) == 0) {
-    cli::cli_alert_warning(
-      "No private sector sources found in data from source_config$private"
-    )
-  }
-
-  cli::cli_alert_info(
-    "Public sources ({length(public_cols)}): {paste(public_cols, collapse = ', ')}"
-  )
-
-  cli::cli_alert_info(
-    "Private sources ({length(private_cols)}): {paste(private_cols, collapse = ', ')}"
-  )
-  if (length(excluded_cols) > 0) {
+    csb_classification <- .convert_source_config(source_config)
     cli::cli_alert_info(
-      "Excluded sources ({length(excluded_cols)}): {paste(excluded_cols, collapse = ', ')}"
+      "Converted source_config to csb_classification format"
+    )
+  } else if (is.null(csb_classification)) {
+    # Neither provided - use WMR default
+    csb_classification <- .default_csb_classification()
+    cli::cli_alert_info(
+      "Using default WMR csb_classification"
     )
   }
 
-  # ---- 2. Prepare base dataset ----------------------------------------------
+  # Validate csb_classification
+  if (!is.data.frame(csb_classification)) {
+    cli::cli_abort("`csb_classification` must be a data.frame")
+  }
+
+  if (!all(c("variable", "csb") %in% names(csb_classification))) {
+    cli::cli_abort(
+      c(
+        "`csb_classification` must have columns: variable, csb",
+        "i" = "Got columns: {.var {names(csb_classification)}}"
+      )
+    )
+  }
+
+  valid_csb_values <- c(
+    "public", "chw", "private_formal",
+    "private_informal", "pharmacy"
+  )
+  invalid_csb <- setdiff(unique(csb_classification$csb), valid_csb_values)
+
+  if (length(invalid_csb) > 0) {
+    cli::cli_abort(
+      c(
+        "Invalid csb values: {.val {invalid_csb}}",
+        "i" = "Valid values: {.val {valid_csb_values}}"
+      )
+    )
+  }
+
+  # Filter classification to only include variables present in data
+  csb_classification <- csb_classification |>
+    dplyr::filter(variable %in% available_h32)
+
+  if (nrow(csb_classification) == 0) {
+    class_vars <- unique(csb_classification$variable)
+    cli::cli_abort(
+      c(
+        "No h32 variables from csb_classification found in data.",
+        "i" = "Available h32 variables: {.var {available_h32}}",
+        "i" = "Classification variables: {.var {class_vars}}"
+      )
+    )
+  }
+
+  # Log which categories are available
+  categories_found <- unique(csb_classification$csb)
+  cli::cli_alert_info(
+    "CSB categories found: {paste(categories_found, collapse = ', ')}"
+  )
+
+  for (cat in categories_found) {
+    cat_vars <- csb_classification$variable[csb_classification$csb == cat]
+    cli::cli_alert_info(
+      "  {cat} ({length(cat_vars)}): {paste(cat_vars, collapse = ', ')}"
+    )
+  }
+
+  # ---- 3. Prepare base dataset ----------------------------------------------
 
   # Check if alive variable exists
   has_alive <- !is.null(survey_vars$alive) &&
@@ -201,10 +264,6 @@ calc_csb_dhs_core <- function(
   }
 
   # Filter to children who had fever
-  # Note: We do NOT filter by child survival status (b5) because:
-  # 1. Fever in last 2 weeks implies the child was alive recently
-
-  # 2. This matches standard DHS analysis methodology
   kr_fever <- kr_eligible |>
     dplyr::filter(had_fever == 1)
 
@@ -215,57 +274,127 @@ calc_csb_dhs_core <- function(
   }
 
   cli::cli_alert_info(
-    "Found {format(nrow(kr_fever), big.mark = ',')} children with fever out of {format(nrow(kr_eligible), big.mark = ',')} eligible children"
+    paste0(
+      "Found {format(nrow(kr_fever), big.mark = ',')} children with fever ",
+      "out of {format(nrow(kr_eligible), big.mark = ',')} eligible children"
+    )
   )
 
-  # ---- 3. Create care-seeking variables -------------------------------------
-  # IMPORTANT: This creates OVERLAPPING indicators matching standard DHS methodology.
-  # - "is_public" = child contacted ANY public source (1=yes, 0=no)
-  # - "is_private" = child contacted ANY private source (1=yes, 0=no)
-  # - "is_none" = child did not seek care from any source (1=yes, 0=no)
-  # Note: public + private can exceed 100% if child sought both types of care
+  # ---- 4. Create care-seeking indicators (WMR methodology) -----------------
+  # This implements the WHO World Malaria Report methodology:
+  # 1. Reshape h32 variables to long format
 
-  # Helper function to check if ANY source in a set equals 1
-  # Returns TRUE/FALSE (not 0/1) for use in logical operations
-  has_any_source <- function(data, cols) {
-    if (length(cols) == 0) return(rep(FALSE, nrow(data)))
-    source_matrix <- as.matrix(data[, cols, drop = FALSE])
-    apply(source_matrix, 1, function(row) {
-      any(row == 1, na.rm = TRUE)
-    })
+  # 2. Join to classification table
+  # 3. Aggregate to 5 base categories per child
+  # 4. Create derived overlapping indicators
+
+  # Add row ID for joining back after reshape
+  kr_fever <- kr_fever |>
+    dplyr::mutate(.row_id = dplyr::row_number())
+
+  # Get h32 columns that are in our classification
+  h32_cols <- intersect(csb_classification$variable, names(kr_fever))
+
+  # Reshape h32 to long format and join to classification
+  kr_long <- kr_fever |>
+    dplyr::select(.row_id, dplyr::all_of(h32_cols)) |>
+    tidyr::pivot_longer(
+      cols = dplyr::all_of(h32_cols),
+      names_to = "variable",
+      values_to = "visited"
+    ) |>
+    dplyr::left_join(
+      csb_classification |> dplyr::select(variable, csb),
+      by = "variable"
+    ) |>
+    dplyr::filter(visited == 1)  # Keep only sources that were visited
+
+  # Aggregate to base categories per child
+  if (nrow(kr_long) > 0) {
+    base_cats <- kr_long |>
+      dplyr::group_by(.row_id, csb) |>
+      dplyr::summarise(visited = 1L, .groups = "drop") |>
+      tidyr::pivot_wider(
+        names_from = csb,
+        values_from = visited,
+        values_fill = 0L,
+        names_prefix = "has_"
+      )
+
+    # Join back to main data
+    kr_fever <- kr_fever |>
+      dplyr::left_join(base_cats, by = ".row_id")
   }
 
-  # Create overlapping care-seeking indicators (standard DHS methodology)
+  # Ensure all 5 base categories exist (even if no children visited them)
+  base_category_cols <- c(
+    "has_public", "has_chw", "has_private_formal",
+    "has_private_informal", "has_pharmacy"
+  )
+
+  for (col in base_category_cols) {
+    if (!col %in% names(kr_fever)) {
+      kr_fever[[col]] <- 0L
+    }
+    # Replace NA with 0 (children who had fever but visited no sources)
+    kr_fever[[col]] <- tidyr::replace_na(kr_fever[[col]], 0L)
+  }
+
+  # Create derived indicators (WMR methodology)
   kr_fever <- kr_fever |>
     dplyr::mutate(
-      # Determine which sectors were contacted (TRUE/FALSE)
-      has_public = has_any_source(
-        dplyr::pick(dplyr::all_of(public_cols)),
-        public_cols
-      ),
-      has_private = has_any_source(
-        dplyr::pick(dplyr::all_of(private_cols)),
-        private_cols
+      # csb_public = public OR chw
+      csb_public = as.numeric(has_public == 1 | has_chw == 1),
+
+      # csb_private = private_formal OR private_informal OR pharmacy
+      csb_private = as.numeric(
+        has_private_formal == 1 |
+        has_private_informal == 1 |
+        has_pharmacy == 1
       ),
 
-      # Create overlapping indicators directly from sector contact
-      # These are INDEPENDENT - a child can have is_public=1 AND is_private=1
-      is_public = as.numeric(.data$has_public),
-      is_private = as.numeric(.data$has_private),
-      is_none = as.numeric(!.data$has_public & !.data$has_private)
+      # csb_private_formal_pha = private_formal OR pharmacy
+      csb_private_formal_pha = as.numeric(
+        has_private_formal == 1 |
+        has_pharmacy == 1
+      ),
+
+      # csb_any_treatment = csb_public OR csb_private
+      csb_any_treatment = as.numeric(csb_public == 1 | csb_private == 1),
+
+      # csb_no_treatment = NOT(csb_any_treatment)
+      csb_no_treatment = as.numeric(csb_any_treatment == 0),
+
+      # csb_trained_provider = csb_public OR csb_private_formal_pha
+      csb_trained_provider = as.numeric(
+        csb_public == 1 |
+        csb_private_formal_pha == 1
+      )
     )
+
+  # Verify mathematical invariant: any + none must equal 1
+  stopifnot(
+    all(kr_fever$csb_any_treatment + kr_fever$csb_no_treatment == 1)
+  )
 
   # Log distribution for diagnostic purposes (unweighted)
   n_total <- nrow(kr_fever)
-  n_public <- sum(kr_fever$is_public, na.rm = TRUE)
-  n_private <- sum(kr_fever$is_private, na.rm = TRUE)
-  n_none <- sum(kr_fever$is_none, na.rm = TRUE)
+  n_public <- sum(kr_fever$csb_public, na.rm = TRUE)
+  n_private <- sum(kr_fever$csb_private, na.rm = TRUE)
+  n_none <- sum(kr_fever$csb_no_treatment, na.rm = TRUE)
+  n_trained <- sum(kr_fever$csb_trained_provider, na.rm = TRUE)
 
   cli::cli_alert_info(
-    "Care-seeking (unweighted): public={round(n_public/n_total*100, 1)}%, private={round(n_private/n_total*100, 1)}%, none={round(n_none/n_total*100, 1)}%"
+    paste0(
+      "Care-seeking (unweighted): ",
+      "public={round(n_public/n_total*100, 1)}%, ",
+      "private={round(n_private/n_total*100, 1)}%, ",
+      "none={round(n_none/n_total*100, 1)}%, ",
+      "trained={round(n_trained/n_total*100, 1)}%"
+    )
   )
 
-  # ---- 4. Join GPS and shapefile if provided --------------------------------
+  # ---- 5. Join GPS and shapefile if provided --------------------------------
 
   class_var <- NULL
 
@@ -356,8 +485,9 @@ calc_csb_dhs_core <- function(
       unmatched <- is.na(cluster_admin[[admin_level[1]]])
 
       if (any(unmatched)) {
+        n_unmatched <- format(sum(unmatched), big.mark = ",")
         cli::cli_alert_info(
-          "Assigning {format(sum(unmatched), big.mark = ',')} clusters to nearest admin units"
+          "Assigning {n_unmatched} clusters to nearest admin units"
         )
 
         nearest_idx <- sf::st_nearest_feature(
@@ -424,7 +554,7 @@ calc_csb_dhs_core <- function(
     }
   }
 
-  # ---- 5. Set up survey design ----------------------------------------------
+  # ---- 6. Set up survey design ----------------------------------------------
 
   if (!is.null(class_var)) {
     cli::cli_alert_info(
@@ -447,8 +577,9 @@ calc_csb_dhs_core <- function(
   single_psu_strata <- sum(strata_check$n_clusters == 1)
 
   if (single_psu_strata > 0) {
+    n_strata <- format(single_psu_strata, big.mark = ",")
     cli::cli_alert_info(
-      "Found {format(single_psu_strata, big.mark = ',')} strata with single PSU; using certainty option"
+      "Found {n_strata} strata with single PSU; using certainty option"
     )
   }
 
@@ -475,9 +606,8 @@ calc_csb_dhs_core <- function(
     )
   }
 
-  # ---- 6. Calculate care-seeking indicators ---------------------------------
-  # Use the dummy variables (is_public, is_private, is_none) for survey estimation
-  # These dummies sum to 1 by construction (mutually exclusive categories)
+  # ---- 7. Calculate care-seeking indicators ---------------------------------
+  # Use the WMR derived indicators for survey estimation
 
   # Determine grouping
   if (!is.null(class_var)) {
@@ -486,8 +616,9 @@ calc_csb_dhs_core <- function(
     group_formula <- ~1
   }
 
-  # Formula for svyby using the mutually exclusive dummy variables
-  indicator_formula <- ~ is_public + is_private + is_none
+  # Formula for svyby using WMR indicators
+  indicator_formula <- ~ csb_public + csb_private +
+    csb_no_treatment + csb_trained_provider
 
   # Calculate proportions
   if (!is.null(class_var)) {
@@ -504,7 +635,10 @@ calc_csb_dhs_core <- function(
 
       if (single_cluster_groups > 0) {
         cli::cli_alert_warning(
-          "{single_cluster_groups} admin unit(s) have only one cluster; variance estimates may be unreliable"
+          paste0(
+            "{single_cluster_groups} admin unit(s) have only one cluster; ",
+            "variance estimates may be unreliable"
+          )
         )
       }
     }
@@ -553,29 +687,32 @@ calc_csb_dhs_core <- function(
 
     csb_results <- tibble::tibble(
       level = "National",
-      is_public = as.numeric(csb_means["is_public"]),
-      `ci_l.is_public` = csb_ci["is_public", 1],
-      `ci_u.is_public` = csb_ci["is_public", 2],
-      is_private = as.numeric(csb_means["is_private"]),
-      `ci_l.is_private` = csb_ci["is_private", 1],
-      `ci_u.is_private` = csb_ci["is_private", 2],
-      is_none = as.numeric(csb_means["is_none"]),
-      `ci_l.is_none` = csb_ci["is_none", 1],
-      `ci_u.is_none` = csb_ci["is_none", 2]
+      csb_public = as.numeric(csb_means["csb_public"]),
+      `ci_l.csb_public` = csb_ci["csb_public", 1],
+      `ci_u.csb_public` = csb_ci["csb_public", 2],
+      csb_private = as.numeric(csb_means["csb_private"]),
+      `ci_l.csb_private` = csb_ci["csb_private", 1],
+      `ci_u.csb_private` = csb_ci["csb_private", 2],
+      csb_no_treatment = as.numeric(csb_means["csb_no_treatment"]),
+      `ci_l.csb_no_treatment` = csb_ci["csb_no_treatment", 1],
+      `ci_u.csb_no_treatment` = csb_ci["csb_no_treatment", 2],
+      csb_trained_provider = as.numeric(csb_means["csb_trained_provider"]),
+      `ci_l.csb_trained_provider` = csb_ci["csb_trained_provider", 1],
+      `ci_u.csb_trained_provider` = csb_ci["csb_trained_provider", 2]
     )
   }
 
-  # ---- 7. Calculate sample sizes --------------------------------------------
-  # Sample sizes by mutually exclusive category
+  # ---- 8. Calculate sample sizes --------------------------------------------
 
   if (!is.null(class_var)) {
     sample_sizes <- kr_fever |>
       dplyr::group_by(.data[[class_var]]) |>
       dplyr::summarise(
         dhs_n_fever = dplyr::n(),
-        dhs_n_public = sum(is_public == 1, na.rm = TRUE),
-        dhs_n_private = sum(is_private == 1, na.rm = TRUE),
-        dhs_n_none = sum(is_none == 1, na.rm = TRUE),
+        dhs_n_public = sum(csb_public == 1, na.rm = TRUE),
+        dhs_n_private = sum(csb_private == 1, na.rm = TRUE),
+        dhs_n_none = sum(csb_no_treatment == 1, na.rm = TRUE),
+        dhs_n_trained = sum(csb_trained_provider == 1, na.rm = TRUE),
         .groups = "drop"
       )
 
@@ -586,25 +723,37 @@ calc_csb_dhs_core <- function(
       )
   } else {
     csb_results$dhs_n_fever <- nrow(kr_fever)
-    csb_results$dhs_n_public <- sum(kr_fever$is_public == 1, na.rm = TRUE)
-    csb_results$dhs_n_private <- sum(kr_fever$is_private == 1, na.rm = TRUE)
-    csb_results$dhs_n_none <- sum(kr_fever$is_none == 1, na.rm = TRUE)
+    csb_results$dhs_n_public <- sum(
+      kr_fever$csb_public == 1, na.rm = TRUE
+    )
+    csb_results$dhs_n_private <- sum(
+      kr_fever$csb_private == 1, na.rm = TRUE
+    )
+    csb_results$dhs_n_none <- sum(
+      kr_fever$csb_no_treatment == 1, na.rm = TRUE
+    )
+    csb_results$dhs_n_trained <- sum(
+      kr_fever$csb_trained_provider == 1, na.rm = TRUE
+    )
   }
 
-  # ---- 8. Format results -----------------------------------------------------
+  # ---- 9. Format results -----------------------------------------------------
 
-  # Rename columns from dummy variable names to standard output format
+  # Rename columns to standard output format
   csb_results <- csb_results |>
     dplyr::rename(
-      dhs_csb_public = is_public,
-      dhs_csb_public_low = `ci_l.is_public`,
-      dhs_csb_public_upp = `ci_u.is_public`,
-      dhs_csb_private = is_private,
-      dhs_csb_private_low = `ci_l.is_private`,
-      dhs_csb_private_upp = `ci_u.is_private`,
-      dhs_csb_none = is_none,
-      dhs_csb_none_low = `ci_l.is_none`,
-      dhs_csb_none_upp = `ci_u.is_none`
+      dhs_csb_public = csb_public,
+      dhs_csb_public_low = `ci_l.csb_public`,
+      dhs_csb_public_upp = `ci_u.csb_public`,
+      dhs_csb_private = csb_private,
+      dhs_csb_private_low = `ci_l.csb_private`,
+      dhs_csb_private_upp = `ci_u.csb_private`,
+      dhs_csb_none = csb_no_treatment,
+      dhs_csb_none_low = `ci_l.csb_no_treatment`,
+      dhs_csb_none_upp = `ci_u.csb_no_treatment`,
+      dhs_csb_trained = csb_trained_provider,
+      dhs_csb_trained_low = `ci_l.csb_trained_provider`,
+      dhs_csb_trained_upp = `ci_u.csb_trained_provider`
     )
 
   # Round proportions (keep as 0-1 scale, not percentages)
@@ -618,7 +767,7 @@ calc_csb_dhs_core <- function(
       )
     )
 
-  # Derive "any care" = 1 - none (by construction, any = public OR private)
+  # Derive "any care" = 1 - none (by construction: any + none == 1)
   csb_results <- csb_results |>
     dplyr::mutate(
       dhs_csb_any = 1 - dhs_csb_none,
@@ -691,6 +840,9 @@ calc_csb_dhs_core <- function(
     "dhs_csb_private",
     "dhs_csb_private_low",
     "dhs_csb_private_upp",
+    "dhs_csb_trained",
+    "dhs_csb_trained_low",
+    "dhs_csb_trained_upp",
     "dhs_csb_none",
     "dhs_csb_none_low",
     "dhs_csb_none_upp"
@@ -699,7 +851,10 @@ calc_csb_dhs_core <- function(
   col_order <- intersect(col_order, names(csb_results))
 
   # Ensure count columns are integers
-  count_cols <- c("dhs_n_fever", "dhs_n_public", "dhs_n_private", "dhs_n_none")
+  count_cols <- c(
+    "dhs_n_fever", "dhs_n_public", "dhs_n_private",
+    "dhs_n_none", "dhs_n_trained"
+  )
   count_cols <- intersect(count_cols, names(csb_results))
 
   csb_results <- csb_results |>
@@ -720,6 +875,72 @@ calc_csb_dhs_core <- function(
     )
 
   tibble::as_tibble(csb_results)
+}
+
+#' Default WMR CSB classification
+#'
+#' Returns the default WHO World Malaria Report classification mapping
+#' h32 variables to CSB categories.
+#'
+#' @return Data frame with columns: variable, csb
+#' @noRd
+.default_csb_classification <- function() {
+  data.frame(
+    variable = c(
+      # Public sector (government facilities)
+      "h32a", "h32b", "h32c", "h32d", "h32e", "h32f", "h32g", "h32h", "h32i",
+      # CHW / NGO sector (DHS-8 added h32na-h32ne)
+      "h32na", "h32nb", "h32nc", "h32nd", "h32ne",
+      # Private formal (private hospitals, clinics, doctors)
+      "h32j", "h32k", "h32l", "h32m",
+      # Private informal (traditional practitioners, other)
+      "h32s", "h32t", "h32u",
+      # Pharmacy (pharmacies, drug shops)
+      "h32n", "h32o", "h32p", "h32q", "h32r"
+    ),
+    csb = c(
+      rep("public", 9),
+      rep("chw", 5),
+      rep("private_formal", 4),
+      rep("private_informal", 3),
+      rep("pharmacy", 5)
+    ),
+    stringsAsFactors = FALSE
+  )
+}
+
+#' Convert legacy source_config to csb_classification
+#'
+#' @param source_config Named list with public, private, excluded vectors
+#' @return Data frame with columns: variable, csb
+#' @noRd
+.convert_source_config <- function(source_config) {
+  result <- dplyr::bind_rows(
+    if (length(source_config$public) > 0) {
+      data.frame(
+        variable = source_config$public,
+        csb = "public",
+        stringsAsFactors = FALSE
+      )
+    },
+    if (length(source_config$private) > 0) {
+      # In legacy mode, all private sources are treated as private_formal
+      # This maintains backwards compatibility with the old behavior
+      data.frame(
+        variable = source_config$private,
+        csb = "private_formal",
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+
+  if (nrow(result) == 0) {
+    cli::cli_abort(
+      "source_config must have at least one public or private source"
+    )
+  }
+
+  result
 }
 
 #' Extract metadata from DHS KR dataset for care-seeking analysis
@@ -817,11 +1038,13 @@ extract_dhs_metadata_csb <- function(
   metadata$processed_time <- Sys.time()
 
   metadata$analysis_type <- "CSB (Care-Seeking Behavior)"
+  metadata$methodology <- "WHO World Malaria Report (WMR)"
   metadata$age_group <- "0-59 months"
   metadata$condition <- "Fever in last 2 weeks"
 
   # Detect available h32 source variables
-  available_h32 <- grep("^h32[a-z]$", names(dhs_kr), value = TRUE)
+  # Pattern includes digits for DHS-8 NGO sector variables (h32na, h32nb, etc.)
+  available_h32 <- grep("^h32[a-z0-9]+$", names(dhs_kr), value = TRUE)
   metadata$h32_sources_detected <- available_h32
   metadata$n_h32_sources <- length(available_h32)
 
@@ -834,12 +1057,13 @@ extract_dhs_metadata_csb <- function(
   metadata
 }
 
-#' Calculate Sector-Partitioned Care-Seeking Behavior from DHS Data
+#' Calculate Care-Seeking Behavior from DHS Data (WMR Methodology)
 #'
-#' Main function for calculating sector-partitioned care-seeking behavior (CSB)
-#' from DHS children's recode data. Supports spatial aggregation using
-#' administrative boundary shapefiles to calculate CSB at any administrative
-#' level (adm0, adm1, adm2, etc.). Returns both data and a data dictionary.
+#' Main function for calculating care-seeking behavior (CSB)
+#' from DHS children's recode data following the WHO World Malaria Report
+#' methodology. Supports spatial aggregation using administrative boundary
+#' shapefiles to calculate CSB at any administrative level.
+#' Returns both data and a data dictionary.
 #'
 #' This is a convenience wrapper around calc_csb_dhs_core() that also extracts
 #' survey metadata and builds a data dictionary.
@@ -854,15 +1078,15 @@ extract_dhs_metadata_csb <- function(
 #'   }
 #'
 #' @details
-#' See calc_csb_dhs_core() for full details on the methodology, including:
+#' See calc_csb_dhs_core() for full details on the WMR methodology, including:
 #' \itemize{
-#'   \item The mutually exclusive categorization approach
-#'   \item The precedence rule (public > private > none)
+#'   \item The 5-category classification system
+#'   \item How derived indicators are calculated
 #'   \item How to configure country-specific source mappings
 #' }
 #'
 #' @examples
-#' # Example with default source mappings
+#' # Example with default WMR classification
 #' # csb_results <- calc_csb_dhs(
 #' #   dhs_kr = kr_data,
 #' #   gps_data = gps_data,
@@ -870,14 +1094,15 @@ extract_dhs_metadata_csb <- function(
 #' #   admin_level = c("adm1")
 #' # )
 #' #
-#' # # Example with custom source configuration (country-specific)
+#' # # Example with custom classification (country-specific)
+#' # my_classification <- data.frame(
+#' #   variable = c("h32a", "h32b", "h32c", "h32j", "h32k", "h32n"),
+#' #   csb = c("public", "public", "chw",
+#' #           "private_formal", "pharmacy", "pharmacy")
+#' # )
 #' # csb_results <- calc_csb_dhs(
 #' #   dhs_kr = kr_data,
-#' #   source_config = list(
-#' #     public = c("h32a", "h32b", "h32c"),
-#' #     private = c("h32j", "h32k", "h32l"),
-#' #     excluded = c("h32t")  # exclude traditional healer
-#' #   )
+#' #   csb_classification = my_classification
 #' # )
 #' #
 #' # # Access the data
@@ -900,11 +1125,8 @@ calc_csb_dhs <- function(
     fever = "h22",
     alive = "b5"
   ),
-  source_config = list(
-    public = c("h32a", "h32b", "h32c", "h32d", "h32e", "h32f", "h32g", "h32h", "h32i"),
-    private = c("h32j", "h32k", "h32l", "h32m", "h32n", "h32o", "h32p", "h32q", "h32r"),
-    excluded = c("h32s", "h32t", "h32u", "h32v", "h32w", "h32x")
-  ),
+  csb_classification = NULL,
+  source_config = NULL,
   gps_data = NULL,
   gps_vars = list(
     cluster = "DHSCLUST",
@@ -925,6 +1147,7 @@ calc_csb_dhs <- function(
   csb_data <- calc_csb_dhs_core(
     dhs_kr = dhs_kr,
     survey_vars = survey_vars,
+    csb_classification = csb_classification,
     source_config = source_config,
     gps_data = gps_data,
     gps_vars = gps_vars,
@@ -1044,6 +1267,13 @@ aggregate_csb_admin <- function(
             na.rm = TRUE
           )
         } else NA_real_,
+        dhs_csb_trained = if ("dhs_csb_trained" %in% names(joined_df)) {
+          stats::weighted.mean(
+            dhs_csb_trained,
+            w = dhs_n_fever,
+            na.rm = TRUE
+          )
+        } else NA_real_,
         dhs_csb_none = if ("dhs_csb_none" %in% names(joined_df)) {
           stats::weighted.mean(
             dhs_csb_none,
@@ -1060,6 +1290,9 @@ aggregate_csb_admin <- function(
         } else NA_integer_,
         dhs_n_private = if ("dhs_n_private" %in% names(joined_df)) {
           sum(dhs_n_private, na.rm = TRUE)
+        } else NA_integer_,
+        dhs_n_trained = if ("dhs_n_trained" %in% names(joined_df)) {
+          sum(dhs_n_trained, na.rm = TRUE)
         } else NA_integer_,
         dhs_n_none = if ("dhs_n_none" %in% names(joined_df)) {
           sum(dhs_n_none, na.rm = TRUE)
@@ -1084,6 +1317,9 @@ aggregate_csb_admin <- function(
         dhs_csb_private = if ("dhs_csb_private" %in% names(joined_df)) {
           mean(dhs_csb_private, na.rm = TRUE)
         } else NA_real_,
+        dhs_csb_trained = if ("dhs_csb_trained" %in% names(joined_df)) {
+          mean(dhs_csb_trained, na.rm = TRUE)
+        } else NA_real_,
         dhs_csb_none = if ("dhs_csb_none" %in% names(joined_df)) {
           mean(dhs_csb_none, na.rm = TRUE)
         } else NA_real_,
@@ -1096,6 +1332,9 @@ aggregate_csb_admin <- function(
         } else NA_integer_,
         dhs_n_private = if ("dhs_n_private" %in% names(joined_df)) {
           sum(dhs_n_private, na.rm = TRUE)
+        } else NA_integer_,
+        dhs_n_trained = if ("dhs_n_trained" %in% names(joined_df)) {
+          sum(dhs_n_trained, na.rm = TRUE)
         } else NA_integer_,
         dhs_n_none = if ("dhs_n_none" %in% names(joined_df)) {
           sum(dhs_n_none, na.rm = TRUE)
