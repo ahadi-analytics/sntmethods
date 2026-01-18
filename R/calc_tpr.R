@@ -28,12 +28,16 @@
 #'   (default: "conf").
 #' @param test_var Column name for number of individuals tested
 #'   (default: "test").
+#' @param reprate_var Column name for pre-calculated reporting rate (0-1 scale).
+#'   If NULL (default), reporting rate is calculated internally from facility
+#'   activity classification at the district-month level. If provided, this
+#'   column will be used directly and internal calculation is skipped.
 #' @param reporting_threshold Numeric threshold for minimum reporting rate
 #'   used when calculating district-level proxies. Facility-months from
 #'   districts with reporting rate below this value are excluded from proxy
 #'   calculations but kept in output. Default is 0.8 (80%). Set to NULL to
-#'   disable reporting rate threshold checks. Reporting rate is calculated
-#'   internally using `sntutils::calculate_reporting_metrics()`.
+#'   disable reporting rate threshold checks. When `reprate_var` is NULL,
+#'   reporting rate is calculated internally from facility activity.
 #' @param extreme_threshold Numeric vector of length 2 specifying lower and
 #'   upper bounds for flagging extreme TPR values (default: `c(0.01, 0.99)`).
 #' @param include_flags Logical; if `TRUE`, includes all quality flag columns
@@ -125,6 +129,7 @@ calc_tpr <- function(
   date_var = "date",
   conf_var = "conf",
   test_var = "test",
+  reprate_var = NULL,
   reporting_threshold = 0.80,
   extreme_threshold = c(0.01, 0.99),
   include_flags = FALSE,
@@ -233,6 +238,29 @@ calc_tpr <- function(
     )
   }
 
+ # Validate reprate_var if provided
+  if (!is.null(reprate_var)) {
+    if (!reprate_var %in% names(data)) {
+      cli::cli_abort(
+        c(
+          "Column specified in `reprate_var` not found in data:",
+          "x" = "{.var {reprate_var}}"
+        )
+      )
+    }
+
+    # Check that reprate values are in valid range
+    reprate_values <- data[[reprate_var]]
+    if (any(!is.na(reprate_values) & (reprate_values < 0 | reprate_values > 1))) {
+      cli::cli_warn(
+        c(
+          "Some values in `{reprate_var}` are outside [0, 1] range.",
+          "i" = "Reporting rate should be between 0 and 1."
+        )
+      )
+    }
+  }
+
   cli::cli_alert_info(
     "Processing {sntutils::big_mark(nrow(data))} facility-month records."
   )
@@ -279,29 +307,40 @@ calc_tpr <- function(
     "facility-months flagged as inactive."
   )
 
-  # Calculate district-month level reporting rate from facility-level activity
-  cli::cli_alert_info("Calculating district-month reporting rates...")
+  # Calculate or use provided reporting rate
+  if (is.null(reprate_var)) {
+    # Calculate district-month level reporting rate from facility-level activity
+    cli::cli_alert_info("Calculating district-month reporting rates...")
 
-  reprate_by_district <- data |>
-  dplyr::group_by(!!rlang::sym(adm2_var), !!rlang::sym(date_var)) |>
-  dplyr::summarise(
-    n_total_facilities = dplyr::n(),
-    n_active_facilities = sum(!flag_inactive, na.rm = TRUE),
-    reprate = n_active_facilities / n_total_facilities,
-    .groups = "drop"
-  )
+    reprate_by_district <- data |>
+    dplyr::group_by(!!rlang::sym(adm2_var), !!rlang::sym(date_var)) |>
+    dplyr::summarise(
+      n_total_facilities = dplyr::n(),
+      n_active_facilities = sum(!flag_inactive, na.rm = TRUE),
+      reprate = n_active_facilities / n_total_facilities,
+      .groups = "drop"
+    )
 
-  # Join reporting rate back to main data
-  data <- data |>
-  dplyr::left_join(
-    reprate_by_district |>
-    dplyr::select(
-      !!adm2_var,
-      !!date_var,
-      reprate
-    ),
-    by = c(adm2_var, date_var)
-  )
+    # Join reporting rate back to main data
+    data <- data |>
+    dplyr::left_join(
+      reprate_by_district |>
+      dplyr::select(
+        !!adm2_var,
+        !!date_var,
+        reprate
+      ),
+      by = c(adm2_var, date_var)
+    )
+  } else {
+    # Use user-provided reporting rate column
+    cli::cli_alert_info(
+      "Using provided reporting rate column: {.var {reprate_var}}"
+    )
+
+    data <- data |>
+    dplyr::mutate(reprate = .data[[reprate_var]])
+  }
 
   # Diagnostics
   n_na_reprate <- sum(is.na(data$reprate))
@@ -888,6 +927,8 @@ calc_tpr <- function(
     nonreport_window = nonreport_window,
     reporting_threshold = reporting_threshold,
     extreme_threshold = extreme_threshold,
+    reprate_var = reprate_var,
+    reprate_source = if (is.null(reprate_var)) "calculated" else "user_provided",
     hf_var = hf_var,
     adm0_var = adm0_var,
     adm1_var = adm1_var,
