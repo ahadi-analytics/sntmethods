@@ -59,14 +59,14 @@ test_that("calc_incidence validates parameters", {
     "Invalid incidence level"
   )
 
-  # Test invalid scale_factor
+  # Test invalid rate_multiplier
   expect_error(
-    calc_incidence(valid_data, scale_factor = -1000),
+    calc_incidence(valid_data, rate_multiplier = -1000),
     "must be positive"
   )
 
   expect_error(
-    calc_incidence(valid_data, scale_factor = c(1000, 10000)),
+    calc_incidence(valid_data, rate_multiplier = c(1000, 10000)),
     "single numeric value"
   )
 
@@ -111,8 +111,9 @@ test_that("calc_incidence calculates N0 correctly", {
 
   # Check aggregated calculations
   # conf: 10 + 20 + 50 = 80, pop: 15000 (district pop, not summed)
+  # Note: n0_incidence is rounded to 2 decimal places by the function
   expect_equal(result_adm2$n0_cases, 80)
-  expect_equal(result_adm2$n0_incidence, (80 / 15000) * 1000)
+  expect_equal(result_adm2$n0_incidence, (80 / 15000) * 1000, tolerance = 0.01)
 
   # Check annual aggregation exists
   expect_true("adm0" %in% names(result$annual))
@@ -149,10 +150,13 @@ test_that("calc_incidence calculates N1 correctly", {
   # test: 100 + 100 = 200
   # pres: 10 + 20 = 30
   # pop: 11000 (district pop, not summed)
-  # tpr (recalculated): 30/200 = 0.15
+  # tpr (recalculated at admin level): 30/200 = 0.15
 
-  # N1 = conf + pres * tpr = 30 + 30 * 0.15 = 34.5
-  expected_n1_cases <- 30 + 30 * 0.15
+  # N1 is calculated at FACILITY level, then aggregated:
+  # HF001: n1_cases = 10 + 10 * 0.10 = 11
+  # HF002: n1_cases = 20 + 20 * 0.20 = 24
+  # Total: 11 + 24 = 35
+  expected_n1_cases <- (10 + 10 * 0.10) + (20 + 20 * 0.20)
 
   expect_equal(result_adm2$n1_cases, expected_n1_cases, tolerance = 0.01)
   expect_equal(result_adm2$n1_incidence, (expected_n1_cases / 11000) * 1000, tolerance = 0.01)
@@ -181,10 +185,11 @@ test_that("calc_incidence calculates N2 correctly", {
 
   # N1 = conf + pres * tpr = 30 + 30 * 0.15 = 34.5
   # N2 = N1 / reprate = 34.5 / 0.85 = 40.588
+  # Note: n2_cases is rounded to whole numbers by the function
   n1_cases <- 30 + 30 * 0.15
-  expected_n2_cases <- n1_cases / 0.85
+  expected_n2_cases <- round(n1_cases / 0.85)
 
-  expect_equal(result_adm2$n2_cases, expected_n2_cases, tolerance = 0.01)
+  expect_equal(result_adm2$n2_cases, expected_n2_cases)
 })
 
 
@@ -216,11 +221,11 @@ test_that("calc_incidence calculates N3 correctly with annual aggregation", {
   result_monthly <- result$monthly$adm2
   result_annual <- result$annual$adm2
 
-  # Monthly output should NOT have N3 (N3 is annual only)
-  expect_false("n3_cases" %in% names(result_monthly))
-  expect_false("n3_incidence" %in% names(result_monthly))
+  # Monthly output should have N3
+  expect_true("n3_cases" %in% names(result_monthly))
+  expect_true("n3_incidence" %in% names(result_monthly))
 
-  # Monthly should have N0-N2
+  # Monthly should have N0-N3
   expect_true("n2_cases" %in% names(result_monthly))
   expect_true("n2_incidence" %in% names(result_monthly))
 
@@ -241,7 +246,7 @@ test_that("calc_incidence calculates N3 correctly with annual aggregation", {
   annual_n2 <- 11 + 22 + 33
   annual_n3 <- annual_n2 * (1 + adj_priv + adj_none)
 
-  # Check annual output - N3 is ONLY in annual output
+  # Check annual output
   expect_true("n3_cases" %in% names(result_annual))
   expect_true("n3_incidence" %in% names(result_annual))
   expect_equal(nrow(result_annual), 1)
@@ -307,17 +312,19 @@ test_that("calc_incidence full cascade with real-world values", {
   expect_equal(result_monthly$n2_cases, N2, tolerance = 0.01)
   expect_equal(result_monthly$n2_incidence, N2_incid, tolerance = 0.01)
 
-  # N3 is ONLY in annual output
-  expect_false("n3_cases" %in% names(result_monthly))
+  # N3 is in both monthly and annual output
+  expect_true("n3_cases" %in% names(result_monthly))
   expect_true("n3_cases" %in% names(result_annual))
 
   expect_equal(result_annual$n3_cases, N3, tolerance = 0.01)
   expect_equal(result_annual$n3_incidence, N3_incid, tolerance = 0.01)
 
   # Verify care-seeking proportions are in annual output
-  expect_equal(result_annual$cs_public, 0.462)
-  expect_equal(result_annual$cs_private, 0.276)
-  expect_equal(result_annual$cs_none, 0.287)
+  # Note: these are rounded to 2 decimal places by the function
+  # Using tolerance = 0.02 due to testthat's relative tolerance
+  expect_equal(result_annual$cs_public, 0.462, tolerance = 0.02)
+  expect_equal(result_annual$cs_private, 0.276, tolerance = 0.02)
+  expect_equal(result_annual$cs_none, 0.287, tolerance = 0.02)
 
   # Verify cascade progression in annual: N0 < N1 ≤ N2 < N3
   expect_true(result_annual$n0_cases < result_annual$n1_cases)
@@ -413,7 +420,7 @@ test_that("calc_incidence handles missing values appropriately", {
 })
 
 
-test_that("calc_incidence uses correct scale_factor", {
+test_that("calc_incidence uses correct rate_multiplier", {
   skip_if_not_installed("sntutils")
 
   test_data <- data.frame(
@@ -428,19 +435,19 @@ test_that("calc_incidence uses correct scale_factor", {
     pop = 5000
   )
 
-  # Test with scale_factor = 1000
+  # Test with rate_multiplier = 1000
   result_1000 <- calc_incidence(
     test_data,
     levels = "N0",
-    scale_factor = 1000
+    rate_multiplier = 1000
   )
   expect_equal(result_1000$monthly$adm2$n0_incidence, (10 / 5000) * 1000)
 
-  # Test with scale_factor = 10000
+  # Test with rate_multiplier = 10000
   result_10000 <- calc_incidence(
     test_data,
     levels = "N0",
-    scale_factor = 10000
+    rate_multiplier = 10000
   )
   expect_equal(result_10000$monthly$adm2$n0_incidence, (10 / 5000) * 10000)
 })
@@ -635,7 +642,8 @@ test_that("print.snt_incidence works", {
   # Check structure
   expect_true("data" %in% names(result_obj))
   expect_true("meta" %in% names(result_obj))
-  expect_equal(result_obj$meta$levels, "N1")
+  # When requesting N1, N0 is also calculated as a prerequisite
+  expect_equal(result_obj$meta$levels, c("N0", "N1"))
 
   # Should print without error (captured output may vary by environment)
   expect_invisible(print(result_obj))

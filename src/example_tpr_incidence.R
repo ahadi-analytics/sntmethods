@@ -169,7 +169,7 @@ validate_tpr_proxies(
     cs_private_var = "csb_private",
     cs_none_var = "csb_no_treatment",
     rho = 0,
-    scale_factor = 1000,
+    rate_multiplier = 1000,
     include_flags = T
   )
 
