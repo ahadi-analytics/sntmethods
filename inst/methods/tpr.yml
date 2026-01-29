@@ -48,18 +48,12 @@ compute_tpr:
         +/-2 months (5-month average), etc. Weighted by test counts.
     - name: fallback_triggers
       type: character vector
-      default: c("missing")
+      default: c("missing", "extreme", "low_test")
       description: >
         Conditions that trigger proxy fallback. Valid options: "missing"
         (conf/test is NA), "extreme" (TPR outside extreme_threshold),
-        "low_test" (test < 5), "impossible" (conf > test), "low_reprate"
-        (reporting rate below reporting_threshold).
-    - name: reporting_threshold
-      type: numeric
-      default: 0.8
-      description: >
-        Minimum reporting rate threshold. Facility-months below this are
-        flagged as low_reprate.
+        "low_test" (test < 5). Note: impossible values (conf > test) are
+        always included in fallback along with missing values.
     - name: extreme_threshold
       type: numeric vector (length 2)
       default: c(0.01, 0.99)
@@ -87,17 +81,6 @@ compute_tpr:
 
   stages:
     - stage: 1
-      name: Reporting rate calculation
-      description: >
-        Calculate reporting rate BEFORE identifying inactive facilities,
-        to ensure reporting metrics reflect the full dataset.
-      actions:
-        - "Calculate reporting rate using
-          sntutils::calculate_reporting_metrics()."
-        - "Join reporting rate back to main data by admin2 and date."
-        - "Flag facility-months with reprate < reporting_threshold."
-
-    - stage: 2
       name: Inactive facility identification
       input_requirements:
         - "Data must be at health facility-month level (one row per
@@ -111,7 +94,7 @@ compute_tpr:
         - "FLAG (not remove) inactive facility-months with flag_inactive."
         - "Inactive facilities will have NA TPR (no proxies applied)."
 
-    - stage: 3
+    - stage: 2
       name: Data validation and quality flagging
       actions:
         - "Verify data is at health facility-month level (unique hf_uid
@@ -125,7 +108,7 @@ compute_tpr:
         - "Maintain alignment for age-disaggregated variables
           (e.g., conf_u5 <= test_u5)."
 
-    - stage: 4
+    - stage: 3
       name: TPR calculation and proxy derivation
       description: >
         Calculate TPR directly where conf and test are valid. For missing
@@ -133,17 +116,16 @@ compute_tpr:
         fallback hierarchy based on available data and specified triggers.
       steps:
         - "Compute tpr_raw = conf / test for clean data (excluding
-          flag_conf_gt_test, flag_inactive, flag_low_reprate)."
+          flag_conf_gt_test, flag_inactive)."
         - "Initialize tpr = tpr_raw, tpr_source = 'facility_raw' where
           tpr_raw is available."
         - "Build dynamic .should_fallback condition based on
           fallback_triggers parameter:
           - Always exclude inactive facilities (!flag_inactive)
-          - Optionally exclude conf > test (!flag_conf_gt_test)
+          - Impossible values (conf > test) always receive fallbacks
           - Apply if missing (is.na(tpr))
           - Apply if extreme (flag_tpr_extreme)
-          - Apply if low test (flag_low_test)
-          - Apply if low reporting (flag_low_reprate)"
+          - Apply if low test (flag_low_test)"
         - "Apply fallbacks sequentially in order specified by
           fallback_method parameter:
           1. adm2: District (adm2) TPR - sum(conf)/sum(test) for all
@@ -160,7 +142,7 @@ compute_tpr:
         - "After each fallback, update .should_fallback to FALSE for
           facility-months that received proxy values."
         - "Each fallback uses only clean data (no conf > test, not
-          inactive, not low reprate)."
+          inactive)."
       outputs:
         - "tpr: Final TPR value (raw or proxy)"
         - "tpr_source: Origin of TPR value"
@@ -174,7 +156,7 @@ compute_tpr:
         - "Fallback hierarchy is fully customizable via fallback_method
           parameter."
 
-    - stage: 5
+    - stage: 4
       name: Quality assurance and final flagging
       actions:
         - "Set flag_tpr_valid = TRUE for facility-months with valid
@@ -201,8 +183,6 @@ compute_tpr:
         - month
         - conf
         - test
-        - pres
-        - reprate
         - tpr
         - tpr_source
       optional_flag_fields:
@@ -215,7 +195,6 @@ compute_tpr:
         - flag_low_test
         - flag_missing_conf
         - flag_inactive
-        - flag_low_reprate
 
   outputs:
     - name: tpr
@@ -233,11 +212,6 @@ compute_tpr:
         - proxy_prev_year: "Same facility, previous year (with seasonal window)"
         - proxy_adm0: "National-level aggregate TPR"
         - proxy_rolling: "3-month rolling average from same facility"
-    - name: reprate
-      type: numeric
-      description: >
-        Reporting rate for the facility's district-month, ranging 0-1.
-        Calculated before inactive facility identification.
     - name: flags
       description: >
         Quality flags for data validation and proxy usage. Returned only
@@ -252,7 +226,6 @@ compute_tpr:
         - flag_low_test: "TRUE if test < 5"
         - flag_missing_conf: "TRUE if conf is NA"
         - flag_inactive: "TRUE if facility-month classified as inactive"
-        - flag_low_reprate: "TRUE if reprate < reporting_threshold"
 
 validate_tpr_proxies:
   description: >
@@ -274,7 +247,7 @@ validate_tpr_proxies:
       Compare proxy estimates to actual TPR values using multiple metrics.
     steps:
       - "Filter to clean data: exclude flag_conf_gt_test, flag_inactive,
-        flag_low_reprate, and NA conf/test values."
+        and NA conf/test values."
       - "Calculate tpr_actual = conf / test for validation dataset."
       - "For each proxy level, compute leave-one-out estimates:
         - ADM2: (sum_conf_adm2 - conf) / (sum_test_adm2 - test)
@@ -293,7 +266,8 @@ validate_tpr_proxies:
       - "Generate diagnostic plots (if generate_plots = TRUE):
         - Scatter plots: Actual vs proxy TPR
         - Error distribution: Density plots of (proxy - actual)
-        - MAE by reporting rate: How proxy quality varies with reprate"
+        - MAE by test count: How proxy quality varies with denominator size
+        - Stability map: Error patterns by test count and TPR value"
 
   outputs:
     - name: metrics
@@ -310,7 +284,7 @@ validate_tpr_proxies:
       type: list
       description: >
         Diagnostic ggplot2 objects (if generate_plots = TRUE): scatter,
-        error_dist, mae_by_reprate.
+        error_dist, mae_by_tests, stability_map.
 
   interpretation:
     - "Lower MAE and RMSE indicate better proxy accuracy."
@@ -320,8 +294,8 @@ validate_tpr_proxies:
       calibration."
     - "Compare metrics across proxy levels to select optimal fallback
       hierarchy."
-    - "Use mae_by_reprate plot to understand how proxy quality varies
-      with data completeness."
+    - "Use mae_by_tests plot to understand how proxy quality varies
+      with denominator size (data reliability)."
 
 implementation_notes:
   - "All calculations use tidyverse/dplyr for consistency with SNT

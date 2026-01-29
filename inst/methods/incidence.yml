@@ -1,9 +1,10 @@
 title: "Incidence Adjustment Framework"
-version: "1.1.0"
+version: "1.2.0"
 description: >
-  Defines the standard stepwise approach (N0–N3) for estimating malaria
+  Defines the standard stepwise approach (N0–N4) for estimating malaria
   incidence using routine DHIS2 data. Each step progressively adjusts for
-  diagnostic, reporting, and care-seeking biases. The approach aligns with
+  diagnostic, reporting, and care-seeking biases. N4 provides an alternative
+  to N3 that excludes private sector adjustment. The approach aligns with
   WHO Global Malaria Programme guidance and uses standardized variable names
   from SNT workflows (e.g., conf, test, pres, reprate, pop). When disaggregated
   variables are used (e.g., conf_u5), the corresponding population denominator
@@ -33,12 +34,11 @@ levels:
 
   N1:
     name: "Testing-Adjusted Incidence"
-    formula: "N1 = conf + pres × (conf / test)"
+    formula: "N1 = conf + pres × tpr"
     where:
       conf: "Confirmed malaria cases"
-      pres: "Presumed malaria cases = max(treated − confirmed, 0)"
-      test: "Number tested for malaria"
-      (conf/test): "Test positivity rate (TPR)"
+      pres: "Presumed malaria cases"
+      tpr: "Test positivity rate (TPR)"
     scale: "per 1,000 population"
     purpose: >
       Adjusts for incomplete testing by estimating additional confirmed cases
@@ -91,12 +91,9 @@ levels:
 
   N3:
     name: "Care-Seeking-Adjusted Incidence"
-    formula: >
-      N3_annual = N2_annual × (1 + CS_Priv/CS_Pub + CS_None/CS_Pub)
-      N3_monthly = N3_annual × (N2_monthly / N2_annual)
+    formula: "N3_annual = N2_annual × (1 + CS_Priv/CS_Pub + CS_None/CS_Pub)"
     where:
       N2_annual: "Sum of N2 cases within admin unit for the year"
-      N2_monthly: "N2 cases for a specific admin-month"
       CS_Pub: "Proportion seeking care in public facilities"
       CS_Priv: "Proportion seeking care in private facilities"
       CS_None: "Proportion not seeking care"
@@ -106,13 +103,11 @@ levels:
       seeking care at all, using care-seeking proportions (CS_Pub, CS_Priv, CS_None)
       from national household surveys such as DHS or MIS.
     temporal_note: >
-      N3 calculation aggregates N2 to annual level before applying CSB adjustment,
-      then distributes back to monthly level proportionally. This ensures the
-      annual CSB data from DHS/MIS is applied once per year, not 12 times.
+      N3 is calculated at annual level only. Care-seeking behavior data from
+      DHS/MIS surveys is annual, so N3 is not available at monthly resolution.
     aggregation_process:
       - "Sum N2 cases within admin unit for the year"
       - "Apply CSB adjustment to annual N2 totals"
-      - "Distribute annual N3 back to admin-month proportionally"
     assumptions:
       - Care-seeking fractions are representative for the analysis period.
       - Care-seeking among febrile adults approximates that of children.
@@ -132,14 +127,49 @@ levels:
       - "CS_Pub > 0"
       - "Warn if |(CS_Pub + CS_Priv + CS_None − 1)| > 0.05"
 
+  N4:
+    name: "Care-Seeking-Adjusted Incidence (Public + Non-Seekers Only)"
+    formula: >
+      N4_annual = N2_annual × (1 + CS_None/CS_Pub)
+    where:
+      N2_annual: "Sum of N2 cases within admin unit for the year"
+      CS_Pub: "Proportion seeking care in public facilities"
+      CS_None: "Proportion not seeking care"
+    scale: "per 1,000 population"
+    purpose: >
+      Adjusts for populations not seeking care, without adding private sector
+      cases. Use when private sector burden is low, private data is already
+      captured in DHIS2, or for conservative estimates. N4 will always be
+      between N2 and N3 in magnitude (N2 < N4 < N3).
+    temporal_note: >
+      N4 is calculated at annual level only. Like N3, care-seeking behavior data
+      from DHS/MIS surveys is annual, so N4 is not available at monthly resolution.
+    assumptions:
+      - Care-seeking fractions are representative for the analysis period.
+      - Private sector cases are excluded (either negligible or already captured).
+      - CS_Pub + CS_None represents the relevant population for this adjustment.
+    uncertainty_points:
+      - Survey years may differ from routine data period.
+      - Does not account for private sector burden.
+      - Provides a conservative estimate compared to N3.
+    outputs:
+      - n4_cases
+      - n4_incidence
+      - adj_none
+    validation:
+      - "CS_Pub within [0,1] and > 0"
+      - "CS_None within [0,1]"
+
 aggregation_rules:
   - "Variables use SNT standardized naming: conf, test, pres, treated, reprate,
     pop."
   - "Output is at admin-month level (adm2-month). Facility-level data is
     aggregated to admin level before calculating incidence."
   - "N0, N1, N2 are calculated at admin-month level."
-  - "N3 uses annual aggregation of N2 before applying CSB adjustment, then
-    distributes back to admin-month level."
+  - "N3 uses annual aggregation of N2 before applying full CSB adjustment
+    (private + non-seekers). N3 is annual-only."
+  - "N4 uses annual aggregation of N2 before applying non-seeker adjustment
+    only (excludes private sector). N4 is annual-only."
   - "When variables are age-disaggregated (e.g., conf_u5, conf_preg), matching
     denominators follow the same pattern (e.g., pop_u5, pop_preg_exp)."
   - "Aggregation across admin levels (adm1, adm2) uses weighted sums of cases
