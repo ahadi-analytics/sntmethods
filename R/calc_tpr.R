@@ -28,24 +28,13 @@
 #'   (default: "conf").
 #' @param test_var Column name for number of individuals tested
 #'   (default: "test").
-#' @param reprate_var Column name for pre-calculated reporting rate (0-1 scale).
-#'   If NULL (default), reporting rate is calculated internally from facility
-#'   activity classification at the district-month level. If provided, this
-#'   column will be used directly and internal calculation is skipped.
-#' @param reporting_threshold Numeric threshold for minimum reporting rate
-#'   used when calculating district-level proxies. Facility-months from
-#'   districts with reporting rate below this value are excluded from proxy
-#'   calculations but kept in output. Default is 0.8 (80%). Set to NULL to
-#'   disable reporting rate threshold checks. When `reprate_var` is NULL,
-#'   reporting rate is calculated internally from facility activity.
 #' @param extreme_threshold Numeric vector of length 2 specifying lower and
 #'   upper bounds for flagging extreme TPR values (default: `c(0.01, 0.99)`).
 #' @param include_flags Logical; if `TRUE`, includes all quality flag columns
 #'   in the output. If `FALSE` (default), returns only the core TPR variables
 #'   without flags.
 #' @param activity_indicators Character vector of indicator columns used to
-#'   calculate reporting rate and determine facility activity. Default is
-#'   `c("conf", "test")`.
+#'   determine facility activity. Default is `c("conf", "test")`.
 #' @param activity_method Numeric. Classification method for facility activity
 #'   (1, 2, or 3). Default is 3 (dynamic activation/inactivation). Used to
 #'   flag inactive facility-months which are excluded from proxy calculations.
@@ -65,10 +54,9 @@
 #'   the window from the previous year, weighted by test counts.
 #' @param fallback_triggers Character vector specifying when to apply proxy
 #'   fallbacks. Valid options: "missing" (conf/test is NA), "extreme" (TPR
-#'   outside extreme_threshold), "low_test" (test < 5), "low_reprate"
-#'   (reporting rate < threshold). Default is
-#'   `c("missing", "extreme", "low_test", "low_reprate")`. Set to NULL to
-#'   disable all triggers (keep raw TPR values without replacement).
+#'   outside extreme_threshold), "low_test" (test < 5). Default is
+#'   `c("missing", "extreme", "low_test")`. Set to NULL to disable all
+#'   triggers (keep raw TPR values without replacement).
 #'   Note: impossible values (conf > test) are always included in fallback
 #'   along with missing values. Inactive facilities are always excluded.
 #'
@@ -85,7 +73,6 @@
 #'         \item `month`: Month extracted from date
 #'         \item `conf`: Confirmed cases
 #'         \item `test`: Number tested
-#'         \item `reprate`: Reporting rate (0-1 scale)
 #'         \item `tpr`: Final validated or proxy TPR (0-1 scale)
 #'         \item `tpr_source`: Source of TPR value (facility_raw, proxy_adm2,
 #'           proxy_adm1, proxy_prev_year, or proxy_adm0)
@@ -98,9 +85,38 @@
 #'         \item `flag_low_test`: TRUE if test < 5
 #'         \item `flag_missing_conf`: TRUE if conf is NA
 #'         \item `flag_inactive`: TRUE if facility-month is inactive
-#'         \item `flag_low_reprate`: TRUE if reporting rate below threshold
 #'       }
 #'   }
+#'
+#' @section Reporting Rates:
+#' This function does not calculate reporting rates. If you need reporting
+#' rates for analysis or filtering, calculate them separately using
+#' `sntutils::calculate_reporting_metrics()` and join to your data before
+#' calling `calc_tpr()`.
+#'
+#' Example:
+#' \preformatted{
+#' # Calculate reporting rate at district level
+#' reprate_data <- sntutils::calculate_reporting_metrics(
+#'   data = facility_data,
+#'   vars_of_interest = "conf",
+#'   x_var = "date",
+#'   y_var = "adm2",
+#'   hf_col = "hf_uid",
+#'   key_indicators = c("conf", "test")
+#' )
+#'
+#' # Join back to facility data (include all admin levels for proper join)
+#' data_with_reprate <- facility_data |>
+#'   dplyr::left_join(
+#'     reprate_data |> dplyr::select(adm0, adm1, adm2, date, reprate),
+#'     by = c("adm0", "adm1", "adm2", "date")
+#'   )
+#'
+#' # Now filter or use reprate in your analysis
+#' tpr_result <- calc_tpr(data_with_reprate) |>
+#'   dplyr::filter(reprate >= 0.8)
+#' }
 #'
 #' @examples
 #' # Example with minimal data
@@ -129,8 +145,6 @@ calc_tpr <- function(
   date_var = "date",
   conf_var = "conf",
   test_var = "test",
-  reprate_var = NULL,
-  reporting_threshold = 0.80,
   extreme_threshold = c(0.01, 0.99),
   include_flags = FALSE,
   activity_indicators = c("conf", "test"),
@@ -138,7 +152,7 @@ calc_tpr <- function(
   nonreport_window = 6,
   fallback_method = c("rolling", "adm2", "prev_year", "adm1", "adm0"),
   prev_year_window = 2,
-  fallback_triggers = c("missing", "extreme", "low_test", "low_reprate")
+  fallback_triggers = c("missing", "extreme", "low_test")
 ) {
   # ---- validate data -------------------------------------------------------
 
@@ -223,8 +237,7 @@ calc_tpr <- function(
   valid_triggers <- c(
     "missing",
     "extreme",
-    "low_test",
-    "low_reprate"
+    "low_test"
   )
   invalid_triggers <- setdiff(fallback_triggers, valid_triggers)
 
@@ -238,34 +251,13 @@ calc_tpr <- function(
     )
   }
 
- # Validate reprate_var if provided
-  if (!is.null(reprate_var)) {
-    if (!reprate_var %in% names(data)) {
-      cli::cli_abort(
-        c(
-          "Column specified in `reprate_var` not found in data:",
-          "x" = "{.var {reprate_var}}"
-        )
-      )
-    }
-
-    # Check that reprate values are in valid range
-    reprate_values <- data[[reprate_var]]
-    if (any(!is.na(reprate_values) & (reprate_values < 0 | reprate_values > 1))) {
-      cli::cli_warn(
-        c(
-          "Some values in `{reprate_var}` are outside [0, 1] range.",
-          "i" = "Reporting rate should be between 0 and 1."
-        )
-      )
-    }
-  }
-
   cli::cli_alert_info(
     "Processing {sntutils::big_mark(nrow(data))} facility-month records."
   )
 
-  # ---- classify facility activity and calculate reporting rate -------------
+  # ---- classify facility activity before rename ----------------------------
+  # Must do this before renaming columns since activity_indicators uses
+  # user-provided column names
 
   cli::cli_alert_info(
     "Classifying facility activity (method {activity_method})..."
@@ -279,105 +271,26 @@ calc_tpr <- function(
       hf_col = hf_var,
       date_col = date_var,
       key_indicators = activity_indicators,
-      binary_classification = TRUE,  # Get binary Active/Inactive classification
+      binary_classification = TRUE,
       nonreport_window = nonreport_window
     )
   )
 
-  # Join activity status back to main data
-  data <- data |>
-    dplyr::left_join(
-      activity_classification |>
-        dplyr::select(
-          !!hf_var,
-          !!date_var,
-          activity_status
-        ),
-      by = c(hf_var, date_var)
-    ) |>
-    dplyr::mutate(
-      flag_inactive = activity_status != "Active"
-    )
-
-  n_inactive <- sum(data$flag_inactive, na.rm = TRUE)
-  n_total <- nrow(data)
-
-  cli::cli_alert_info(
-    "{sntutils::big_mark(n_inactive)} of {sntutils::big_mark(n_total)} ",
-    "facility-months flagged as inactive."
-  )
-
-  # Calculate or use provided reporting rate
-  if (is.null(reprate_var)) {
-    # Calculate district-month level reporting rate from facility-level activity
-    cli::cli_alert_info("Calculating district-month reporting rates...")
-
-    reprate_by_district <- data |>
-    dplyr::group_by(!!rlang::sym(adm2_var), !!rlang::sym(date_var)) |>
-    dplyr::summarise(
-      n_total_facilities = dplyr::n(),
-      n_active_facilities = sum(!flag_inactive, na.rm = TRUE),
-      reprate = n_active_facilities / n_total_facilities,
-      .groups = "drop"
-    )
-
-    # Join reporting rate back to main data
-    data <- data |>
-    dplyr::left_join(
-      reprate_by_district |>
-      dplyr::select(
-        !!adm2_var,
-        !!date_var,
-        reprate
-      ),
-      by = c(adm2_var, date_var)
-    )
-  } else {
-    # Use user-provided reporting rate column
-    cli::cli_alert_info(
-      "Using provided reporting rate column: {.var {reprate_var}}"
-    )
-
-    data <- data |>
-    dplyr::mutate(reprate = .data[[reprate_var]])
-  }
-
-  # Diagnostics
-  n_na_reprate <- sum(is.na(data$reprate))
-  n_zero_reprate <- sum(data$reprate == 0, na.rm = TRUE)
-
-  if (!is.null(reporting_threshold)) {
-    n_low_reprate <- sum(
-      !is.na(data$reprate) & data$reprate < reporting_threshold,
-      na.rm = TRUE
-    )
-  } else {
-    n_low_reprate <- 0
-  }
-
-  if (n_na_reprate > 0) {
-    cli::cli_alert_info(
-      "{sntutils::big_mark(n_na_reprate)} facility-months have NA reporting rate."
-    )
-  }
-
-  if (n_zero_reprate > 0) {
-    cli::cli_alert_info(
-      "{sntutils::big_mark(n_zero_reprate)} facility-months in districts ",
-      "with 0% reporting rate."
-    )
-  }
-
-  if (n_low_reprate > 0 && !is.null(reporting_threshold)) {
-    cli::cli_alert_info(
-      "{sntutils::big_mark(n_low_reprate)} facility-months in districts below ",
-      "{reporting_threshold * 100}% reporting threshold."
-    )
-  }
-
-  # ---- rename vars internally ----------------------------------------------
+  # ---- rename vars internally and merge activity -------------------------
 
   df <- data |>
+  # Join activity status first (before rename)
+  dplyr::left_join(
+    activity_classification |>
+      dplyr::select(
+        !!rlang::sym(hf_var),
+        !!rlang::sym(date_var),
+        activity_status
+      ) |>
+      dplyr::distinct(!!!rlang::syms(c(hf_var, date_var)), .keep_all = TRUE),
+    by = c(hf_var, date_var)
+  ) |>
+  # Now rename to standard column names
   dplyr::rename(
     hf_uid = !!hf_var,
     adm1 = !!adm1_var,
@@ -388,7 +301,16 @@ calc_tpr <- function(
   ) |>
   dplyr::mutate(
     conf = as.numeric(conf),
-    test = as.numeric(test)
+    test = as.numeric(test),
+    flag_inactive = activity_status != "Active"
+  )
+
+  n_inactive <- sum(df$flag_inactive, na.rm = TRUE)
+  n_total <- nrow(df)
+
+  cli::cli_alert_info(
+    "{sntutils::big_mark(n_inactive)} of {sntutils::big_mark(n_total)} ",
+    "facility-months flagged as inactive."
   )
 
   # ---- adm0 handling -------------------------------------------------------
@@ -430,8 +352,13 @@ calc_tpr <- function(
   nrow()
 
   if (n_dup > 0) {
-    cli::cli_alert_warning(
-      "Found {sntutils::big_mark(n_dup)} duplicate facility-months."
+    cli::cli_abort(
+      c(
+        "Found {sntutils::big_mark(n_dup)} duplicate facility-month records.",
+        "x" = "Input data contains duplicate hf_uid + date combinations.",
+        "i" = "Remove duplicates from input data before calling calc_tpr().",
+        "i" = "Use dplyr::distinct(hf_uid, date, .keep_all = TRUE) to keep first occurrence."
+      )
     )
   }
 
@@ -462,22 +389,16 @@ calc_tpr <- function(
     flag_zero_test = test == 0,
     flag_low_test = !is.na(test) & test < 5,
     flag_missing_conf = is.na(conf),
-    flag_low_reprate = if (!is.null(reporting_threshold)) {
-      !is.na(reprate) & reprate < reporting_threshold
-    } else {
-      FALSE
-    },
     test = dplyr::if_else(test == 0, NA_real_, test)
   )
 
   # ---- clean dataset for proxies -------------------------------------------
-  # Exclude: impossible values, inactive facilities, low reporting rate
+  # Exclude: impossible values, inactive facilities
 
   df_clean <- df |>
   dplyr::filter(
     !flag_conf_gt_test,
-    !flag_inactive,
-    !flag_low_reprate
+    !flag_inactive
   )
 
   # ---- raw tpr --------------------------------------------------------------
@@ -545,14 +466,6 @@ calc_tpr <- function(
     dplyr::mutate(
       .should_fallback = .should_fallback &
       (is.na(tpr) | flag_low_test)
-    )
-  }
-
-  if ("low_reprate" %in% fallback_triggers) {
-    df <- df |>
-    dplyr::mutate(
-      .should_fallback = .should_fallback &
-      (is.na(tpr) | flag_low_reprate)
     )
   }
 
@@ -869,10 +782,11 @@ calc_tpr <- function(
   }
 
   # Breakdown of missing TPR
-  n_missing_inactive <- sum(is.na(df$tpr) & df$flag_inactive)
-  n_missing_conf_gt_test <- sum(is.na(df$tpr) & df$flag_conf_gt_test)
+  n_missing_inactive <- sum(is.na(df$tpr) & df$flag_inactive, na.rm = TRUE)
+  n_missing_conf_gt_test <- sum(is.na(df$tpr) & df$flag_conf_gt_test, na.rm = TRUE)
   n_missing_other <- sum(
-    is.na(df$tpr) & !df$flag_inactive & !df$flag_conf_gt_test
+    is.na(df$tpr) & !df$flag_inactive & !df$flag_conf_gt_test,
+    na.rm = TRUE
   )
 
   if (n_missing_inactive > 0) {
@@ -922,13 +836,9 @@ calc_tpr <- function(
     n_extreme_tpr = sum(df$flag_tpr_extreme),
     n_impossible_values = sum(df$flag_conf_gt_test),
     n_inactive = sum(df$flag_inactive),
-    n_low_reprate = sum(df$flag_low_reprate),
     activity_method = activity_method,
     nonreport_window = nonreport_window,
-    reporting_threshold = reporting_threshold,
     extreme_threshold = extreme_threshold,
-    reprate_var = reprate_var,
-    reprate_source = if (is.null(reprate_var)) "calculated" else "user_provided",
     hf_var = hf_var,
     adm0_var = adm0_var,
     adm1_var = adm1_var,
@@ -951,7 +861,6 @@ calc_tpr <- function(
     "month",
     "conf",
     "test",
-    "reprate",
     "tpr",
     "tpr_source"
   )
@@ -966,8 +875,7 @@ calc_tpr <- function(
     "flag_zero_test",
     "flag_low_test",
     "flag_missing_conf",
-    "flag_inactive",
-    "flag_low_reprate"
+    "flag_inactive"
   )
 
   # Get all other columns from original data (preserving extra columns)
@@ -1034,9 +942,8 @@ calc_tpr <- function(
 #'       \itemize{
 #'         \item `scatter`: Actual vs proxy scatterplots
 #'         \item `error_dist`: Error distribution by proxy level
-#'         \item `mae_by_reprate`: MAE vs reporting rate
-#'         \item `mae_by_nfacilities`: MAE vs number of facilities
-#'         \item `error_by_month`: Proxy error by calendar month
+#'         \item `mae_by_tests`: MAE vs number of tests
+#'         \item `stability_map`: Error patterns by test count and TPR value
 #'       }
 #'     \item `summary`: Character vector with key findings
 #'   }
@@ -1078,10 +985,8 @@ validate_tpr_proxies <- function(
     test_var,
     "tpr",
     "tpr_source",
-    "reprate",
     "flag_inactive",
-    "flag_conf_gt_test",
-    "flag_low_reprate"
+    "flag_conf_gt_test"
   )
 
   missing_cols <- setdiff(required_cols, names(data))
@@ -1104,7 +1009,6 @@ validate_tpr_proxies <- function(
   dplyr::filter(
     !flag_conf_gt_test,
     !flag_inactive,
-    !flag_low_reprate,
     !is.na(.data[[conf_var]]),
     !is.na(.data[[test_var]]),
     .data[[test_var]] > 0
@@ -1544,52 +1448,6 @@ validate_tpr_proxies <- function(
     ggplot2::theme_minimal() +
     ggplot2::theme(
       axis.text.x = ggplot2::element_text(angle = 45, hjust = 1),
-      panel.border = ggplot2::element_rect(
-        colour = "black",
-        fill = NA,
-        linewidth = 1
-      )
-    )
-
-    # MAE vs reprate
-    mae_reprate <- long |>
-    dplyr::mutate(
-      reprate_bin = cut(
-        reprate,
-        breaks = seq(0, 1.0, by = 0.05),
-        include.lowest = TRUE
-      )
-    ) |>
-    dplyr::group_by(proxy_level, reprate_bin) |>
-    dplyr::summarise(
-      mae = mean(abs(error), na.rm = TRUE),
-      n = dplyr::n(),
-      .groups = "drop"
-    )
-
-    mae_reprate$reprate_bin <- factor(
-      mae_reprate$reprate_bin,
-      levels = levels(mae_reprate$reprate_bin),
-      ordered = TRUE
-    )
-
-    plots$mae_by_reprate <- ggplot2::ggplot(
-      mae_reprate,
-      ggplot2::aes(reprate_bin, mae, colour = proxy_level, group = proxy_level)
-    ) +
-    ggplot2::geom_line(linewidth = 1.2) +
-    ggplot2::geom_point(size = 2) +
-    ggplot2::scale_color_brewer(palette = "Spectral") +
-    ggplot2::theme_minimal() +
-    ggplot2::labs(
-      title = "MAE by Reporting Rate",
-      subtitle = "Proxy TPR minus actual TPR\n",
-      y = "\n\nMAE\n\n",
-      x = "\n\nReporting rate breaks",
-      color = "Proxy Level"
-    ) +
-    ggplot2::theme(
-      plot.margin = ggplot2::margin(10, 10, 10, 10),
       panel.border = ggplot2::element_rect(
         colour = "black",
         fill = NA,

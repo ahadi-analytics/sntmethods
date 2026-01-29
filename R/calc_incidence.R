@@ -90,8 +90,12 @@
 #'   (default: NULL). If provided (e.g., `suffix = "u5"`), output columns
 #'   will be named `n0_cases_u5`, `n0_incidence_u5`, etc. Useful for
 #'   distinguishing outputs for different population groups.
+#' @param return_facility Logical; if `TRUE`, includes facility-level data
+#'   in the output with diagnostic flags. If `FALSE` (default), returns only
+#'   aggregated admin-level data. Useful for investigating data quality issues
+#'   before aggregation (e.g., why n1_cases < n0_cases).
 #'
-#' @return A named list with two components:
+#' @return A named list with components:
 #'   \describe{
 #'     \item{monthly}{A named list with tibbles at each admin level (N0-N4):
 #'       \itemize{
@@ -107,6 +111,12 @@
 #'         \item `adm1`: First admin level (region) annual incidence (N0-N4)
 #'         \item `adm2`: Second admin level (district) annual incidence (N0-N4)
 #'         \item `adm3`: Third admin level annual incidence (N0-N4, if `adm3_var` provided)
+#'       }
+#'     }
+#'     \item{facility}{(Only if `return_facility = TRUE`) A named list with tibbles:
+#'       \itemize{
+#'         \item `monthly`: Facility-month level data
+#'         \item `annual`: Facility-year level data (if applicable)
 #'       }
 #'     }
 #'   }
@@ -190,7 +200,8 @@ calc_incidence <- function(
   rate_multiplier = 1000,
   scale_factor = lifecycle::deprecated(),
   include_flags = FALSE,
-  suffix = NULL
+  suffix = NULL,
+  return_facility = FALSE
 ) {
   # ---- handle deprecated scale_factor parameter -----------------------------
 
@@ -355,7 +366,7 @@ calc_incidence <- function(
   # Validate reporting rate is in (0, 1] range (if present and N2+ requested)
   if (needs_reprate && reprate_var %in% names(data)) {
     reprate_vals <- data[[reprate_var]]
-    invalid_reprate <- !is.na(reprate_vals) & (reprate_vals <= 0 | reprate_vals > 1)
+    invalid_reprate <- !is.na(reprate_vals) & (reprate_vals < 0 | reprate_vals > 1)
     if (any(invalid_reprate)) {
       n_invalid <- sum(invalid_reprate)
       reprate_range <- range(reprate_vals[invalid_reprate], na.rm = TRUE)
@@ -405,6 +416,51 @@ calc_incidence <- function(
 
   # ---- rename vars internally ----------------------------------------------
 
+  # Build list of columns that will be renamed to standard names
+  # We need to drop any existing columns with these standard names to avoid
+
+  # duplicates (e.g., if data has both "conf" and "conf_u5" and user specifies
+  # conf_var = "conf_u5", we need to drop "conf" before renaming "conf_u5")
+  standard_names <- c("hf_uid", "adm1", "adm2", "date_raw", "pop", "conf")
+  input_vars <- c(hf_var, adm1_var, adm2_var, date_var, pop_var, conf_var)
+
+  if (needs_tpr) {
+    standard_names <- c(standard_names, "test", "pres", "tpr")
+    input_vars <- c(input_vars, test_var, pres_var, tpr_var)
+  }
+
+  if (needs_reprate && reprate_var != "reprate") {
+    standard_names <- c(standard_names, "reprate")
+    input_vars <- c(input_vars, reprate_var)
+  }
+
+  if ("N3" %in% levels || "N4" %in% levels) {
+    if (cs_public_var %in% names(data) && cs_public_var != "cs_public") {
+      standard_names <- c(standard_names, "cs_public")
+      input_vars <- c(input_vars, cs_public_var)
+    }
+    if (cs_private_var %in% names(data) && cs_private_var != "cs_private") {
+      standard_names <- c(standard_names, "cs_private")
+      input_vars <- c(input_vars, cs_private_var)
+    }
+    if (cs_none_var %in% names(data) && cs_none_var != "cs_none") {
+      standard_names <- c(standard_names, "cs_none")
+      input_vars <- c(input_vars, cs_none_var)
+    }
+  }
+
+  # Find columns that would cause duplicates (standard name exists but isn't
+  # the input var being renamed)
+  cols_to_drop <- setdiff(
+    intersect(standard_names, names(data)),
+    input_vars
+  )
+
+  if (length(cols_to_drop) > 0) {
+    data <- data |>
+      dplyr::select(-dplyr::all_of(cols_to_drop))
+  }
+
   df <- data |>
     dplyr::rename(
       hf_uid = !!hf_var,
@@ -444,6 +500,10 @@ calc_incidence <- function(
       df <- df |>
         dplyr::rename(reprate = !!reprate_var)
     }
+    # Explicitly convert to numeric (like test and pres)
+    # Use as.character first to handle factor inputs correctly
+    df <- df |>
+      dplyr::mutate(reprate = as.numeric(as.character(reprate)))
   }
 
   # Add care-seeking for N3 and N4
@@ -508,32 +568,36 @@ calc_incidence <- function(
     )
   }
 
+  # ---- N1 calculation: ADMIN-LEVEL ONLY (NOT facility-level) ----------------
+  #
+  # IMPORTANT: We do NOT calculate N1 at facility level before aggregation.
+  #
+  # Previous approach (facility-level N1 → sum to admin):
+  #   - Calculated n1_cases_fac = conf + pres × tpr for each facility
+  #   - Summed n1_cases_fac to get admin-level n1_cases
+  #   - ISSUE: Facilities with missing TPR were excluded (n1_cases_fac = NA)
+  #   - Result: n1_cases < n0_cases (data loss from excluded facilities)
+  #   - Example: BLITTA 2018-03 had 5/22 facilities with missing TPR
+  #             → 809 confirmed cases excluded from N1
+  #             → n0=3300, n1=2491 (impossible!)
+  #
+  # Current approach (admin-level N1 after aggregation):
+  #   - Aggregate conf, pres, test to admin level
+  #   - Calculate admin-level TPR = sum(conf) / sum(test)
+  #   - Calculate n1_cases = sum(conf) + sum(pres) × admin_tpr
+  #   - Result: All facilities contribute, n1 >= n0 (mathematically correct)
+  #
+  # Trade-off: We lose facility-specific TPR variation, but gain data completeness.
+  # This is acceptable because missing TPR is a data quality issue that would
+  # otherwise cause severe underestimation of N1.
+  #
+  # N1 will be calculated after aggregation in .calc_n1_internal()
+  # ----------------------------------------------------------------------------
+
   # ---- store facility-level data before aggregation -------------------------
 
   # Keep facility-level data for hf-level output
   df_facility <- df
-
-  # ---- calculate N1 cases at facility level --------------------------------
-
-  if (needs_tpr) {
-    df <- df |>
-      dplyr::mutate(
-        tpr_clean = dplyr::case_when(
-          is.na(tpr) ~ NA_real_,
-          tpr < 0 ~ 0,
-          tpr > 1 ~ 1,
-          TRUE ~ tpr
-        ),
-        pres_clean = dplyr::if_else(is.na(pres) | pres < 0, 0, pres),
-        # N1 cases at facility level using facility-specific TPR
-        n1_cases_fac = dplyr::if_else(
-          !is.na(conf) & !is.na(tpr_clean),
-          conf + pres_clean * tpr_clean,
-          NA_real_
-        )
-      ) |>
-      dplyr::select(-tpr_clean, -pres_clean)
-  }
 
   # ---- aggregate to admin-month level --------------------------------------
 
@@ -739,6 +803,13 @@ calc_incidence <- function(
 
   if (needs_tpr) {
     core_cols <- c(core_cols, "test", "pres", "tpr")
+    # Add data quality diagnostic columns if they exist
+    diagnostic_cols <- c("n_facilities", "n_facilities_with_conf",
+                         "n_facilities_with_tpr")
+    existing_diagnostic_cols <- intersect(diagnostic_cols, names(df))
+    if (length(existing_diagnostic_cols) > 0) {
+      core_cols <- c(core_cols, existing_diagnostic_cols)
+    }
   }
 
   if (needs_reprate) {
@@ -823,8 +894,29 @@ calc_incidence <- function(
     df_admin = df_final,
     df_facility = df_facility_final,
     scale_factor = rate_multiplier,
-    has_adm3 = has_adm3
+    has_adm3 = has_adm3,
+    return_facility = return_facility
   )
+
+  # ---- Rename TPR column in output if different from "tpr" ------------------
+
+  if (needs_tpr && tpr_var != "tpr") {
+    # Rename tpr in all monthly tibbles
+    for (level in names(output$monthly)) {
+      if ("tpr" %in% names(output$monthly[[level]])) {
+        output$monthly[[level]] <- output$monthly[[level]] |>
+          dplyr::rename(!!tpr_var := tpr)
+      }
+    }
+
+    # Rename tpr in all annual tibbles
+    for (level in names(output$annual)) {
+      if ("tpr" %in% names(output$annual[[level]])) {
+        output$annual[[level]] <- output$annual[[level]] |>
+          dplyr::rename(!!tpr_var := tpr)
+      }
+    }
+  }
 
   # ---- Validate cascade monotonicity -----------------------------------------
 
@@ -842,35 +934,38 @@ calc_incidence <- function(
   cli::cli_rule()
   cli::cli_h2("Incidence Cascade Summary")
 
-  # Show formulas used
+  # Show formulas used (with suffix if provided)
   cli::cli_h3("Formulas Used")
+  sfx <- if (!is.null(suffix)) paste0("_", suffix) else ""
+
   if ("N0" %in% levels) {
-    cli::cli_text("N0: n0_cases = conf")
-    cli::cli_text("    n0_incidence = (n0_cases / pop) * {rate_multiplier}")
+    cli::cli_text("N0: n0_cases{sfx} = conf{sfx}")
+    cli::cli_text("    n0_incidence{sfx} = (n0_cases{sfx} / pop{sfx}) * {rate_multiplier}")
   }
+
   if ("N1" %in% levels) {
-    cli::cli_text("N1: n1_cases = n0_cases + (pres * tpr)")
-    cli::cli_text("    n1_incidence = (n1_cases / pop) * {rate_multiplier}")
+    cli::cli_text("N1: n1_cases{sfx} = n0_cases{sfx} + (pres{sfx} * tpr)")
+    cli::cli_text("    n1_incidence{sfx} = (n1_cases{sfx} / pop{sfx}) * {rate_multiplier}")
   }
   if ("N2" %in% levels) {
-    cli::cli_text("N2: n2_cases = n1_cases / reprate")
-    cli::cli_text("    n2_incidence = (n2_cases / pop) * {rate_multiplier}")
+    cli::cli_text("N2: n2_cases{sfx} = n1_cases{sfx} / reprate")
+    cli::cli_text("    n2_incidence{sfx} = (n2_cases{sfx} / pop{sfx}) * {rate_multiplier}")
   }
   if ("N3" %in% levels) {
     cli::cli_text(
-      "N3: n3_cases = n2_cases + (n2_cases * cs_private/cs_public) + ",
-      "(n2_cases * cs_none/cs_public)"
+      "N3: n3_cases{sfx} = n2_cases{sfx} + (n2_cases{sfx} * cs_private/cs_public) + ",
+      "(n2_cases{sfx} * cs_none/cs_public)"
     )
     cli::cli_text(
-      "    n3_incidence = (n3_cases / pop) * {rate_multiplier}"
+      "    n3_incidence{sfx} = (n3_cases{sfx} / pop{sfx}) * {rate_multiplier}"
     )
   }
   if ("N4" %in% levels) {
     cli::cli_text(
-      "N4: n4_cases = n2_cases * (1 + cs_none/cs_public)"
+      "N4: n4_cases{sfx} = n2_cases{sfx} * (1 + cs_none/cs_public)"
     )
     cli::cli_text(
-      "    n4_incidence = (n4_cases / pop) * {rate_multiplier}"
+      "    n4_incidence{sfx} = (n4_cases{sfx} / pop{sfx}) * {rate_multiplier}"
     )
     cli::cli_text(
       "    Note: Excludes private sector adjustment"
@@ -930,6 +1025,16 @@ calc_incidence <- function(
   }
   cli::cli_rule()
 
+  # ---- Round output values ----------------------------------------------------
+
+  output <- .round_incidence_output(output)
+
+  # ---- Apply suffix to output columns if specified ----------------------------
+
+  if (!is.null(suffix)) {
+    output <- .apply_suffix_to_output(output, suffix)
+  }
+
   # Results by Region (ADM1) for most recent year
   regional_annual <- output$annual$adm1
   if (nrow(regional_annual) > 0) {
@@ -952,17 +1057,6 @@ calc_incidence <- function(
       dplyr::arrange(year)
     print(national_summary, n = Inf)
     cli::cli_rule()
-  }
-
-  # ---- Round output values ----------------------------------------------------
-
-  output <- .round_incidence_output(output)
-
-  # ---- Apply suffix to output columns if specified ----------------------------
-
-  if (!is.null(suffix)) {
-    output <- .apply_suffix_to_output(output, suffix)
-    cli::cli_alert_info("Applied suffix '_{suffix}' to incidence columns.")
   }
 
   return(output)
@@ -997,6 +1091,9 @@ calc_incidence <- function(
     "adj_priv", "adj_none"
   )
 
+  # Intermediate columns to drop from final output
+  cols_to_drop <- c("adj_priv", "adj_none", "adj_pub")
+
   # Helper to round columns in a single data frame
   round_df <- function(df) {
     if (is.null(df) || nrow(df) == 0) return(df)
@@ -1009,6 +1106,12 @@ calc_incidence <- function(
     # Round decimal columns to 2 decimal places
     for (col in intersect(decimal_cols, names(df))) {
       df[[col]] <- round(df[[col]], 2)
+    }
+
+    # Drop intermediate calculation columns
+    cols_present <- intersect(cols_to_drop, names(df))
+    if (length(cols_present) > 0) {
+      df <- df |> dplyr::select(-dplyr::all_of(cols_present))
     }
 
     df
@@ -1163,8 +1266,11 @@ calc_incidence <- function(
 #'
 #' @keywords internal
 .apply_suffix_to_output <- function(output, suffix) {
-  # Columns to rename (incidence cascade outputs)
+  # Columns to rename: core data columns + incidence cascade outputs
   cols_to_rename <- c(
+    # Core data columns (population-specific)
+    "pop", "conf", "test", "pres",
+    # Incidence cascade outputs
     "n0_cases", "n0_incidence",
     "n1_cases", "n1_incidence",
     "n2_cases", "n2_incidence",
@@ -1179,10 +1285,13 @@ calc_incidence <- function(
     existing_cols <- intersect(cols_to_rename, names(df))
     if (length(existing_cols) == 0) return(df)
 
-    new_names <- paste0(existing_cols, "_", suffix)
-    names(new_names) <- existing_cols
+    # dplyr::rename with all_of() expects: new_name = old_name
+    # So names of the vector are the NEW names (with suffix)
+    # and values are the OLD names (existing columns)
+    old_names <- existing_cols
+    names(old_names) <- paste0(existing_cols, "_", suffix)
 
-    dplyr::rename(df, dplyr::all_of(new_names))
+    dplyr::rename(df, dplyr::all_of(old_names))
   }
 
   # Apply to all monthly tibbles
@@ -1212,6 +1321,7 @@ calc_incidence <- function(
 #'   - Recalculated: tpr = sum(conf)/sum(test)
 #'   - Mean: reprate
 #'   - First: cs_public, cs_private, cs_none
+#'   - Diagnostics: n_facilities, n_facilities_with_conf, n_facilities_with_tpr
 #'
 #' @keywords internal
 .aggregate_to_admin_month <- function(df) {
@@ -1221,7 +1331,6 @@ calc_incidence <- function(
   has_reprate <- "reprate" %in% names(df)
   has_tpr <- "tpr" %in% names(df)
   has_adm3 <- "adm3" %in% names(df)
-  has_n1_fac <- "n1_cases_fac" %in% names(df)
 
   # Build grouping variables dynamically
 
@@ -1244,12 +1353,6 @@ calc_incidence <- function(
       },
       pres = if ("pres" %in% names(df)) {
         sum(pres, na.rm = TRUE)
-      } else {
-        NA_real_
-      },
-      # N1 cases: sum facility-level n1_cases (calculated before aggregation)
-      n1_cases = if (has_n1_fac) {
-        sum(n1_cases_fac, na.rm = TRUE)
       } else {
         NA_real_
       },
@@ -1280,6 +1383,14 @@ calc_incidence <- function(
         dplyr::first(cs_none)
       } else {
         NA_real_
+      },
+      # Diagnostic outputs for data quality monitoring
+      n_facilities = dplyr::n_distinct(hf_uid),
+      n_facilities_with_conf = sum(!is.na(conf) & conf > 0, na.rm = TRUE),
+      n_facilities_with_tpr = if (has_tpr) {
+        sum(!is.na(tpr), na.rm = TRUE)
+      } else {
+        NA_integer_
       },
       .groups = "drop"
     )
@@ -2052,21 +2163,24 @@ calc_incidence <- function(
 #' Build Output List with Monthly and Annual Aggregations - Internal
 #'
 #' Creates a structured list with monthly and annual aggregations at each
-#' admin level (hf, adm0, adm1, adm2, adm3).
+#' admin level (adm0, adm1, adm2, adm3). Optionally includes facility-level
+#' data with diagnostic flags.
 #'
 #' @param df_admin Data frame with monthly incidence data at admin level
 #' @param df_facility Data frame with monthly incidence data at facility level
 #' @param scale_factor Numeric. Scale factor for incidence calculation
 #' @param has_adm3 Logical. Whether adm3 column exists
+#' @param return_facility Logical. Whether to include facility-level data in output
 #'
-#' @return Named list with monthly and annual components
+#' @return Named list with monthly and annual components, and optionally facility
 #'
 #' @keywords internal
 .build_output_list <- function(
     df_admin,
     df_facility,
     scale_factor,
-    has_adm3 = FALSE
+    has_adm3 = FALSE,
+    return_facility = FALSE
 ) {
 
   admin_levels <- c("adm0", "adm1", "adm2")
@@ -2094,10 +2208,19 @@ calc_incidence <- function(
     )
   }
 
-  list(
+  output <- list(
     monthly = monthly,
     annual = annual
   )
+
+  # Add facility-level data if requested
+  if (return_facility && !is.null(df_facility)) {
+    output$facility <- list(
+      monthly = df_facility
+    )
+  }
+
+  output
 }
 
 
@@ -2804,18 +2927,31 @@ check_incidence <- function(
       location = paste0(adm1, " ~ ", adm2)
     )
 
-  # Determine which incidence columns exist
-  monthly_inc_cols <- intersect(
-    c("n0_incidence", "n1_incidence", "n2_incidence"),
-    names(monthly_data)
+
+  # Determine which incidence columns exist (with or without suffix)
+  # Pattern matches n0_incidence, n1_incidence_u5, etc.
+  monthly_inc_cols <- grep(
+    "^n[0-4]_incidence(_[a-zA-Z0-9_]+)?$",
+    names(monthly_data),
+    value = TRUE
   )
-  annual_inc_cols <- intersect(
-    c(
-      "n0_incidence", "n1_incidence", "n2_incidence",
-      "n3_incidence", "n4_incidence"
-    ),
-    names(annual_data)
+  annual_inc_cols <- grep(
+    "^n[0-4]_incidence(_[a-zA-Z0-9_]+)?$",
+    names(annual_data),
+    value = TRUE
   )
+
+  # Detect suffix from column names (if any)
+  detected_suffix <- NULL
+  if (length(monthly_inc_cols) > 0) {
+    suffix_match <- regmatches(
+      monthly_inc_cols[1],
+      regexec("^n[0-4]_incidence(_([a-zA-Z0-9_]+))?$", monthly_inc_cols[1])
+    )[[1]]
+    if (length(suffix_match) >= 3 && nchar(suffix_match[3]) > 0) {
+      detected_suffix <- suffix_match[3]
+    }
+  }
 
   if (length(monthly_inc_cols) == 0) {
     cli::cli_abort("No incidence columns found in monthly data.")
@@ -2842,7 +2978,8 @@ check_incidence <- function(
     ) |>
     dplyr::mutate(
       yearmon = zoo::as.yearmon(date),
-      level = toupper(gsub("_incidence", "", level)),
+      # Remove _incidence and any suffix (e.g., n0_incidence_u5 -> N0)
+      level = toupper(gsub("_incidence(_[a-zA-Z0-9_]+)?$", "", level)),
       level = factor(level, levels = c("N0", "N1", "N2", "N3", "N4"))
     )
 
@@ -2858,7 +2995,8 @@ check_incidence <- function(
       values_to = "incidence"
     ) |>
     dplyr::mutate(
-      level = toupper(gsub("_incidence", "", level)),
+      # Remove _incidence and any suffix (e.g., n0_incidence_u5 -> N0)
+      level = toupper(gsub("_incidence(_[a-zA-Z0-9_]+)?$", "", level)),
       level = factor(level, levels = c("N0", "N1", "N2", "N3", "N4"))
     )
 

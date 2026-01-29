@@ -100,7 +100,6 @@ test_that("calc_tpr calculates raw TPR correctly", {
   expect_true("tpr" %in% names(result))
   expect_true("tpr_source" %in% names(result))
   expect_true("adm0" %in% names(result))
-  expect_true("reprate" %in% names(result))
 
   # Check TPR values
   expect_equal(result$tpr[1], 0.10)
@@ -406,7 +405,6 @@ test_that("calc_tpr handles custom variable mapping", {
     date_var = "report_date",
     conf_var = "confirmed_cases",
     test_var = "tested",
-    pres_var = "presumed_cases",
     activity_indicators = c("confirmed_cases", "tested")
   )
 
@@ -612,7 +610,7 @@ test_that("calc_tpr handles fallback_triggers correctly (impossible values now i
   expect_true(result_default$flag_missing_conf[3])  # HF003 missing
 })
 
-test_that("calc_tpr returns reprate column", {
+test_that("calc_tpr does not return reprate column", {
   skip_if_not_installed("sntutils")
 
   test_data <- data.frame(
@@ -627,9 +625,10 @@ test_that("calc_tpr returns reprate column", {
 
   result <- calc_tpr(test_data)
 
-  # Check reprate column exists
-  expect_true("reprate" %in% names(result))
+  # Check reprate column does not exist
+  expect_false("reprate" %in% names(result))
 
-  # Reprate should be numeric between 0 and 1
-  expect_true(all(result$reprate >= 0 & result$reprate <= 1, na.rm = TRUE))
+  # Check flag_low_reprate does not exist
+  result_with_flags <- calc_tpr(test_data, include_flags = TRUE)
+  expect_false("flag_low_reprate" %in% names(result_with_flags))
 })

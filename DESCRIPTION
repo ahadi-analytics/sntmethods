@@ -21,6 +21,7 @@ BugReports: https://github.com/ahadi-analytics/sntmethods/issues
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
+SystemRequirements: GDAL (>= 3.0.0), GEOS (>= 3.8.0), PROJ (>= 6.0.0) for spatial functionality (optional)
 Imports:
     cli (>= 3.6.5),
     DHS.rates,
@@ -29,9 +30,9 @@ Imports:
     lifecycle (>= 1.0.0),
     sntutils (>= 1.11.6),
     survey (>= 4.4.8),
-    ggplot2 (>= 4.0.0),
-    mbg (>= 1.1.0)
+    ggplot2 (>= 4.0.0)
 Suggests:
+    mbg (>= 1.1.0),
     here (>= 1.0.2),
     arrow (>= 22.0.0),
     countrycode (>= 1.5.0),
