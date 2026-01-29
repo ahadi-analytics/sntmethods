@@ -1,0 +1,107 @@
+title: "ANC MBG Indicator Preparation"
+version: "1.0.0"
+description: >
+  Prepares cluster-level Antenatal Care (ANC) attendance data for MBG analysis.
+  Calculates proportion of women with recent births who received specified
+  number of ANC visits.
+
+indicators:
+  anc_1plus:
+    name: "ANC 1+ visits"
+    numerator: "Women with at least 1 ANC visit"
+    denominator: "Women with births in analysis window"
+    description: >
+      Proportion of women who received at least one antenatal care visit
+      during their most recent pregnancy.
+
+  anc_4plus:
+    name: "ANC 4+ visits"
+    numerator: "Women with at least 4 ANC visits"
+    denominator: "Women with births in analysis window"
+    description: >
+      Proportion of women who received at least four antenatal care visits.
+      This was the WHO-recommended minimum until 2016.
+
+  anc_8plus:
+    name: "ANC 8+ visits"
+    numerator: "Women with at least 8 ANC visits"
+    denominator: "Women with births in analysis window"
+    description: >
+      Proportion of women who received at least eight antenatal care visits.
+      This is the current WHO recommendation (2016 guidelines).
+
+data_sources:
+  primary: "IR (Individual Recode)"
+  gps: "GE (Geographic)"
+
+variables:
+  cluster_id:
+    dhs_name: "v001"
+    description: "Cluster/enumeration area identifier"
+
+  interview_date:
+    dhs_name: "v008"
+    description: "Date of interview (CMC format)"
+
+  birth_date:
+    dhs_name: "b3_01"
+    description: "Date of most recent birth (CMC format)"
+    note: "_01 suffix indicates most recent birth (birth index 1)"
+
+  anc_visits:
+    dhs_name: "m14_1"
+    description: "Number of antenatal visits during last pregnancy"
+    note: >
+      Value 98 typically means "don't know" and should be excluded.
+      _1 suffix indicates most recent pregnancy.
+
+  gps_cluster:
+    dhs_name: "DHSCLUST"
+    description: "Cluster ID in GPS file"
+
+  gps_lat:
+    dhs_name: "LATNUM"
+    description: "Latitude coordinate"
+
+  gps_lon:
+    dhs_name: "LONGNUM"
+    description: "Longitude coordinate"
+
+eligibility:
+  - "Woman had a live birth within analysis window (default: 36 months)"
+  - "Valid response to ANC visits question (not missing, not 'don't know')"
+  - "Cluster has valid GPS coordinates"
+
+methodology:
+  birth_window: >
+    Default analysis window is 36 months (3 years) before the survey.
+    Maximum is 60 months (5 years). Shorter windows provide more recent
+    data but may reduce sample sizes.
+
+  cmc_format: >
+    Century Month Code (CMC) is used for dates. CMC = (year - 1900) * 12 + month.
+    Example: January 2020 = (2020 - 1900) * 12 + 1 = 1441.
+
+  most_recent_birth: >
+    Only the most recent birth is included to avoid double-counting women
+    with multiple births in the analysis window. The _01 suffix in variable
+    names indicates the most recent birth.
+
+output_format:
+  columns:
+    cluster_id: "Cluster identifier"
+    indicator: "Number of women meeting threshold"
+    samplesize: "Total women with recent births"
+    x: "Longitude"
+    y: "Latitude"
+
+validation:
+  - "Birth must be within analysis window"
+  - "ANC visits must be valid number (< 98)"
+  - "Interview date must be after birth date"
+  - "Clusters with zero eligible women excluded"
+
+references:
+  - "WHO. WHO recommendations on antenatal care. 2016."
+  - "DHS Guide to Statistics - ANC Coverage"
+  - "Countdown to 2030 - ANC indicators"

@@ -1,0 +1,106 @@
+title: "IPTp MBG Indicator Preparation"
+version: "1.0.0"
+description: >
+  Prepares cluster-level Intermittent Preventive Treatment in pregnancy (IPTp)
+  data for MBG analysis. Supports cumulative and exclusive dose categories.
+
+indicators:
+  cumulative:
+    iptp_1plus:
+      name: "IPTp 1+ doses"
+      numerator: "Women who received at least 1 dose of SP/Fansidar"
+      denominator: "Women with recent birth"
+
+    iptp_2plus:
+      name: "IPTp 2+ doses"
+      numerator: "Women who received at least 2 doses of SP/Fansidar"
+      denominator: "Women with recent birth"
+
+    iptp_3plus:
+      name: "IPTp 3+ doses"
+      numerator: "Women who received at least 3 doses of SP/Fansidar"
+      denominator: "Women with recent birth"
+      note: "WHO-recommended minimum for malaria prevention in pregnancy"
+
+  exclusive:
+    iptp_1only:
+      name: "IPTp exactly 1 dose"
+      numerator: "Women who received exactly 1 dose"
+      denominator: "Women with recent birth"
+
+    iptp_2only:
+      name: "IPTp exactly 2 doses"
+      numerator: "Women who received exactly 2 doses"
+      denominator: "Women with recent birth"
+
+    iptp_3only:
+      name: "IPTp exactly 3 doses"
+      numerator: "Women who received exactly 3 doses"
+      denominator: "Women with recent birth"
+
+data_sources:
+  primary: "IR (Individual Recode)"
+  gps: "GE (Geographic)"
+
+variables:
+  cluster_id:
+    dhs_name: "v001"
+    description: "Cluster/enumeration area identifier"
+
+  interview_date:
+    dhs_name: "v008"
+    description: "Date of interview (CMC format)"
+
+  birth_date:
+    dhs_name: "b3_01"
+    description: "Date of most recent birth (CMC format)"
+
+  sp_doses:
+    dhs_name: "m49a_1"
+    description: "Number of SP/Fansidar doses during pregnancy"
+    values:
+      0: "None"
+      1-7: "Number of doses"
+      90+: "Don't know / Other"
+    note: "_1 suffix indicates most recent pregnancy"
+
+  gps_cluster:
+    dhs_name: "DHSCLUST"
+
+  gps_lat:
+    dhs_name: "LATNUM"
+
+  gps_lon:
+    dhs_name: "LONGNUM"
+
+eligibility:
+  - "Woman had a live birth within analysis window (default: 36 months)"
+  - "Valid response to SP doses question (0-7, not don't know)"
+  - "Cluster has valid GPS coordinates"
+
+methodology:
+  who_recommendation: >
+    WHO recommends at least 3 doses of IPTp-SP for pregnant women in
+    malaria-endemic areas. Some programs aim for 4+ doses.
+
+  denominator: >
+    Denominator includes all women with recent births and valid SP data.
+    Some analyses restrict to women who attended ANC at least once.
+
+  cumulative_vs_exclusive: >
+    Cumulative indicators (1plus, 2plus, 3plus) count all women who
+    received at least N doses. Exclusive indicators count women who
+    received exactly N doses.
+
+output_format:
+  columns:
+    cluster_id: "Cluster identifier"
+    indicator: "Number meeting threshold"
+    samplesize: "Total eligible women"
+    x: "Longitude"
+    y: "Latitude"
+
+references:
+  - "WHO. Updated WHO policy recommendation: IPTp-SP. 2012."
+  - "DHS Guide to Statistics - IPTp indicators"
+  - "WHO World Malaria Report - IPTp coverage"

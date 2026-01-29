@@ -1,0 +1,137 @@
+title: "Anemia MBG Indicator Preparation"
+version: "1.0.0"
+description: >
+  Prepares cluster-level anemia prevalence data for MBG analysis.
+  Supports multiple severity thresholds and both cumulative and exclusive
+  categories for children 6-59 months.
+
+indicators:
+  cumulative:
+    anemia_any:
+      name: "Any anemia"
+      threshold: "Hb < 11 g/dL"
+      numerator: "Children with Hb < 11 g/dL"
+      denominator: "Children with valid Hb measurement"
+
+    anemia_moderate_plus:
+      name: "Moderate or severe anemia"
+      threshold: "Hb < 10 g/dL"
+      numerator: "Children with Hb < 10 g/dL"
+      denominator: "Children with valid Hb measurement"
+
+    anemia_severe:
+      name: "Severe anemia"
+      threshold: "Hb < 8 g/dL"
+      numerator: "Children with Hb < 8 g/dL"
+      denominator: "Children with valid Hb measurement"
+
+  exclusive:
+    anemia_mild_only:
+      name: "Mild anemia only"
+      threshold: "10 <= Hb < 11 g/dL"
+      numerator: "Children with mild anemia only"
+      denominator: "Children with valid Hb measurement"
+
+    anemia_moderate_only:
+      name: "Moderate anemia only"
+      threshold: "8 <= Hb < 10 g/dL"
+      numerator: "Children with moderate anemia only"
+      denominator: "Children with valid Hb measurement"
+
+    anemia_severe_only:
+      name: "Severe anemia only"
+      threshold: "Hb < 8 g/dL"
+      numerator: "Children with severe anemia"
+      denominator: "Children with valid Hb measurement"
+      note: "Same as anemia_severe (severe is mutually exclusive by definition)"
+
+data_sources:
+  primary: "PR (Person Recode)"
+  gps: "GE (Geographic)"
+
+variables:
+  cluster_id:
+    dhs_name: "hv001"
+    description: "Cluster/enumeration area identifier"
+
+  age_months:
+    dhs_name: "hc1"
+    description: "Child's age in months"
+
+  present:
+    dhs_name: "hv103"
+    description: "Child slept in household last night"
+
+  mother_listed:
+    dhs_name: "hv042"
+    description: "Mother of child listed in household"
+
+  hemoglobin:
+    dhs_name: "hc56"
+    description: "Hemoglobin level (altitude-adjusted)"
+    unit: "g/dL * 10"
+    note: >
+      Stored as g/dL * 10 (e.g., 110 = 11.0 g/dL). Values >= 900 indicate
+      not tested, refused, or other missing values.
+
+  gps_cluster:
+    dhs_name: "DHSCLUST"
+
+  gps_lat:
+    dhs_name: "LATNUM"
+
+  gps_lon:
+    dhs_name: "LONGNUM"
+
+eligibility:
+  - "Child age 6-59 months (configurable)"
+  - "Present in household (hv103 == 1)"
+  - "Mother listed in household (hv042 == 1)"
+  - "Valid hemoglobin measurement (hc56 < 900)"
+  - "Cluster has valid GPS coordinates"
+
+thresholds:
+  who_children_6_59_months:
+    no_anemia: ">= 11 g/dL"
+    mild: "10.0 - 10.9 g/dL"
+    moderate: "7.0 - 9.9 g/dL"
+    severe: "< 7.0 g/dL"
+
+  dhs_implementation:
+    any_anemia: "< 11 g/dL"
+    moderate_severe: "< 10 g/dL"
+    severe: "< 8 g/dL"
+    note: >
+      DHS uses slightly different thresholds than WHO clinical definitions.
+      This implementation follows DHS conventions for consistency with
+      standard DHS reports.
+
+methodology:
+  altitude_adjustment: >
+    Hemoglobin values in DHS are already altitude-adjusted. The variable
+    hc56 contains adjusted values. No further adjustment needed.
+
+  cumulative_vs_exclusive: >
+    Cumulative indicators (any, moderate_plus, severe) count all children
+    below a threshold. Exclusive indicators (mild_only, moderate_only)
+    count children in exactly that category. For example, a child with
+    Hb = 9 g/dL would be counted in:
+    - any (cumulative): Yes
+    - moderate_plus (cumulative): Yes
+    - severe (cumulative): No
+    - mild_only (exclusive): No
+    - moderate_only (exclusive): Yes
+    - severe_only (exclusive): No
+
+output_format:
+  columns:
+    cluster_id: "Cluster identifier"
+    indicator: "Number of anemic children at threshold"
+    samplesize: "Total children with valid Hb"
+    x: "Longitude"
+    y: "Latitude"
+
+references:
+  - "WHO. Haemoglobin concentrations for anemia diagnosis. 2011."
+  - "DHS Guide to Statistics - Anemia indicators"
+  - "Stevens GA et al. Global, regional, and national trends in haemoglobin. Lancet. 2013."

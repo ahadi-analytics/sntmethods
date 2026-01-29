@@ -1,0 +1,85 @@
+title: "SMC MBG Indicator Preparation"
+version: "1.0.0"
+description: >
+  Prepares cluster-level Seasonal Malaria Chemoprevention (SMC) receipt data
+  for MBG analysis. Measures proportion of U5 children who received SMC.
+
+indicators:
+  smc_receipt:
+    name: "SMC receipt (under 5)"
+    numerator: "Children who received SMC"
+    denominator: "Children under 5 with valid SMC data"
+    description: >
+      Proportion of children under 5 who received seasonal malaria
+      chemoprevention during the malaria season.
+
+data_sources:
+  primary: "KR (Children's Recode)"
+  gps: "GE (Geographic)"
+
+variables:
+  cluster_id:
+    dhs_name: "v001"
+    description: "Cluster identifier"
+
+  age_months:
+    dhs_name: "hw1"
+    description: "Child's age in months"
+
+  smc_primary:
+    dhs_name: "hml43"
+    description: "Child received SMC drugs during malaria season"
+    availability: "DHS-7 and later in SMC-eligible countries"
+    values:
+      0: "No"
+      1: "Yes"
+
+  smc_alternative:
+    dhs_name: "ml13g"
+    description: "Child received antimalarials for prevention"
+    availability: "Available in some surveys without specific SMC variable"
+
+  gps_cluster:
+    dhs_name: "DHSCLUST"
+
+  gps_lat:
+    dhs_name: "LATNUM"
+
+  gps_lon:
+    dhs_name: "LONGNUM"
+
+eligibility:
+  - "Child age 0-59 months"
+  - "Valid SMC response (0 or 1, not don't know)"
+  - "Cluster has valid GPS coordinates"
+
+methodology:
+  variable_priority: >
+    Function checks for hml43 first (SMC-specific), then falls back to
+    ml13g (general antimalarial prevention). Survey administrators should
+    verify which variable is appropriate for their context.
+
+  geographic_coverage: >
+    SMC is only implemented in Sahel countries with highly seasonal
+    malaria transmission. Surveys from non-SMC countries will not have
+    SMC variables, and the function will return an error.
+
+  target_population: >
+    SMC is typically given to children 3-59 months in eligible areas.
+    This function includes all children 0-59 months in the denominator
+    to match standard DHS reporting.
+
+validation:
+  - "Check that SMC variable exists before proceeding"
+  - "Exclude don't know / missing responses"
+  - "Verify survey is from SMC-eligible country/region"
+
+limitations:
+  - "SMC variable may not be available in all surveys"
+  - "Variable coding may differ between survey rounds"
+  - "Does not capture number of SMC rounds received"
+
+references:
+  - "WHO. Seasonal malaria chemoprevention with sulfadoxine-pyrimethamine plus amodiaquine. 2012."
+  - "ACCESS-SMC Partnership coverage indicators"
+  - "DHS MIS questionnaire - SMC module"

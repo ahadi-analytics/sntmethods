@@ -1,0 +1,80 @@
+title: "IRS MBG Indicator Preparation"
+version: "1.0.0"
+description: >
+  Prepares cluster-level Indoor Residual Spraying (IRS) coverage data for
+  MBG analysis. Calculates proportion of households sprayed in last 12 months.
+
+indicators:
+  irs_coverage:
+    name: "Household IRS coverage"
+    numerator: "Number of households sprayed in last 12 months"
+    denominator: "Total number of households"
+    level: "household"
+    description: >
+      Proportion of households that were sprayed with residual insecticide
+      in the 12 months preceding the survey.
+
+data_sources:
+  primary: "HR (Household Recode)"
+  gps: "GE (Geographic)"
+
+variables:
+  cluster_id:
+    dhs_name: "hv001"
+    description: "Cluster/enumeration area identifier"
+
+  irs_sprayed:
+    dhs_name: "hv253"
+    description: "Household interior walls sprayed in last 12 months"
+    values:
+      0: "No"
+      1: "Yes"
+    note: >
+      This variable may not be available in all DHS surveys. It is typically
+      included in Malaria Indicator Surveys (MIS) and DHS surveys in
+      malaria-endemic countries.
+
+  gps_cluster:
+    dhs_name: "DHSCLUST"
+    description: "Cluster ID in GPS file"
+
+  gps_lat:
+    dhs_name: "LATNUM"
+    description: "Latitude coordinate"
+
+  gps_lon:
+    dhs_name: "LONGNUM"
+    description: "Longitude coordinate"
+
+eligibility:
+  - "Valid response to IRS question (not missing)"
+  - "Cluster has valid GPS coordinates"
+
+output_format:
+  columns:
+    cluster_id: "Cluster identifier"
+    indicator: "Number of households sprayed"
+    samplesize: "Total number of households"
+    x: "Longitude"
+    y: "Latitude"
+
+methodology:
+  coverage_definition: >
+    A household is considered to have received IRS if the interior walls
+    were sprayed with residual insecticide in the 12 months preceding
+    the survey (hv253 == 1).
+
+  survey_timing: >
+    IRS coverage varies seasonally and may depend on spray campaign timing
+    relative to survey dates. Consider survey timing when interpreting
+    spatial patterns.
+
+validation:
+  - "hv253 must be 0 or 1 (exclude missing/don't know)"
+  - "Clusters with zero households excluded"
+  - "Clusters with missing GPS excluded"
+
+references:
+  - "DHS Guide to Statistics - IRS Coverage"
+  - "WHO World Malaria Report - IRS indicators"
+  - "PMI IRS coverage monitoring guidance"

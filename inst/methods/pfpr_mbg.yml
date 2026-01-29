@@ -1,0 +1,169 @@
+title: "PfPR MBG Indicator Preparation"
+version: "1.0.0"
+description: >
+  Prepares cluster-level malaria parasite prevalence data for MBG analysis.
+  Aggregates individual test results to cluster counts without survey weights.
+  MBG handles spatial smoothing internally.
+
+indicators:
+  pfpr_rdt_u5:
+    name: "PfPR by RDT (children 6-59 months)"
+    numerator: "Number of RDT-positive children"
+    denominator: "Number of children tested by RDT"
+    age_range_months: [6, 59]
+    description: >
+      Malaria parasite prevalence measured by rapid diagnostic test among
+      children 6-59 months of age.
+
+  pfpr_mic_u5:
+    name: "PfPR by microscopy (children 6-59 months)"
+    numerator: "Number of microscopy-positive children (Pf only)"
+    denominator: "Number of children tested by microscopy"
+    age_range_months: [6, 59]
+    description: >
+      Malaria parasite prevalence measured by microscopy among children
+      6-59 months of age. Only P. falciparum infections counted as positive.
+
+  pfpr_rdt_5_9:
+    name: "PfPR by RDT (children 5-9 years)"
+    numerator: "Number of RDT-positive children"
+    denominator: "Number of children tested by RDT"
+    age_range_months: [60, 119]
+
+  pfpr_mic_5_9:
+    name: "PfPR by microscopy (children 5-9 years)"
+    numerator: "Number of microscopy-positive children"
+    denominator: "Number of children tested by microscopy"
+    age_range_months: [60, 119]
+
+  pfpr_rdt_u10:
+    name: "PfPR by RDT (children 6 months - 10 years)"
+    numerator: "Number of RDT-positive children"
+    denominator: "Number of children tested by RDT"
+    age_range_months: [6, 119]
+
+  pfpr_mic_u10:
+    name: "PfPR by microscopy (children 6 months - 10 years)"
+    numerator: "Number of microscopy-positive children"
+    denominator: "Number of children tested by microscopy"
+    age_range_months: [6, 119]
+
+  pfpr_rdt_2_10:
+    name: "PfPR by RDT (children 2-10 years)"
+    numerator: "Number of RDT-positive children"
+    denominator: "Number of children tested by RDT"
+    age_range_months: [24, 119]
+    description: >
+      Standard MAP age group for cross-country comparison. Children must
+      be at least 24 months old to be included.
+
+  pfpr_mic_2_10:
+    name: "PfPR by microscopy (children 2-10 years)"
+    numerator: "Number of microscopy-positive children"
+    denominator: "Number of children tested by microscopy"
+    age_range_months: [24, 119]
+    description: >
+      Standard MAP age group for cross-country comparison.
+
+data_sources:
+  primary: "PR (Person Recode)"
+  gps: "GE (Geographic)"
+
+variables:
+  cluster_id:
+    dhs_name: "hv001"
+    description: "Cluster/enumeration area identifier"
+
+  age_months:
+    dhs_name: "hc1"
+    description: "Child's age in months"
+
+  present:
+    dhs_name: "hv103"
+    description: "Child slept in household last night"
+    values:
+      0: "No"
+      1: "Yes"
+
+  mother_listed:
+    dhs_name: "hv042"
+    description: "Mother of child listed in household roster"
+    values:
+      0: "No"
+      1: "Yes"
+
+  rdt_result:
+    dhs_name: "hml35"
+    description: "Result of malaria rapid diagnostic test"
+    values:
+      0: "Negative"
+      1: "Positive"
+
+  microscopy_result:
+    dhs_name: "hml32"
+    description: "Result of malaria blood smear (microscopy)"
+    values:
+      0: "Negative"
+      1: "Positive (P. falciparum)"
+      6: "Positive (other species)"
+    note: >
+      For PfPR, only value 1 (P. falciparum) is counted as positive.
+      Value 6 (other species) is included in denominator but not numerator.
+
+  gps_cluster:
+    dhs_name: "DHSCLUST"
+    description: "Cluster ID in GPS file"
+
+  gps_lat:
+    dhs_name: "LATNUM"
+    description: "Latitude coordinate (WGS84)"
+
+  gps_lon:
+    dhs_name: "LONGNUM"
+    description: "Longitude coordinate (WGS84)"
+
+eligibility:
+  - "Child age within specified range (e.g., 6-59 months for u5)"
+  - "Present in household (hv103 == 1)"
+  - "Mother listed in household (hv042 == 1)"
+  - "Valid test result (not missing/refused/not tested)"
+
+output_format:
+  columns:
+    cluster_id: "Cluster identifier"
+    indicator: "Numerator count (number positive)"
+    samplesize: "Denominator count (number tested)"
+    x: "Longitude"
+    y: "Latitude"
+  note: >
+    One row per cluster with valid GPS coordinates. Clusters with zero
+    tested children are excluded. This format is ready for direct input
+    to mbg::MbgModelRunner.
+
+methodology:
+  survey_weights: >
+    MBG prep functions do NOT use survey weights. The MBG model handles
+    spatial smoothing and uncertainty estimation internally. Survey weights
+    are appropriate for direct survey estimates (see calc_pfpr_dhs()) but
+    not for spatial modeling inputs.
+
+  aggregation: >
+    Simple counts aggregated at cluster level. Numerator = sum of positive
+    tests. Denominator = total number tested. No weighting applied.
+
+  age_groups: >
+    Multiple age groups supported to enable analysis of different populations.
+    Standard groups include: u5 (6-59m), 5-9 (60-119m), u10 (6-119m), and
+    2-10 (24-119m). The 2-10 age group aligns with MAP standard for
+    cross-country comparison.
+
+validation:
+  - "Age range must be valid (min < max, both non-negative)"
+  - "Test results must be 0 or 1 for RDT, 0/1/6 for microscopy"
+  - "Clusters with missing GPS coordinates are excluded"
+  - "Clusters with zero samplesize are excluded"
+
+references:
+  - "DHS Malaria Indicator Survey Guide"
+  - "Malaria Atlas Project (MAP) methodology"
+  - "WHO World Malaria Report guidance on PfPR estimation"

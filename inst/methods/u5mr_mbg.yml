@@ -1,0 +1,203 @@
+title: "Under-5 Mortality Rate (U5MR) MBG Model Framework"
+version: "1.0.0"
+description: >
+ Defines the methodology for estimating spatially-smoothed Under-5 Mortality Rate
+ (U5MR) using Model-Based Geostatistics (MBG) applied to DHS birth history data.
+ U5MR is modeled as a composite of age-specific mortality risks, with separate
+ MBG models fitted for each age group and combined using survival probability
+ multiplication.
+
+indicator:
+ name: "Under-5 Mortality Rate (U5MR)"
+ definition: >
+   Probability of dying between birth and exact age 5 years, expressed per
+   1,000 live births.
+ unit: "deaths per 1,000 live births"
+ dhs_module: "BR (Birth Recode)"
+ standard_reference: "WHO/UNICEF/World Bank/UN IGME methodology"
+
+age_groups:
+ under1:
+   name: "Infant mortality (under 1 year)"
+   months_start: 0
+   months_end: 12
+   description: "Deaths between birth and 12 months of age"
+   component: "q0 (neonatal + post-neonatal)"
+
+ age1:
+   name: "Child mortality (1 year)"
+   months_start: 12
+   months_end: 24
+   description: "Deaths between 12 and 24 months of age"
+   component: "q1"
+
+ age2:
+   name: "Child mortality (2 years)"
+   months_start: 24
+   months_end: 36
+   description: "Deaths between 24 and 36 months of age"
+   component: "q2"
+
+ age3:
+   name: "Child mortality (3 years)"
+   months_start: 36
+   months_end: 48
+   description: "Deaths between 36 and 48 months of age"
+   component: "q3"
+
+ age4:
+   name: "Child mortality (4 years)"
+   months_start: 48
+   months_end: 60
+   description: "Deaths between 48 and 60 months of age"
+   component: "q4"
+
+methodology:
+ overview: >
+   U5MR estimation requires modeling mortality as a composite of detailed age
+   groups because wider age groups would require dropping observations where
+   children have not yet reached the upper age bound, making the data
+   non-representative. The approach fits separate spatial models for each
+   single-year age group and combines them using survival probabilities.
+
+ formula:
+   composite: "U5MR = 1 - (1 - q_under1) × (1 - q_age1) × (1 - q_age2) × (1 - q_age3) × (1 - q_age4)"
+   interpretation: >
+     The probability of dying before age 5 equals one minus the probability
+     of surviving all five age intervals. Each q represents the conditional
+     probability of dying within that age interval given survival to the
+     start of the interval.
+   per_1000: "U5MR_per_1000 = U5MR × 1000"
+
+ retrospective_period:
+   default_months: 60
+   extended_months: 120
+   rationale: >
+     DHS standard estimates use 5-year (60-month) retrospective windows.
+     A 10-year (120-month) window can be used for subnational estimates
+     to increase sample sizes, though this may mask recent trends.
+
+workflow:
+ step1_load_data:
+   description: "Load DHS birth history microdata"
+   inputs:
+     - "BR (Birth Recode) file from DHS"
+     - "GE (GPS) file for cluster coordinates"
+   key_variables:
+     b3: "Date of birth (CMC format)"
+     b5: "Child is alive (0=no, 1=yes)"
+     b7: "Age at death in months"
+     v008: "Date of interview (CMC format)"
+     v001: "Cluster number"
+     v002: "Household number"
+     bidx: "Birth index (child ID within mother)"
+     v005: "Sample weight"
+   output: "Cleaned birth history data.table"
+
+ step2_split_ages:
+   description: "Split birth histories into age-specific cohorts"
+   function: "split_ages()"
+   parameters:
+     age_groups:
+       under1: [0, 12]
+       age1: [12, 24]
+       age2: [24, 36]
+       age3: [36, 48]
+       age4: [48, 60]
+     max_timediff_months: 60
+     child_id_columns: ["cluster_id", "hhid", "bidx"]
+   logic:
+     - "For each age group, identify children who entered the age group during the analysis period"
+     - "Drop children who died before reaching the age group"
+     - "Drop children who would intersect the interview month during the age group"
+     - "Flag those who died within the age group boundaries"
+   output: "Data with age_group, year, and died columns"
+
+ step3_cluster_aggregation:
+   description: "Aggregate to cluster level for each age group"
+   aggregation:
+     grouping: ["cluster_id", "age_group"]
+     numerator: "sum(died)"
+     denominator: "n()"
+   output: "Cluster-level mortality counts by age group"
+
+ step4_merge_coordinates:
+   description: "Merge GPS coordinates from GE file"
+   join_key: "cluster_id = DHSCLUST"
+   filter: "Remove clusters with missing or zero coordinates"
+   output: "Georeferenced cluster mortality data"
+
+ step5_mbg_models:
+   description: "Run separate MBG model for each age group"
+   model_type: "Binomial spatial model with SPDE mesh"
+   covariates:
+     - "Intercept only (pure spatial smoothing)"
+     - "Optional: population density, urbanization, accessibility"
+   iterations: 5
+   outputs_per_model:
+     - "cell_pred_mean: Mean mortality risk raster"
+     - "cell_pred_lower: Lower 95% credible interval"
+     - "cell_pred_upper: Upper 95% credible interval"
+   note: >
+     Each model produces mortality risk (q) for its age group.
+     Models are independent; uncertainty propagation requires
+     simulation-based approaches or approximations.
+
+ step6_combine_age_groups:
+   description: "Combine age-specific mortality into U5MR"
+   formula: "u5mr = 1 - prod(1 - q_under1, 1 - q_age1, 1 - q_age2, 1 - q_age3, 1 - q_age4)"
+   implementation:
+     - "Load mean raster for each age group"
+     - "Calculate survival probability for each: surv_i = 1 - q_i"
+     - "Multiply survival probabilities across age groups"
+     - "U5MR = 1 - product of survival probabilities"
+   uncertainty_note: >
+     Simple combination of mean estimates does not propagate uncertainty
+     correctly. For valid uncertainty bounds, draw from posterior
+     distributions of each model and combine at the draw level.
+
+ step7_admin_aggregation:
+   description: "Aggregate pixel-level estimates to admin units"
+   method: "Population-weighted mean"
+   levels: ["adm0", "adm1", "adm2"]
+   outputs:
+     - "Mean U5MR by admin unit"
+     - "Uncertainty bounds (if draw-level combination performed)"
+
+cmc_date_handling:
+ description: "Century Month Code (CMC) conversion utilities"
+ cmc_to_year: "floor(cmc / 12) + 1900"
+ year_to_cmc: "(year - 1900) * 12"
+ example: "CMC 1368 = January 2014 (1368/12 + 1900 = 2014)"
+
+validation:
+ data_quality:
+   - "Check for heaping on ages 12, 24, 36, 48 months"
+   - "Verify interview dates are after birth dates"
+   - "Check for implausible death ages"
+   - "Validate cluster coordinates are within country boundaries"
+
+ output_checks:
+   - "U5MR should be between 0 and 1 (0-1000 per 1000)"
+   - "Age-specific rates should decrease with age (generally)"
+   - "Compare national aggregate to DHS report estimates"
+   - "Check for spatial patterns consistent with known health gradients"
+
+limitations:
+ - "Five independent models do not share information across age groups"
+ - "Uncertainty intervals from mean combination are approximate"
+ - "Requires sufficient cluster-level deaths for stable estimation"
+ - "GPS displacement affects fine-scale spatial patterns"
+ - "Retrospective nature may miss recent mortality changes"
+
+future_improvements:
+ - "Space-age joint model sharing strength across age groups"
+ - "Proper uncertainty propagation via simulation"
+ - "Integration of covariates (access to health care, wealth, etc.)"
+ - "Multi-survey pooling for trend estimation"
+
+references:
+ - "DHS Guide to Statistics (Chapter 9: Childhood Mortality)"
+ - "IHME MBG methodology papers"
+ - "Golding et al. (2017) - Mapping under-5 mortality"
+ - "UN IGME methodology notes"

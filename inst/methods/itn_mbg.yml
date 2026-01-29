@@ -1,0 +1,181 @@
+title: "ITN MBG Indicator Preparation"
+version: "1.0.0"
+description: >
+  Prepares cluster-level ITN (Insecticide-Treated Net) data for MBG analysis.
+  Supports ownership, access, and use indicators across multiple age groups.
+  Aggregates to cluster counts without survey weights.
+
+indicators:
+  itn_ownership:
+    name: "Household ITN ownership"
+    numerator: "Number of households with at least one ITN"
+    denominator: "Total number of households"
+    level: "household"
+    description: >
+      Proportion of households owning at least one ITN. A household is
+      counted as owning an ITN if any hml10_* variable equals 1.
+
+  itn_access:
+    name: "Population ITN access"
+    numerator: "Number of individuals with access to an ITN"
+    denominator: "Total de facto population"
+    level: "individual"
+    description: >
+      Proportion of de facto household members with access to an ITN.
+      Access is calculated as min(ITNs * 2, household_size) / household_size.
+      For MBG, probabilistic assignment converts this to binary (0/1).
+
+  itn_use_all:
+    name: "Population ITN use (all ages)"
+    numerator: "Number of individuals who slept under ITN last night"
+    denominator: "Total de facto population"
+    level: "individual"
+    description: >
+      Proportion of de facto population who used an ITN the night
+      before the survey.
+
+  itn_use_u5:
+    name: "ITN use among children under 5"
+    numerator: "Number of U5 children who slept under ITN"
+    denominator: "Total U5 children"
+    age_range_years: [0, 4]
+    level: "individual"
+    description: >
+      Proportion of children under 5 years of age who slept under
+      an ITN the night before the survey.
+
+  itn_use_5_9:
+    name: "ITN use among children 5-9 years"
+    numerator: "Number of children 5-9 who slept under ITN"
+    denominator: "Total children 5-9"
+    age_range_years: [5, 9]
+    level: "individual"
+
+  itn_use_10_19:
+    name: "ITN use among adolescents 10-19 years"
+    numerator: "Number of adolescents who slept under ITN"
+    denominator: "Total adolescents 10-19"
+    age_range_years: [10, 19]
+    level: "individual"
+
+  itn_use_20plus:
+    name: "ITN use among adults 20+"
+    numerator: "Number of adults 20+ who slept under ITN"
+    denominator: "Total adults 20+"
+    age_range_years: [20, null]
+    level: "individual"
+
+  itn_use_pregnant:
+    name: "ITN use among pregnant women"
+    numerator: "Number of pregnant women who slept under ITN"
+    denominator: "Total pregnant women"
+    level: "individual"
+    description: >
+      Proportion of pregnant women (hml18 == 1) who slept under an ITN.
+      Note: Pregnancy status may not be available in all surveys.
+
+data_sources:
+  household: "HR (Household Recode)"
+  individual: "PR (Person Recode)"
+  gps: "GE (Geographic)"
+
+variables:
+  cluster_id:
+    dhs_name: "hv001"
+    description: "Cluster/enumeration area identifier"
+
+  hhid:
+    dhs_name: "hhid"
+    description: "Household identifier"
+
+  hhsize:
+    dhs_name: "hv013"
+    description: "De facto household size"
+
+  age:
+    dhs_name: "hv105"
+    description: "Age of household member in years"
+
+  sex:
+    dhs_name: "hv104"
+    description: "Sex of household member"
+    values:
+      1: "Male"
+      2: "Female"
+
+  pregnant:
+    dhs_name: "hml18"
+    description: "Woman is pregnant"
+    values:
+      0: "Not pregnant or NA"
+      1: "Pregnant"
+
+  itn_use:
+    dhs_name: "hml12"
+    description: "Person slept under ITN last night"
+    values:
+      0: "No"
+      1: "Treated net"
+      2: "Untreated net"
+    note: "Both values 1 and 2 are counted as ITN use"
+
+  itn_net_type:
+    dhs_name: "hml10_*"
+    description: "Type of net (series of variables for each net)"
+    values:
+      1: "LLIN/ITN"
+      0: "Other/not ITN"
+    note: "Count number of nets where hml10_* == 1"
+
+  gps_cluster:
+    dhs_name: "DHSCLUST"
+    description: "Cluster ID in GPS file"
+
+  gps_lat:
+    dhs_name: "LATNUM"
+    description: "Latitude coordinate"
+
+  gps_lon:
+    dhs_name: "LONGNUM"
+    description: "Longitude coordinate"
+
+methodology:
+  ownership: >
+    Household ownership is straightforward: count households with at least
+    one ITN (any hml10_* == 1).
+
+  access: >
+    ITN access follows DHS methodology. Potential users per household =
+    min(number_of_ITNs * 2, household_size). Access ratio =
+    potential_users / household_size. For MBG, convert to binary using
+    probabilistic assignment: has_access = 1 if random_uniform < access_ratio.
+
+  use: >
+    ITN use is measured by hml12 variable (slept under net last night).
+    Both treated (1) and untreated (2) nets are counted as use.
+
+  age_stratification: >
+    Age is in completed years (hv105). Age groups are defined by boundaries.
+    Each person is counted in exactly one age group.
+
+output_format:
+  columns:
+    cluster_id: "Cluster identifier"
+    indicator: "Numerator count"
+    samplesize: "Denominator count"
+    x: "Longitude"
+    y: "Latitude"
+  note: >
+    One row per cluster with valid GPS coordinates. This format is
+    ready for direct input to mbg::MbgModelRunner.
+
+validation:
+  - "Household size must be positive"
+  - "ITN count must be non-negative"
+  - "Age must be non-negative"
+  - "Clusters with missing GPS excluded"
+
+references:
+  - "DHS Guide to Statistics - Chapter 5: ITN Coverage"
+  - "WHO World Malaria Report ITN indicators"
+  - "RBM ITN coverage indicators guidance"

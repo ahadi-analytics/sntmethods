@@ -1,0 +1,159 @@
+title: "EPI (Vaccination) MBG Indicator Preparation"
+version: "1.0.0"
+description: >
+  Prepares cluster-level vaccination coverage data for MBG analysis.
+  Supports standard EPI vaccines plus malaria vaccine.
+
+indicators:
+  epi_bcg:
+    name: "BCG vaccination"
+    numerator: "Children who received BCG"
+    denominator: "Children 12-23 months"
+
+  epi_dpt1:
+    name: "DPT1 vaccination"
+    numerator: "Children who received DPT dose 1"
+    denominator: "Children 12-23 months"
+
+  epi_dpt2:
+    name: "DPT2 vaccination"
+    numerator: "Children who received DPT dose 2"
+    denominator: "Children 12-23 months"
+
+  epi_dpt3:
+    name: "DPT3 vaccination"
+    numerator: "Children who received DPT dose 3"
+    denominator: "Children 12-23 months"
+
+  epi_polio1:
+    name: "Polio1 vaccination"
+    numerator: "Children who received Polio dose 1"
+    denominator: "Children 12-23 months"
+
+  epi_polio2:
+    name: "Polio2 vaccination"
+    numerator: "Children who received Polio dose 2"
+    denominator: "Children 12-23 months"
+
+  epi_polio3:
+    name: "Polio3 vaccination"
+    numerator: "Children who received Polio dose 3"
+    denominator: "Children 12-23 months"
+
+  epi_measles1:
+    name: "Measles1 vaccination"
+    numerator: "Children who received Measles dose 1"
+    denominator: "Children 12-23 months"
+
+  epi_measles2:
+    name: "Measles2 vaccination"
+    numerator: "Children who received Measles dose 2"
+    denominator: "Children 12-23 months"
+
+  epi_vita1:
+    name: "Vitamin A dose 1"
+    numerator: "Children who received Vitamin A dose 1"
+    denominator: "Children 12-23 months"
+
+  epi_vita2:
+    name: "Vitamin A dose 2"
+    numerator: "Children who received Vitamin A dose 2"
+    denominator: "Children 12-23 months"
+
+  epi_malaria:
+    name: "Malaria vaccine (RTS,S/R21)"
+    numerator: "Children who received malaria vaccine"
+    denominator: "Children 12-23 months"
+    note: "Variable h68, may not be available in all surveys"
+
+  epi_fully_vaccinated:
+    name: "Fully vaccinated (basic)"
+    numerator: "Children with BCG + DPT3 + Polio3 + Measles1"
+    denominator: "Children 12-23 months"
+
+data_sources:
+  primary: "KR (Children's Recode)"
+  gps: "GE (Geographic)"
+
+variables:
+  cluster_id:
+    dhs_name: "v001"
+    description: "Cluster identifier"
+
+  age_months:
+    dhs_name: "hw1"
+    description: "Child's age in months"
+
+  bcg:
+    dhs_name: "h2"
+    description: "BCG vaccine"
+
+  dpt1:
+    dhs_name: "h3"
+    description: "DPT dose 1"
+
+  dpt2:
+    dhs_name: "h4"
+    description: "DPT dose 2"
+
+  dpt3:
+    dhs_name: "h5"
+    description: "DPT dose 3"
+
+  polio1:
+    dhs_name: "h6"
+    description: "Polio dose 1"
+
+  polio2:
+    dhs_name: "h7"
+    description: "Polio dose 2"
+
+  polio3:
+    dhs_name: "h8"
+    description: "Polio dose 3"
+
+  measles1:
+    dhs_name: "h9"
+    description: "Measles dose 1"
+
+  measles2:
+    dhs_name: "h9a"
+    description: "Measles dose 2"
+
+  vita1:
+    dhs_name: "h33"
+    description: "Vitamin A dose 1"
+
+  vita2:
+    dhs_name: "h33a"
+    description: "Vitamin A dose 2"
+
+  malaria:
+    dhs_name: "h68"
+    description: "Malaria vaccine (RTS,S)"
+
+vaccination_coding:
+  values:
+    0: "No"
+    1: "Vaccination date on card"
+    2: "Reported by mother"
+    3: "Vaccination marked on card"
+  received: "Values 1, 2, or 3 indicate vaccination received"
+
+eligibility:
+  - "Child age 12-23 months (completed 1 year, standard EPI target age)"
+  - "Age range is configurable"
+  - "Cluster has valid GPS coordinates"
+
+output_format:
+  columns:
+    cluster_id: "Cluster identifier"
+    indicator: "Number vaccinated"
+    samplesize: "Total eligible children"
+    x: "Longitude"
+    y: "Latitude"
+
+references:
+  - "DHS Guide to Statistics - Vaccination Coverage"
+  - "WHO/UNICEF immunization coverage estimates"
+  - "Gavi EPI coverage indicators"
