@@ -42,6 +42,5 @@ renv/python/
 *.swo
 .~lock.*
 
-*renv
 CLAUDE.md
 /.claude
