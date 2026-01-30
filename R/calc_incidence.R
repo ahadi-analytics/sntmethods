@@ -3062,6 +3062,7 @@ check_incidence <- function(
     ggplot2::geom_point(size = 2) +
     ggplot2::facet_wrap(~location, scales = "free_y", ncol = ncol) +
     ggplot2::scale_y_continuous(labels = scales::label_comma()) +
+    ggplot2::scale_x_continuous(breaks = unique(annual_long$year)) +
     ggplot2::scale_colour_manual(
       values = c("N0" = "#1b9e77", "N1" = "#d95f02",
       "N2" = "#7570b3", "N3" = "#e7298a", "N4" = "#66a61e"),
