@@ -77,23 +77,6 @@ normalize_zscore <- function(vec, na_on_fail = TRUE) {
 #'   date_col = "date",
 #'   indicators = indicators
 #' )
-#' Run STL decomposition and trend tests on grouped time series data
-#'
-#' Performs STL decomposition, Mann-Kendall trend testing, and Sen's slope
-#' estimation for multiple indicators within grouped time series data.
-#'
-#' @param data A data.frame containing the time series data.
-#' @param group_col Character vector of grouping column names.
-#' @param date_col Name of the date column.
-#' @param indicators A list of indicator specifications. Each element must
-#'   contain:
-#'   - col: column name of the indicator
-#'   - type: indicator type label
-#' @param freq Number of observations per year. Default is 12.
-#' @param normalize_fun Function used to normalize indicator values.
-#' @param stl_window STL seasonal window. Default is "periodic".
-#'
-#' @return A data.table containing STL components and trend statistics.
 #' @export
 run_grouped_stl_trend <- function(
   data,
