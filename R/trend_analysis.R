@@ -71,12 +71,14 @@ normalize_zscore <- function(vec, na_on_fail = TRUE) {
 #' @return A data.table containing STL components and trend statistics.
 #'
 #' @examples
+#' \dontrun{
 #' res <- run_grouped_stl_trend(
 #'   data = monthly_adm2_incid,
 #'   group_col = c("adm1", "adm2"),
 #'   date_col = "date",
 #'   indicators = indicators
 #' )
+#' }
 #' @export
 run_grouped_stl_trend <- function(
   data,
