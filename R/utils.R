@@ -583,10 +583,15 @@ dhs_read <- function(
   # then file_type
   suppressWarnings(
     if (!is.null(file_type)) {
-      ds <- ds |> dplyr::filter(file_type == !!file_type)
+      file_type_val <- as.character(file_type)
+      if (length(file_type_val) == 1) {
+        ds <- ds |> dplyr::filter(file_type == file_type_val)
+      } else {
+        ds <- ds |> dplyr::filter(file_type %in% file_type_val)
+      }
       applied_filters <- c(
         applied_filters,
-        paste0("file_type = ", file_type)
+        paste0("file_type = ", paste(file_type, collapse = ", "))
       )
     }
   )
@@ -594,10 +599,15 @@ dhs_read <- function(
   # then country_code
   suppressWarnings(
     if (!is.null(country_code)) {
-      ds <- ds |> dplyr::filter(country_code == !!country_code)
+      country_code_val <- as.character(country_code)
+      if (length(country_code_val) == 1) {
+        ds <- ds |> dplyr::filter(country_code == country_code_val)
+      } else {
+        ds <- ds |> dplyr::filter(country_code %in% country_code_val)
+      }
       applied_filters <- c(
         applied_filters,
-        paste0("country_code = ", country_code)
+        paste0("country_code = ", paste(country_code, collapse = ", "))
       )
     }
   )
@@ -605,10 +615,15 @@ dhs_read <- function(
   # then survey_year
   suppressWarnings(
     if (!is.null(survey_year)) {
-      ds <- ds |> dplyr::filter(survey_year == !!survey_year)
+      survey_year_val <- as.integer(survey_year)
+      if (length(survey_year_val) == 1) {
+        ds <- ds |> dplyr::filter(survey_year == survey_year_val)
+      } else {
+        ds <- ds |> dplyr::filter(survey_year %in% survey_year_val)
+      }
       applied_filters <- c(
         applied_filters,
-        paste0("survey_year = ", survey_year)
+        paste0("survey_year = ", paste(survey_year, collapse = ", "))
       )
     }
   )
@@ -616,18 +631,28 @@ dhs_read <- function(
   # survey_id last (lowest-level directory)
   suppressWarnings(
     if (!is.null(survey_id)) {
-      ds <- ds |> dplyr::filter(survey_id == !!survey_id)
+      survey_id_val <- as.character(survey_id)
+      if (length(survey_id_val) == 1) {
+        ds <- ds |> dplyr::filter(survey_id == survey_id_val)
+      } else {
+        ds <- ds |> dplyr::filter(survey_id %in% survey_id_val)
+      }
       applied_filters <- c(
         applied_filters,
-        paste0("survey_id = ", survey_id)
+        paste0("survey_id = ", paste(survey_id, collapse = ", "))
       )
     }
   )
 
   # survey_type (NOT partitioned, so filter last)
   if (!is.null(survey_type)) {
-    ds <- ds |> dplyr::filter(survey_type == !!survey_type)
-    applied_filters <- c(applied_filters, paste0("survey_type = ", survey_type))
+    survey_type_val <- as.character(survey_type)
+    if (length(survey_type_val) == 1) {
+      ds <- ds |> dplyr::filter(survey_type == survey_type_val)
+    } else {
+      ds <- ds |> dplyr::filter(survey_type %in% survey_type_val)
+    }
+    applied_filters <- c(applied_filters, paste0("survey_type = ", paste(survey_type, collapse = ", ")))
   }
 
   # Report filters

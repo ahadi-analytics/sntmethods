@@ -6,10 +6,6 @@ cli::cli_h1("MBG model for ITN Access (DHS data)")
 # 1) Setup and parameters -----------------------------------------------------
 ## ---------------------------------------------------------------------------##
 
-devtools::load_all(
- "/Users/mohamedyusuf/ahadi-analytics/code/GitHub/sntmethods"
-)
-
 country_iso2 <- "BU"
 country_iso3 <- "bdi"
 survey_year <- 2016

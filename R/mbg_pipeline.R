@@ -17,29 +17,38 @@ NULL
 #' 4. Runs MBG models (if enabled)
 #' 5. Generates outputs (rasters, CSVs, maps)
 #'
-#' @param country_iso3 Three-letter ISO country code (e.g., "bdi" for Burundi).
-#' @param country_iso2 Two-letter DHS country code (e.g., "BU" for Burundi).
-#'   If NULL (default), derived automatically from `country_iso3` using
-#'   the `countrycode` package.
+#' @param country_iso3 Three-letter ISO country code (e.g., "bdi").
+#' @param country_iso2 Two-letter DHS country code (e.g., "BU"). If NULL
+#'   (default), derived automatically from `country_iso3` using the
+#'   `countrycode` package.
 #' @param adm0_sf sf object with country boundary.
 #' @param adm1_sf sf object with ADM1 boundaries.
 #' @param adm2_sf sf object with ADM2 boundaries.
-#' @param pop_rasters Population raster input. Can be one of:
+#' @param pop_raster Total population raster(s). Can be:
 #'   \itemize{
-#'     \item Named list of file paths to TIF files, with years as names
-#'       (e.g., `list("2016" = "path/to/pop_2016.tif")`)
-#'     \item Named list of already-loaded SpatRaster objects
-#'     \item Single directory path containing TIF files with years in filenames
-#'       (function will search for files matching `*{year}*.tif`)
+#'     \item Named list with years as names and file paths as values:
+#'       `list("2019" = "path/to/pop_2019.tif", "2020" = "path/to/pop_2020.tif")`
+#'     \item Single file path (used for all years)
+#'     \item Already-loaded SpatRaster object (used for all years)
 #'   }
+#' @param pop_raster_u5 Under-5 population raster(s) (optional). Same format as
+#'   `pop_raster`. Used for u5-specific indicators (pfpr, itn). If NULL, uses
+#'   `pop_raster` for all indicators.
 #' @param path_dhs_parquet Path to DHS parquet archive.
-#' @param path_output Output directory path.
+#' @param table_out_path Output directory for tables (CSV, XLSX).
+#' @param fig_out_path Output directory for figures and maps.
+#' @param raster_out_path Output directory for prediction rasters.
+#' @param intermediate_out_path Output directory for cached intermediate outputs
+#'   (aggregation tables, ID rasters).
 #' @param survey_year Survey year(s) to process. Can be:
 #'   \itemize{
 #'     \item NULL: Process ALL available surveys with GPS data
 #'     \item Single integer: Process only that year (e.g., 2016)
 #'     \item Integer vector: Process specific years (e.g., c(2012, 2016))
 #'   }
+#' @param min_year Minimum survey year to include. Surveys before this year
+#'   will be excluded. Useful for filtering out older surveys that may lack
+#'   key indicators. Default: NULL (no minimum).
 #' @param survey_type Survey type ("DHS" or "MIS"). Default: "DHS".
 #' @param indicators Character vector of indicator categories to process:
 #'   \itemize{
@@ -57,7 +66,12 @@ NULL
 #' @param run_mbg Logical. If TRUE, runs MBG models. Default: TRUE.
 #' @param save_rasters Logical. If TRUE, saves output rasters. Default: TRUE.
 #' @param generate_maps Logical. If TRUE, generates maps. Default: TRUE.
+#' @param cache Logical. If TRUE (default), reuses cached intermediate outputs
+#'   (aggregation tables, ID rasters) when available. Set to FALSE to force
+#'   regeneration of all intermediate outputs.
 #' @param verbose Logical. If TRUE, prints detailed progress. Default: TRUE.
+#' @param debug Logical. If TRUE, prints additional diagnostic messages for
+#'   troubleshooting. Default: FALSE.
 #'
 #' @return A list containing:
 #'   \itemize{
@@ -76,11 +90,15 @@ NULL
 #'   adm0_sf = adm0,
 #'   adm1_sf = adm1,
 #'   adm2_sf = adm2,
-#'   pop_rasters = list("2016" = "/path/to/bdi_ppp_2016.tif"),
+#'   pop_raster = list("2016" = "/path/to/bdi_ppp_2016.tif"),
 #'   path_dhs_parquet = "path/to/parquet",
-#'   path_output = "path/to/output",
+#'   table_out_path = "path/to/output/tables",
+#'   fig_out_path = "path/to/output/plots",
+#'   raster_out_path = "path/to/output/rasters",
+#'   intermediate_out_path = "path/to/output/intermediate",
 #'   survey_year = 2016,
-#'   indicators = c("pfpr", "itn", "csb")
+#'   indicators = c("pfpr", "itn", "csb"),
+#'   cache = TRUE
 #' )
 #' }
 #'
@@ -90,17 +108,26 @@ run_mbg_indicator_pipeline <- function(
   adm0_sf,
   adm1_sf,
   adm2_sf,
-  pop_rasters,
+  pop_raster,
   path_dhs_parquet,
-  path_output,
+  table_out_path,
+  fig_out_path,
+  raster_out_path,
+  intermediate_out_path,
+  pop_raster_u5 = NULL,
   country_iso2 = NULL,
   survey_year = NULL,
+  min_year = NULL,
   survey_type = "DHS",
-  indicators = c("pfpr", "itn", "irs", "anc", "csb", "anemia", "iptp"),
+  indicators = c(
+    "pfpr", "itn", "irs", "anc", "csb", "anemia", "iptp"
+  ),
   run_mbg = TRUE,
   save_rasters = TRUE,
   generate_maps = TRUE,
-  verbose = TRUE
+  cache = TRUE,
+  verbose = TRUE,
+  debug = FALSE
 ) {
 
   # Check for required spatial packages
@@ -118,11 +145,41 @@ run_mbg_indicator_pipeline <- function(
   if (is.null(country_iso2)) {
     country_iso2 <- .get_dhs_country_code(country_iso3)
     cli::cli_alert_info(
-      "Derived DHS country code: {.val {country_iso2}} from ISO3: {.val {country_iso3}}"
+      "Derived DHS code: {.val {country_iso2}} from {.val {country_iso3}}"
     )
   }
 
-  fs::dir_create(path_output)
+  # Store output paths
+  output_dirs <- list(
+    tables = table_out_path,
+    plots = fig_out_path,
+    rasters = raster_out_path,
+    intermediate = intermediate_out_path
+  )
+
+  # Debug: Show configured output paths
+  if (isTRUE(debug)) {
+    cli::cli_h3("Debug: Output Paths")
+    .show_path <- function(name, path) {
+      if (is.null(path) || path == "") {
+        cli::cli_alert_warning("{name}: {.val NULL or empty}")
+      } else {
+        cli::cli_alert_info("{name}: {.file {.relative_path(path)}}")
+      }
+    }
+    .show_path("Tables", output_dirs$tables)
+    .show_path("Plots", output_dirs$plots)
+    .show_path("Rasters", output_dirs$rasters)
+    .show_path("Intermediate", output_dirs$intermediate)
+  }
+
+  # Validate required output paths
+  if (is.null(intermediate_out_path) || intermediate_out_path == "") {
+    cli::cli_abort(c(
+      "{.arg intermediate_out_path} is required but not set",
+      "i" = "Provide a path for intermediate outputs (ID rasters, aggregation tables)"
+    ))
+  }
 
   results <- list(
     final_dataset = NULL,
@@ -130,7 +187,8 @@ run_mbg_indicator_pipeline <- function(
     mbg_estimates = list(),
     cluster_data = list(),
     raster_paths = list(),
-    survey_metadata = list()
+    survey_metadata = list(),
+    skipped_indicators = list()  # Track skipped indicators per year
   )
 
   # ---- Find surveys using dhs_read() ----
@@ -162,8 +220,9 @@ run_mbg_indicator_pipeline <- function(
     unique() |>
     sort()
 
+  years_str <- paste(available_years, collapse = ", ")
   cli::cli_alert_success(
-    "Found GPS data for {length(available_years)} survey(s): {paste(available_years, collapse = ', ')}"
+    "Found GPS data for {length(available_years)} survey(s): {years_str}"
   )
 
   # Determine which years to process
@@ -180,14 +239,42 @@ run_mbg_indicator_pipeline <- function(
     # Validate requested years exist
     missing_years <- setdiff(years_to_process, available_years)
     if (length(missing_years) > 0) {
+      missing_str <- paste(missing_years, collapse = ", ")
+      avail_str <- paste(available_years, collapse = ", ")
       cli::cli_abort(c(
-        "Requested survey year(s) not found with GPS data: {paste(missing_years, collapse = ', ')}",
-        "i" = "Available years with GPS: {paste(available_years, collapse = ', ')}"
+        "Requested survey year(s) not found with GPS data: {missing_str}",
+        "i" = "Available years with GPS: {avail_str}"
       ))
     }
 
+    process_str <- paste(years_to_process, collapse = ", ")
     cli::cli_alert_info(
-      "Processing {length(years_to_process)} survey(s): {paste(years_to_process, collapse = ', ')}"
+      "Processing {length(years_to_process)} survey(s): {process_str}"
+    )
+  }
+
+  # Apply min_year filter if specified
+  if (!is.null(min_year)) {
+    min_year <- as.integer(min_year)
+    excluded_years <- years_to_process[years_to_process < min_year]
+
+    if (length(excluded_years) > 0) {
+      cli::cli_alert_info(
+        "Excluding {length(excluded_years)} survey(s) before {min_year}: {paste(excluded_years, collapse = ', ')}"
+      )
+    }
+
+    years_to_process <- years_to_process[years_to_process >= min_year]
+
+    if (length(years_to_process) == 0) {
+      cli::cli_abort(c(
+        "No surveys remaining after applying min_year filter ({min_year})",
+        "i" = "Available years: {paste(available_years, collapse = ', ')}"
+      ))
+    }
+
+    cli::cli_alert_success(
+      "Processing {length(years_to_process)} survey(s) >= {min_year}: {paste(years_to_process, collapse = ', ')}"
     )
   }
 
@@ -215,9 +302,8 @@ run_mbg_indicator_pipeline <- function(
 
   file_types_needed <- unique(file_types_needed)
 
-  cli::cli_alert_info(
-    "Required file types: {paste(file_types_needed, collapse = ', ')}"
-  )
+  types_str <- paste(file_types_needed, collapse = ", ")
+  cli::cli_alert_info("Required file types: {types_str}")
 
   # Store metadata
   results$survey_metadata$country <- country_iso2
@@ -269,24 +355,35 @@ run_mbg_indicator_pipeline <- function(
 
     # Report what was loaded
     loaded_types <- names(survey_data)
+    loaded_str <- paste(loaded_types, collapse = ", ")
     cli::cli_alert_success(
-      "Loaded {length(loaded_types)} file types: {paste(loaded_types, collapse = ', ')}"
+      "Loaded {length(loaded_types)} file types: {loaded_str}"
     )
 
-    # ---- Get population raster for this year ----
+    # ---- Load population rasters ----
 
+    # Load total population raster for this year
     pop_rast <- tryCatch({
-      .load_population_raster(
-        pop_rasters = pop_rasters,
-        target_year = current_year,
-        country_iso3 = country_iso3
-      )
+      .load_raster_for_year(pop_raster, current_year, "total population")
     }, error = function(e) {
       cli::cli_alert_warning(
-        "Could not load population raster for {current_year}: {e$message}"
+        "Could not load total population raster: {e$message}"
       )
       NULL
     })
+
+    # Load u5 population raster for this year (if provided)
+    pop_rast_u5 <- NULL
+    if (!is.null(pop_raster_u5)) {
+      pop_rast_u5 <- tryCatch({
+        .load_raster_for_year(pop_raster_u5, current_year, "u5 population")
+      }, error = function(e) {
+        cli::cli_alert_warning(
+          "Could not load u5 population raster: {e$message}"
+        )
+        NULL
+      })
+    }
 
     # ---- Align CRS ----
 
@@ -321,6 +418,10 @@ run_mbg_indicator_pipeline <- function(
       raster_paths = list()
     )
 
+    # Track skipped indicators for this year
+    skipped_indicators <- list()
+    processed_indicators <- character()
+
     for (ind_category in indicators) {
       cli::cli_h3("Processing: {ind_category}")
 
@@ -333,14 +434,28 @@ run_mbg_indicator_pipeline <- function(
           adm1_sf = adm1_aligned,
           adm2_sf = adm2_aligned,
           pop_rast = pop_rast,
-          path_output = path_output,
+          pop_rast_u5 = pop_rast_u5,
+          output_dirs = output_dirs,
           country_iso3 = country_iso3,
           survey_year = current_year,
           run_mbg = run_mbg,
           save_rasters = save_rasters,
           generate_maps = generate_maps,
-          verbose = verbose
+          cache = cache,
+          verbose = verbose,
+          debug = debug
         )
+
+        # Check if indicator was skipped
+        if (!is.null(ind_results$skipped)) {
+          skipped_indicators[[ind_category]] <- ind_results$skipped
+          cli::cli_alert_warning(
+            "Skipped {.field {ind_category}}: {ind_results$skipped}"
+          )
+        } else if (length(ind_results$cluster_data) > 0) {
+          processed_indicators <- c(processed_indicators, ind_category)
+          cli::cli_alert_success("Processed {.field {ind_category}}")
+        }
 
         # Store results for this indicator
         for (name in names(ind_results$cluster_data)) {
@@ -348,7 +463,8 @@ run_mbg_indicator_pipeline <- function(
         }
 
         for (name in names(ind_results$mbg_estimates)) {
-          year_results$mbg_estimates[[name]] <- ind_results$mbg_estimates[[name]]
+          mbg_est <- ind_results$mbg_estimates[[name]]
+          year_results$mbg_estimates[[name]] <- mbg_est
         }
 
         for (name in names(ind_results$raster_paths)) {
@@ -356,10 +472,31 @@ run_mbg_indicator_pipeline <- function(
         }
 
       }, error = function(e) {
+        skipped_indicators[[ind_category]] <- glue::glue("Error: {e$message}")
         cli::cli_alert_danger(
           "Failed to process {ind_category} for {current_year}: {e$message}"
         )
       })
+    }
+
+    # ---- Summary for this year ----
+    cli::cli_h3("Summary for {current_year}")
+
+    if (length(processed_indicators) > 0) {
+      cli::cli_alert_success(
+        "Processed {length(processed_indicators)} indicator(s): {paste(processed_indicators, collapse = ', ')}"
+      )
+    }
+
+    if (length(skipped_indicators) > 0) {
+      cli::cli_alert_warning(
+        "Skipped {length(skipped_indicators)} indicator(s):"
+      )
+      for (ind_name in names(skipped_indicators)) {
+        cli::cli_bullets(c(
+          "!" = "{.field {ind_name}}: {skipped_indicators[[ind_name]]}"
+        ))
+      }
     }
 
     # ---- Build dataset for this year ----
@@ -378,28 +515,63 @@ run_mbg_indicator_pipeline <- function(
 
     # ---- Save outputs for this year ----
 
-    output_basename <- glue::glue("{country_iso3}_dhs_mbg_indicators_{current_year}")
-
-    sntutils::write_snt_data(
-      data = year_dataset,
-      path = path_output,
-      name = output_basename,
-      formats = c("csv", "xlsx")
+    output_basename <- glue::glue(
+      "{tolower(country_iso3)}_dhs_mbg_indicators_{current_year}"
     )
-    cli::cli_alert_success("Saved: {.file {output_basename}}")
+
+    if (isTRUE(debug)) {
+      cli::cli_alert_info(
+        "Debug: year_dataset nrow={.val {nrow(year_dataset)}}, ncol={.val {ncol(year_dataset)}}"
+      )
+      cli::cli_alert_info(
+        "Debug: columns: {paste(names(year_dataset), collapse = ', ')}"
+      )
+    }
+
+    # Ensure output_basename is a single character string
+    if (length(output_basename) != 1) {
+      cli::cli_alert_danger(
+        "output_basename has unexpected length: {length(output_basename)}"
+      )
+      cli::cli_alert_info("Values: {paste(output_basename, collapse = ', ')}")
+      output_basename <- as.character(output_basename)[1]
+      cli::cli_alert_warning("Using first element: {.val {output_basename}}")
+    }
+
+    # Coerce to plain character to avoid glue class issues
+    output_basename <- as.character(output_basename)
+
+    # Build data dictionary
+    year_data_dict <- sntutils::build_dictionary(
+      data = year_dataset,
+      language = "fr"
+    )
+
+    # Write with data dictionary as second tab
+    sntutils::write_snt_data(
+      obj = list(data = year_dataset, data_dict = year_data_dict),
+      path = output_dirs$tables,
+      data_name = output_basename,
+      file_formats = c("xlsx", "qs2")
+    )
+    output_rel_path <- .relative_path(fs::path(output_dirs$tables, output_basename))
+    cli::cli_alert_success("Saved: {.file {output_rel_path}}")
 
     # Store results for this year
     all_year_results[[year_key]] <- list(
       dataset = year_dataset,
       cluster_data = year_results$cluster_data,
       mbg_estimates = year_results$mbg_estimates,
-      raster_paths = year_results$raster_paths
+      raster_paths = year_results$raster_paths,
+      skipped_indicators = skipped_indicators,
+      processed_indicators = processed_indicators
     )
 
     # Also add to main results structure
     results$cluster_data[[year_key]] <- year_results$cluster_data
     results$mbg_estimates[[year_key]] <- year_results$mbg_estimates
     results$raster_paths[[year_key]] <- year_results$raster_paths
+    results$skipped_indicators[[year_key]] <- skipped_indicators
 
   }  # End loop over years
 
@@ -428,24 +600,79 @@ run_mbg_indicator_pipeline <- function(
 
     # Save combined dataset
     if (length(years_to_process) > 1) {
-      combined_basename <- glue::glue("{country_iso3}_dhs_mbg_indicators_combined")
-
-      sntutils::write_snt_data(
-        data = results$final_dataset,
-        path = path_output,
-        name = combined_basename,
-        formats = c("csv", "xlsx")
+      combined_basename <- glue::glue(
+        "{tolower(country_iso3)}_dhs_mbg_indicators_combined"
       )
-      cli::cli_alert_success("Saved combined dataset: {.file {combined_basename}}")
+
+      # Coerce to plain character to avoid glue class issues
+      combined_basename <- as.character(combined_basename)
+
+      # Build data dictionary for combined dataset
+      combined_data_dict <- sntutils::build_dictionary(
+        data = results$final_dataset,
+        language = "fr"
+      )
+
+      # Write with data dictionary as second tab
+      sntutils::write_snt_data(
+        obj = list(data = results$final_dataset, data_dict = combined_data_dict),
+        path = output_dirs$tables,
+        data_name = combined_basename,
+        file_formats = c("xlsx", "qs2")
+      )
+      combined_rel_path <- .relative_path(
+        fs::path(output_dirs$tables, combined_basename)
+      )
+      cli::cli_alert_success(
+        "Saved combined dataset: {.file {combined_rel_path}}"
+      )
     }
   } else {
     results$final_dataset <- data.frame()
     cli::cli_alert_warning("No data could be processed")
   }
 
-  cli::cli_alert_success(
-    "Pipeline complete! Processed {length(years_to_process)} survey(s)"
-  )
+  # ---- Final Summary ----
+
+  cli::cli_h2("Pipeline Summary")
+
+  n_surveys <- length(years_to_process)
+  cli::cli_alert_success("Processed {n_surveys} survey year(s)")
+
+
+  # Summarize skipped indicators across all years
+  all_skipped <- results$skipped_indicators
+  if (length(all_skipped) > 0 && any(sapply(all_skipped, length) > 0)) {
+    cli::cli_h3("Skipped Indicators Summary")
+
+    for (yr in names(all_skipped)) {
+      yr_skipped <- all_skipped[[yr]]
+      if (length(yr_skipped) > 0) {
+        cli::cli_alert_warning("Survey {.val {yr}}:")
+        for (ind_name in names(yr_skipped)) {
+          cli::cli_bullets(c(
+            "!" = "{.field {ind_name}}: {yr_skipped[[ind_name]]}"
+          ))
+        }
+      }
+    }
+
+    # Aggregate common skip reasons
+    all_reasons <- unlist(lapply(all_skipped, function(x) {
+      if (length(x) > 0) names(x) else character()
+    }))
+
+    if (length(all_reasons) > 0) {
+      reason_counts <- table(all_reasons)
+      cli::cli_alert_info(
+        "Most commonly skipped: {paste(names(sort(reason_counts, decreasing = TRUE)[1:min(3, length(reason_counts))]), collapse = ', ')}"
+      )
+    }
+  } else {
+    cli::cli_alert_success("All requested indicators were processed successfully")
+  }
+
+  cli::cli_alert_success("Pipeline complete!")
 
   results
 }
@@ -464,26 +691,50 @@ run_mbg_indicator_pipeline <- function(
   adm1_sf,
   adm2_sf,
   pop_rast,
-  path_output,
+  pop_rast_u5 = NULL,
+  output_dirs,
   country_iso3,
   survey_year,
   run_mbg,
   save_rasters,
   generate_maps,
-  verbose
+  cache,
+  verbose,
+  debug = FALSE
 ) {
+  # Use u5 population raster for u5-specific indicators, fall back to total
+  use_u5 <- category %in% c("pfpr", "itn") && !is.null(pop_rast_u5)
+  pop_for_indicator <- if (use_u5) pop_rast_u5 else pop_rast
+
+  # Log which population raster is being used (debug only)
+  if (isTRUE(debug)) {
+    if (use_u5) {
+      pop_src <- terra::sources(pop_rast_u5)
+      cli::cli_alert_info("Using u5 population raster: {.file {basename(pop_src)}}")
+    } else if (!is.null(pop_rast)) {
+      pop_src <- terra::sources(pop_rast)
+      cli::cli_alert_info("Using total population raster: {.file {basename(pop_src)}}")
+    }
+  }
+
   results <- list(
     cluster_data = list(),
     mbg_estimates = list(),
-    raster_paths = list()
+    raster_paths = list(),
+    skipped = NULL  # Will contain skip reason if indicator was skipped
   )
+
+  # Helper to return skipped result
+  skip_indicator <- function(reason) {
+    results$skipped <- reason
+    return(results)
+  }
 
   # Call appropriate MBG prep function based on category
   cluster_data <- switch(category,
     pfpr = {
       if (!"PR" %in% names(survey_data)) {
-        cli::cli_alert_warning("PR data not available for PfPR")
-        return(results)
+        return(skip_indicator("Missing PR data (Person Recode)"))
       }
       tryCatch({
         calc_pfpr_mbg(
@@ -493,15 +744,17 @@ run_mbg_indicator_pipeline <- function(
           age_groups = list(u5 = c(6, 59))
         )
       }, error = function(e) {
-        cli::cli_alert_warning("PfPR calculation failed: {e$message}")
+        results$skipped <<- glue::glue("Calculation error: {e$message}")
         list()
       })
     },
 
     itn = {
-      if (!all(c("HR", "PR") %in% names(survey_data))) {
-        cli::cli_alert_warning("HR and PR data required for ITN")
-        return(results)
+      missing_ft <- setdiff(c("HR", "PR"), names(survey_data))
+      if (length(missing_ft) > 0) {
+        return(skip_indicator(
+          glue::glue("Missing {paste(missing_ft, collapse = ', ')} data")
+        ))
       }
       tryCatch({
         calc_itn_mbg(
@@ -511,15 +764,14 @@ run_mbg_indicator_pipeline <- function(
           indicators = c("access", "use_u5")
         )
       }, error = function(e) {
-        cli::cli_alert_warning("ITN calculation failed: {e$message}")
+        results$skipped <<- glue::glue("Calculation error: {e$message}")
         list()
       })
     },
 
     irs = {
       if (!"HR" %in% names(survey_data)) {
-        cli::cli_alert_warning("HR data not available for IRS")
-        return(results)
+        return(skip_indicator("Missing HR data (Household Recode)"))
       }
       tryCatch({
         irs_result <- calc_irs_mbg(
@@ -529,18 +781,18 @@ run_mbg_indicator_pipeline <- function(
         if (!is.null(irs_result) && nrow(irs_result) > 0) {
           list(irs_coverage = irs_result)
         } else {
+          results$skipped <<- "IRS variable not found in survey"
           list()
         }
       }, error = function(e) {
-        cli::cli_alert_warning("IRS variable not found: {e$message}")
+        results$skipped <<- glue::glue("Calculation error: {e$message}")
         list()
       })
     },
 
     anc = {
       if (!"IR" %in% names(survey_data)) {
-        cli::cli_alert_warning("IR data not available for ANC")
-        return(results)
+        return(skip_indicator("Missing IR data (Individual Recode)"))
       }
       tryCatch({
         calc_anc_mbg(
@@ -549,15 +801,14 @@ run_mbg_indicator_pipeline <- function(
           indicators = c("anc1", "anc4")
         )
       }, error = function(e) {
-        cli::cli_alert_warning("ANC calculation failed: {e$message}")
+        results$skipped <<- glue::glue("Calculation error: {e$message}")
         list()
       })
     },
 
     csb = {
       if (!"KR" %in% names(survey_data)) {
-        cli::cli_alert_warning("KR data not available for CSB")
-        return(results)
+        return(skip_indicator("Missing KR data (Children Recode)"))
       }
       tryCatch({
         calc_csb_mbg(
@@ -566,15 +817,14 @@ run_mbg_indicator_pipeline <- function(
           indicators = c("public", "private", "none")
         )
       }, error = function(e) {
-        cli::cli_alert_warning("CSB calculation failed: {e$message}")
+        results$skipped <<- glue::glue("Calculation error: {e$message}")
         list()
       })
     },
 
     anemia = {
       if (!"PR" %in% names(survey_data)) {
-        cli::cli_alert_warning("PR data not available for anemia")
-        return(results)
+        return(skip_indicator("Missing PR data (Person Recode)"))
       }
       tryCatch({
         calc_anemia_mbg(
@@ -583,15 +833,14 @@ run_mbg_indicator_pipeline <- function(
           indicators = c("any", "moderate_plus", "severe")
         )
       }, error = function(e) {
-        cli::cli_alert_warning("Anemia variable not found: {e$message}")
+        results$skipped <<- glue::glue("Calculation error: {e$message}")
         list()
       })
     },
 
     iptp = {
       if (!"IR" %in% names(survey_data)) {
-        cli::cli_alert_warning("IR data not available for IPTp")
-        return(results)
+        return(skip_indicator("Missing IR data (Individual Recode)"))
       }
       tryCatch({
         calc_iptp_mbg(
@@ -600,15 +849,14 @@ run_mbg_indicator_pipeline <- function(
           indicators = c("1plus", "2plus", "3plus")
         )
       }, error = function(e) {
-        cli::cli_alert_warning("IPTp variable not found: {e$message}")
+        results$skipped <<- glue::glue("Calculation error: {e$message}")
         list()
       })
     },
 
     epi = {
       if (!"KR" %in% names(survey_data)) {
-        cli::cli_alert_warning("KR data not available for EPI")
-        return(results)
+        return(skip_indicator("Missing KR data (Children Recode)"))
       }
       tryCatch({
         calc_epi_mbg(
@@ -617,15 +865,14 @@ run_mbg_indicator_pipeline <- function(
           indicators = c("bcg", "dpt3", "measles1")
         )
       }, error = function(e) {
-        cli::cli_alert_warning("EPI calculation failed: {e$message}")
+        results$skipped <<- glue::glue("Calculation error: {e$message}")
         list()
       })
     },
 
     u5mr = {
       if (!"BR" %in% names(survey_data)) {
-        cli::cli_alert_warning("BR data not available for U5MR")
-        return(results)
+        return(skip_indicator("Missing BR data (Births Recode)"))
       }
       tryCatch({
         calc_u5mr_mbg(
@@ -633,15 +880,14 @@ run_mbg_indicator_pipeline <- function(
           gps_data = gps_data
         )
       }, error = function(e) {
-        cli::cli_alert_warning("U5MR calculation failed: {e$message}")
+        results$skipped <<- glue::glue("Calculation error: {e$message}")
         list()
       })
     },
 
     smc = {
       if (!"KR" %in% names(survey_data)) {
-        cli::cli_alert_warning("KR data not available for SMC")
-        return(results)
+        return(skip_indicator("Missing KR data (Children Recode)"))
       }
       tryCatch({
         smc_result <- calc_smc_mbg(
@@ -651,21 +897,26 @@ run_mbg_indicator_pipeline <- function(
         if (!is.null(smc_result) && nrow(smc_result) > 0) {
           list(smc_receipt = smc_result)
         } else {
+          results$skipped <<- "SMC variable not found in survey"
           list()
         }
       }, error = function(e) {
-        cli::cli_alert_warning("SMC variable not found: {e$message}")
+        results$skipped <<- glue::glue("Calculation error: {e$message}")
         list()
       })
     },
 
     {
-      cli::cli_alert_warning("Unknown indicator category: {category}")
-      list()
+      # Unknown indicator
+      return(skip_indicator(glue::glue("Unknown indicator category")))
     }
   )
 
+  # Check if indicator was skipped due to empty results
   if (length(cluster_data) == 0) {
+    if (is.null(results$skipped)) {
+      results$skipped <- "No data returned from calculation"
+    }
     return(results)
   }
 
@@ -683,12 +934,14 @@ run_mbg_indicator_pipeline <- function(
         .run_single_mbg(
           cluster_dt = cluster_data[[ind_name]],
           adm2_sf = adm2_sf,
-          pop_rast = pop_rast,
+          pop_rast = pop_for_indicator,
           indicator_name = ind_name,
-          path_output = path_output,
+          output_dirs = output_dirs,
           country_iso3 = country_iso3,
           survey_year = survey_year,
-          save_rasters = save_rasters
+          save_rasters = save_rasters,
+          cache = cache,
+          debug = debug
         )
       }, error = function(e) {
         cli::cli_alert_warning("MBG failed for {ind_name}: {e$message}")
@@ -716,33 +969,106 @@ run_mbg_indicator_pipeline <- function(
   adm2_sf,
   pop_rast,
   indicator_name,
-  path_output,
+  output_dirs,
   country_iso3,
   survey_year,
-  save_rasters
+  save_rasters,
+  cache,
+  debug = FALSE
 ) {
-  # Build ID raster
+  # Validate population raster
+
+  if (is.null(pop_rast)) {
+    cli::cli_abort("Population raster is NULL - cannot run MBG")
+  }
+
+  # Ensure pop_rast has a valid source file (terra rasters can lose source)
+  pop_source <- terra::sources(pop_rast)
+  if (is.null(pop_source) || pop_source == "" || !file.exists(pop_source)) {
+    cli::cli_abort(c(
+      "Population raster has no valid source file",
+      "i" = "Source: {.val {pop_source}}",
+      "i" = "This can happen if the raster was modified in-memory"
+    ))
+  }
+
+  # Ensure intermediate output directory exists
+  if (is.null(output_dirs$intermediate) || output_dirs$intermediate == "") {
+    cli::cli_abort(c(
+      "Intermediate output directory is not set",
+      "i" = "Received: {.val {output_dirs$intermediate}}",
+      "i" = "Pass {.arg intermediate_out_path} to the pipeline function"
+    ))
+  }
+  fs::dir_create(output_dirs$intermediate)
+
+  # Debug: Show input summary
+
+  if (isTRUE(debug)) {
+    cli::cli_h3("Debug: MBG Inputs for {indicator_name}")
+    cli::cli_alert_info("Cluster data: {.val {nrow(cluster_dt)}} rows")
+    cli::cli_alert_info("ADM2 polygons: {.val {nrow(adm2_sf)}} features")
+    cli::cli_alert_info("Population raster: {.file {pop_source}}")
+    cli::cli_alert_info("Intermediate dir: {.file {.relative_path(output_dirs$intermediate)}}")
+  }
+
   adm2_vect <- terra::vect(adm2_sf)
 
-  id_raster <- mbg::build_id_raster(
-    polygons = adm2_vect,
-    template_raster = pop_rast
+  # ---- Cache ID raster ----
+  id_raster_file <- fs::path(
+    output_dirs$intermediate,
+    glue::glue("{tolower(country_iso3)}_id_raster.tif")
   )
+
+  if (isTRUE(cache) && fs::file_exists(id_raster_file)) {
+    cli::cli_alert_info("Using cached ID raster")
+    id_raster <- terra::rast(id_raster_file)
+  } else {
+    cli::cli_alert_info("Building ID raster...")
+    id_raster <- mbg::build_id_raster(
+      polygons = adm2_vect,
+      template_raster = pop_rast
+    )
+    terra::writeRaster(id_raster, id_raster_file, overwrite = TRUE)
+    cli::cli_alert_success("Saved ID raster: {.file {.relative_path(id_raster_file)}}")
+  }
+
+  if (isTRUE(debug)) {
+    cli::cli_alert_info("ID raster dims: {.val {terra::nrow(id_raster)}} x {.val {terra::ncol(id_raster)}}")
+  }
 
   # Intercept-only model
   covariates <- list(
     intercept = terra::setValues(id_raster, 1)
   )
 
-  # Build aggregation table
-  aggregation_table <- mbg::build_aggregation_table(
-    polygons = adm2_vect,
-    id_raster = id_raster,
-    polygon_id_field = "adm2",
-    verbose = FALSE
+  # ---- Cache aggregation table ----
+  agg_file <- fs::path(
+    output_dirs$intermediate,
+    glue::glue("{tolower(country_iso3)}_aggregation_table_adm2.parquet")
   )
 
+  if (isTRUE(cache) && fs::file_exists(agg_file)) {
+    cli::cli_alert_info("Using cached aggregation table")
+    aggregation_table <- arrow::read_parquet(agg_file)
+  } else {
+    cli::cli_alert_info("Building aggregation table...")
+    aggregation_table <- mbg::build_aggregation_table(
+      polygons = adm2_vect,
+      id_raster = id_raster,
+      polygon_id_field = "adm2",
+      verbose = FALSE
+    )
+    arrow::write_parquet(aggregation_table, agg_file)
+    cli::cli_alert_success("Saved aggregation table: {.file {.relative_path(agg_file)}}")
+  }
+
+  if (isTRUE(debug)) {
+    cli::cli_alert_info("Aggregation table: {.val {nrow(aggregation_table)}} rows")
+  }
+
   # Run MBG
+  cli::cli_alert_info("Running MBG model...")
   model_runner <- mbg::MbgModelRunner$new(
     input_data = cluster_dt,
     id_raster = id_raster,
@@ -753,6 +1079,7 @@ run_mbg_indicator_pipeline <- function(
   )
 
   model_runner$run_mbg_pipeline()
+  cli::cli_alert_success("MBG model complete")
 
   # Extract predictions
   cell_preds <- model_runner$grid_cell_predictions
@@ -760,29 +1087,35 @@ run_mbg_indicator_pipeline <- function(
   # Save rasters
   raster_path <- NULL
   if (save_rasters) {
-    raster_path <- fs::path(
-      path_output,
-      glue::glue("{country_iso3}_{indicator_name}_mbg_{survey_year}_mean.tif")
+    fs::dir_create(output_dirs$rasters)
+    raster_file <- glue::glue(
+      "{tolower(country_iso3)}_{indicator_name}_mbg_{survey_year}_mean.tif"
     )
+    raster_path <- fs::path(output_dirs$rasters, raster_file)
 
     terra::writeRaster(
       cell_preds$cell_pred_mean,
       raster_path,
       overwrite = TRUE
     )
+    cli::cli_alert_success("Saved raster: {.file {.relative_path(raster_path)}}")
   }
 
   # Extract ADM2 estimates
+  mean_col <- paste0(indicator_name, "_mean")
+  lower_col <- paste0(indicator_name, "_lower")
+  upper_col <- paste0(indicator_name, "_upper")
+
   adm2_estimates <- adm2_sf |>
     sf::st_drop_geometry() |>
     dplyr::mutate(
-      !!paste0(indicator_name, "_mean") := terra::extract(
+      !!mean_col := terra::extract(
         cell_preds$cell_pred_mean, adm2_sf, fun = mean, na.rm = TRUE
       )[[2]],
-      !!paste0(indicator_name, "_lower") := terra::extract(
+      !!lower_col := terra::extract(
         cell_preds$cell_pred_lower, adm2_sf, fun = mean, na.rm = TRUE
       )[[2]],
-      !!paste0(indicator_name, "_upper") := terra::extract(
+      !!upper_col := terra::extract(
         cell_preds$cell_pred_upper, adm2_sf, fun = mean, na.rm = TRUE
       )[[2]]
     )
@@ -813,19 +1146,21 @@ run_mbg_indicator_pipeline <- function(
 
   # ---- Add standard identifier columns ----
 
-  # Add country codes if provided
+  # Add country codes if provided (lowercase)
   if (!is.null(country_iso3)) {
-    final$iso3 <- toupper(country_iso3)
+    final$iso3_code <- tolower(country_iso3)
   }
 
   if (!is.null(country_iso2)) {
-    final$iso2 <- toupper(country_iso2)
+    final$dhs_code <- tolower(country_iso2)
   }
 
   # Ensure adm0, adm1, adm2 columns exist (try common names)
   if (!"adm0" %in% names(final)) {
     # Try to find adm0 from other column names
-    adm0_candidates <- c("ADM0_NAME", "ADMIN0", "country", "Country", "NAME_0")
+    adm0_candidates <- c(
+      "ADM0_NAME", "ADMIN0", "country", "Country", "NAME_0"
+    )
     for (col in adm0_candidates) {
       if (col %in% names(final)) {
         final$adm0 <- final[[col]]
@@ -836,7 +1171,10 @@ run_mbg_indicator_pipeline <- function(
 
   if (!"adm1" %in% names(final)) {
     # Try to find adm1 from other column names
-    adm1_candidates <- c("ADM1_NAME", "ADMIN1", "province", "Province", "NAME_1", "region", "Region")
+    adm1_candidates <- c(
+      "ADM1_NAME", "ADMIN1", "province", "Province",
+      "NAME_1", "region", "Region"
+    )
     for (col in adm1_candidates) {
       if (col %in% names(final)) {
         final$adm1 <- final[[col]]
@@ -847,7 +1185,9 @@ run_mbg_indicator_pipeline <- function(
 
   if (!"adm2" %in% names(final)) {
     # Try to find adm2 from other column names
-    adm2_candidates <- c("ADM2_NAME", "ADMIN2", "district", "District", "NAME_2")
+    adm2_candidates <- c(
+      "ADM2_NAME", "ADMIN2", "district", "District", "NAME_2"
+    )
     for (col in adm2_candidates) {
       if (col %in% names(final)) {
         final$adm2 <- final[[col]]
@@ -865,7 +1205,7 @@ run_mbg_indicator_pipeline <- function(
 
   if (!"adm2" %in% names(final)) {
     cli::cli_alert_warning(
-      "Column 'adm2' not found in ADM2 shapefile - MBG estimates cannot be merged"
+      "Column 'adm2' not found in shapefile - MBG estimates cannot be merged"
     )
   }
 
@@ -890,161 +1230,104 @@ run_mbg_indicator_pipeline <- function(
     }
   }
 
-  # ---- Reorder columns ----
+  # ---- Select and reorder final columns ----
 
-  # Put identifier columns first
-  id_cols <- c("iso3", "iso2", "adm0", "adm1", "adm2", "survey_year")
+  # Define required identifier columns
+  id_cols <- c("iso3_code", "dhs_code", "adm0", "adm1", "adm2", "survey_year")
   id_cols_present <- intersect(id_cols, names(final))
-  other_cols <- setdiff(names(final), id_cols_present)
 
+  # Identify indicator columns (end with _mean, _lower, _upper)
+  indicator_cols <- names(final)[grepl("_(mean|lower|upper)$", names(final))]
+
+  # Select only required columns (drop GUIDs, hashes, etc.)
   final <- final |>
-    dplyr::select(dplyr::all_of(id_cols_present), dplyr::all_of(other_cols))
+    dplyr::select(dplyr::all_of(c(id_cols_present, indicator_cols)))
 
   final
 }
 
 
-#' Load Population Raster
+#' Load Raster for Year
 #'
-#' Internal function to load population raster from various input formats.
+#' Helper to load a raster for a specific year from various input formats.
 #'
-#' @param pop_rasters Input in one of several formats (see details).
-#' @param target_year Target year to load.
-#' @param country_iso3 Country code (used for searching directory).
+#' @param raster_input Can be:
+#'   - Named list with years as names (e.g., list("2019" = "path.tif"))
+#'   - Single file path (string)
+#'   - Already-loaded SpatRaster object
+#' @param target_year The survey year to load raster for.
+#' @param label Label for CLI messages (e.g., "total population").
 #'
 #' @return A SpatRaster object.
 #'
-#' @details
-#' Supports three input formats:
-#' 1. Named list of file paths (strings) - loads the TIF file for matching year
-#' 2. Named list of SpatRaster objects - returns the raster for matching year
-#' 3. Single directory path - searches for TIF files containing the year
-#'
 #' @noRd
-.load_population_raster <- function(
-  pop_rasters,
-  target_year,
-  country_iso3 = NULL
-) {
+.load_raster_for_year <- function(raster_input, target_year, label = "raster") {
   target_year_char <- as.character(target_year)
 
-  # Case 1: Single directory path
-  if (is.character(pop_rasters) && length(pop_rasters) == 1 && dir.exists(pop_rasters)) {
-    cli::cli_alert_info("Searching for population raster in directory: {.path {pop_rasters}}")
+  # Case 1: Already a SpatRaster
+ if (inherits(raster_input, "SpatRaster")) {
+    cli::cli_alert_success("Using pre-loaded {label} raster")
+    return(raster_input)
+  }
 
-    # Search for TIF files containing the year
-    all_tifs <- list.files(
-      pop_rasters,
-      pattern = "\\.tif$",
-      full.names = TRUE,
-      recursive = TRUE,
-      ignore.case = TRUE
-    )
+  # Case 2: Named list with years
+  if (is.list(raster_input) && !is.null(names(raster_input))) {
+    available_years <- as.integer(names(raster_input))
 
-    if (length(all_tifs) == 0) {
-      cli::cli_abort("No TIF files found in {.path {pop_rasters}}")
-    }
-
-    # First try exact year match
-    year_pattern <- paste0("_", target_year, "[_.]|", target_year, "\\.tif$")
-    matching_files <- all_tifs[grepl(year_pattern, all_tifs)]
-
-    # If country code provided, filter further
-    if (!is.null(country_iso3) && length(matching_files) > 1) {
-      country_matches <- matching_files[grepl(country_iso3, matching_files, ignore.case = TRUE)]
-      if (length(country_matches) > 0) {
-        matching_files <- country_matches
-      }
-    }
-
-    if (length(matching_files) == 0) {
-      # Find closest year
-      year_matches <- regmatches(all_tifs, regexpr("[0-9]{4}", all_tifs))
-      available_years <- as.integer(unique(year_matches[nchar(year_matches) == 4]))
-      available_years <- available_years[!is.na(available_years)]
-
-      if (length(available_years) == 0) {
-        cli::cli_abort("Could not identify years from TIF filenames in {.path {pop_rasters}}")
-      }
-
-      closest_year <- available_years[which.min(abs(available_years - target_year))]
+    # Find exact match or closest year
+    if (target_year_char %in% names(raster_input)) {
+      selected_year <- target_year_char
+    } else {
+      # Find closest available year
+      year_diff <- abs(available_years - target_year)
+      closest_year <- available_years[which.min(year_diff)]
+      selected_year <- as.character(closest_year)
       cli::cli_alert_warning(
-        "No raster found for {target_year}, using closest year: {closest_year}"
+        "No {label} raster for {target_year}, using closest: {closest_year}"
       )
-
-      year_pattern <- paste0("_", closest_year, "[_.]|", closest_year, "\\.tif$")
-      matching_files <- all_tifs[grepl(year_pattern, all_tifs)]
-
-      if (!is.null(country_iso3) && length(matching_files) > 1) {
-        country_matches <- matching_files[grepl(country_iso3, matching_files, ignore.case = TRUE)]
-        if (length(country_matches) > 0) {
-          matching_files <- country_matches
-        }
-      }
     }
 
-    if (length(matching_files) == 0) {
-      cli::cli_abort("Could not find population raster for year {target_year}")
+    raster_path <- raster_input[[selected_year]]
+
+    # Handle if the list value is already a SpatRaster
+    if (inherits(raster_path, "SpatRaster")) {
+      cli::cli_alert_success(
+        "Using pre-loaded {label} raster for {selected_year}"
+      )
+      return(raster_path)
     }
 
-    # Use first match if multiple
-    raster_path <- matching_files[1]
-    cli::cli_alert_success("Loading population raster: {.file {basename(raster_path)}}")
-
+    # Otherwise load from path
+    if (!file.exists(raster_path)) {
+      cli::cli_abort(
+        "{label} raster file not found: {.path {raster_path}}"
+      )
+    }
+    cli::cli_alert_success(
+      "Loading {label} raster ({selected_year}): {.file {basename(raster_path)}}"
+    )
     return(terra::rast(raster_path))
   }
 
-  # Case 2 & 3: Named list (either paths or rasters)
-  if (is.list(pop_rasters)) {
-    # Determine which year to use
-    available_years <- as.integer(names(pop_rasters))
-
-    if (target_year_char %in% names(pop_rasters)) {
-      selected_year <- target_year_char
-    } else {
-      # Find closest year
-      closest_year <- available_years[which.min(abs(available_years - target_year))]
-      selected_year <- as.character(closest_year)
-      cli::cli_alert_warning(
-        "No raster for {target_year}, using closest year: {closest_year}"
-      )
+  # Case 3: Single file path
+  if (is.character(raster_input) && length(raster_input) == 1) {
+    if (!file.exists(raster_input)) {
+      cli::cli_abort("{label} raster file not found: {.path {raster_input}}")
     }
-
-    raster_input <- pop_rasters[[selected_year]]
-
-    # Check if it's a path (string) or already a raster
-    if (is.character(raster_input)) {
-      # It's a file path - load it
-      if (!file.exists(raster_input)) {
-        cli::cli_abort("Population raster file not found: {.path {raster_input}}")
-      }
-      cli::cli_alert_success("Loading population raster: {.file {basename(raster_input)}}")
-      return(terra::rast(raster_input))
-    } else if (inherits(raster_input, "SpatRaster")) {
-      # It's already a raster
-      cli::cli_alert_success("Using pre-loaded population raster for {selected_year}")
-      return(raster_input)
-    } else {
-      cli::cli_abort(
-        "Invalid pop_rasters format. Expected file path or SpatRaster, got {class(raster_input)}"
-      )
-    }
-  }
-
-  # Case 4: Single file path
-  if (is.character(pop_rasters) && length(pop_rasters) == 1 && file.exists(pop_rasters)) {
-    cli::cli_alert_success("Loading population raster: {.file {basename(pop_rasters)}}")
-    return(terra::rast(pop_rasters))
+    cli::cli_alert_success(
+      "Loading {label} raster: {.file {basename(raster_input)}}"
+    )
+    return(terra::rast(raster_input))
   }
 
   cli::cli_abort(
     c(
-      "Invalid pop_rasters format",
+      "Invalid {label} raster input",
       "i" = "Expected one of:",
-      "*" = "Named list of file paths: list('2016' = 'path/to/pop_2016.tif')",
-      "*" = "Named list of SpatRaster objects",
-      "*" = "Directory path containing population TIFs",
-      "*" = "Single TIF file path"
+      "*" = "Named list: list('2019' = 'path/pop_2019.tif', '2020' = ...)",
+      "*" = "Single file path (string)",
+      "*" = "SpatRaster object",
+      "i" = "Received: {class(raster_input)[1]}"
     )
   )
 }
@@ -1185,7 +1468,8 @@ run_mbg_indicator_pipeline <- function(
     "^dhs_severe_anemia", "^iptp_", "^dhs_iptp", "^epi_", "^dhs_epi",
     "^u5mr", "^dhs_u5mr", "^smc_", "^dhs_smc", "^act_", "^dhs_act",
     "access", "use", "ownership", "coverage", "proportion", "prop_",
-    "_low$", "_upp$", "_se$", "^ci_l", "^ci_u", "^mean$", "^lower$", "^upper$",
+    "_low$", "_upp$", "_se$", "^ci_l", "^ci_u",
+    "^mean$", "^lower$", "^upper$",
     "tpr", "reprate", "cs_public", "cs_private", "cs_none"
   )
 
@@ -1194,10 +1478,14 @@ run_mbg_indicator_pipeline <- function(
     if (!is.numeric(df[[col]])) next
 
     # Check if integer column
-    is_integer_col <- any(sapply(integer_patterns, function(p) grepl(p, col, ignore.case = TRUE)))
+    is_integer_col <- any(
+      sapply(integer_patterns, function(p) grepl(p, col, ignore.case = TRUE))
+    )
 
     # Check if proportion column
-    is_proportion_col <- any(sapply(proportion_patterns, function(p) grepl(p, col, ignore.case = TRUE)))
+    is_proportion_col <- any(
+      sapply(proportion_patterns, function(p) grepl(p, col, ignore.case = TRUE))
+    )
 
     if (is_integer_col) {
       df[[col]] <- round(df[[col]], 0)
@@ -1210,4 +1498,35 @@ run_mbg_indicator_pipeline <- function(
   }
 
   df
+}
+
+
+#' Get Relative Path from Project Root
+#'
+#' Extracts the relative path portion from an absolute path by removing
+#' the project root prefix. Uses working directory as reference.
+#'
+#' @param path Character. The absolute path.
+#'
+#' @return Character. The relative path from project root.
+#'
+#' @noRd
+.relative_path <- function(path) {
+  # Try to compute relative path from working directory
+  rel <- tryCatch({
+    fs::path_rel(path, start = getwd())
+  }, error = function(e) {
+    # Fallback: extract path after common project patterns
+    # Matches patterns like: /project-name/01_data/... or /project-name/03_outputs/...
+    match <- regmatches(
+      path,
+      regexpr("(01_data|02_scripts|03_outputs|04_reports|05_metadata_docs)/.*$", path)
+    )
+    if (length(match) > 0 && nchar(match) > 0) {
+      return(match)
+    }
+    # Final fallback: just return basename
+    basename(path)
+  })
+  as.character(rel)
 }
