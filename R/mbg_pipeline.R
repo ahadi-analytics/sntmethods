@@ -160,17 +160,10 @@ run_mbg_indicator_pipeline <- function(
   # Debug: Show configured output paths
   if (isTRUE(debug)) {
     cli::cli_h3("Debug: Output Paths")
-    .show_path <- function(name, path) {
-      if (is.null(path) || path == "") {
-        cli::cli_alert_warning("{name}: {.val NULL or empty}")
-      } else {
-        cli::cli_alert_info("{name}: {.file {.relative_path(path)}}")
-      }
-    }
-    .show_path("Tables", output_dirs$tables)
-    .show_path("Plots", output_dirs$plots)
-    .show_path("Rasters", output_dirs$rasters)
-    .show_path("Intermediate", output_dirs$intermediate)
+    cli::cli_alert_info("Tables: {.file {output_dirs$tables}}")
+    cli::cli_alert_info("Plots: {.file {output_dirs$plots}}")
+    cli::cli_alert_info("Rasters: {.file {output_dirs$rasters}}")
+    cli::cli_alert_info("Intermediate: {.file {output_dirs$intermediate}}")
   }
 
   # Validate required output paths
@@ -1005,11 +998,13 @@ run_mbg_indicator_pipeline <- function(
   # Debug: Show input summary
 
   if (isTRUE(debug)) {
+    pop_rel_path <- .relative_path(pop_source)
+    interm_rel_path <- .relative_path(output_dirs$intermediate)
     cli::cli_h3("Debug: MBG Inputs for {indicator_name}")
     cli::cli_alert_info("Cluster data: {.val {nrow(cluster_dt)}} rows")
     cli::cli_alert_info("ADM2 polygons: {.val {nrow(adm2_sf)}} features")
-    cli::cli_alert_info("Population raster: {.file {pop_source}}")
-    cli::cli_alert_info("Intermediate dir: {.file {.relative_path(output_dirs$intermediate)}}")
+    cli::cli_alert_info("Population raster: {.file {pop_rel_path}}")
+    cli::cli_alert_info("Intermediate dir: {.file {interm_rel_path}}")
   }
 
   adm2_vect <- terra::vect(adm2_sf)
@@ -1030,7 +1025,8 @@ run_mbg_indicator_pipeline <- function(
       template_raster = pop_rast
     )
     terra::writeRaster(id_raster, id_raster_file, overwrite = TRUE)
-    cli::cli_alert_success("Saved ID raster: {.file {.relative_path(id_raster_file)}}")
+    rel_path <- .relative_path(id_raster_file)
+    cli::cli_alert_success("Saved ID raster: {.file {rel_path}}")
   }
 
   if (isTRUE(debug)) {
@@ -1060,7 +1056,8 @@ run_mbg_indicator_pipeline <- function(
       verbose = FALSE
     )
     arrow::write_parquet(aggregation_table, agg_file)
-    cli::cli_alert_success("Saved aggregation table: {.file {.relative_path(agg_file)}}")
+    rel_path <- .relative_path(agg_file)
+    cli::cli_alert_success("Saved aggregation table: {.file {rel_path}}")
   }
 
   if (isTRUE(debug)) {
@@ -1098,7 +1095,8 @@ run_mbg_indicator_pipeline <- function(
       raster_path,
       overwrite = TRUE
     )
-    cli::cli_alert_success("Saved raster: {.file {.relative_path(raster_path)}}")
+    rel_path <- .relative_path(raster_path)
+    cli::cli_alert_success("Saved raster: {.file {rel_path}}")
   }
 
   # Extract ADM2 estimates
