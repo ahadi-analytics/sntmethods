@@ -734,7 +734,11 @@ run_mbg_indicator_pipeline <- function(
           dhs_pr = survey_data$PR,
           gps_data = gps_data,
           test_type = "both",
-          age_groups = list(u5 = c(6, 59))
+          age_groups = list(
+            u5 = c(6, 59),
+            `5_10` = c(60, 120),
+            u10 = c(6, 119)
+          )
         )
       }, error = function(e) {
         results$skipped <<- glue::glue("Calculation error: {e$message}")
@@ -754,7 +758,16 @@ run_mbg_indicator_pipeline <- function(
           dhs_hr = survey_data$HR,
           dhs_pr = survey_data$PR,
           gps_data = gps_data,
-          indicators = c("access", "use_u5")
+          indicators = c(
+            "ownership",
+            "access",
+            "use_all",
+            "use_u5",
+            "use_5_10",
+            "use_10_20",
+            "use_20plus",
+            "use_if_access"
+          )
         )
       }, error = function(e) {
         results$skipped <<- glue::glue("Calculation error: {e$message}")
@@ -1109,13 +1122,13 @@ run_mbg_indicator_pipeline <- function(
     dplyr::mutate(
       !!mean_col := terra::extract(
         cell_preds$cell_pred_mean, adm2_sf, fun = mean, na.rm = TRUE
-      )[[2]],
+      )[[2]] * 100,
       !!lower_col := terra::extract(
         cell_preds$cell_pred_lower, adm2_sf, fun = mean, na.rm = TRUE
-      )[[2]],
+      )[[2]] * 100,
       !!upper_col := terra::extract(
         cell_preds$cell_pred_upper, adm2_sf, fun = mean, na.rm = TRUE
-      )[[2]]
+      )[[2]] * 100
     )
 
   list(
@@ -1144,13 +1157,13 @@ run_mbg_indicator_pipeline <- function(
 
   # ---- Add standard identifier columns ----
 
-  # Add country codes if provided (lowercase)
+  # Add country codes if provided (uppercase)
   if (!is.null(country_iso3)) {
-    final$iso3_code <- tolower(country_iso3)
+    final$iso3_code <- toupper(country_iso3)
   }
 
   if (!is.null(country_iso2)) {
-    final$dhs_code <- tolower(country_iso2)
+    final$dhs_code <- toupper(country_iso2)
   }
 
   # Ensure adm0, adm1, adm2 columns exist (try common names)

@@ -10,10 +10,10 @@
 #' @param age_groups Named list of age ranges (in months) to calculate. Each
 #'   element should be a length-2 vector c(min, max). Default includes:
 #'   \itemize{
-#'     \item u5: c(6, 59)
-#'     \item 5_9: c(60, 119)
-#'     \item u10: c(6, 119)
-#'     \item 2_10: c(24, 119)
+#'     \item u5: c(6, 59) - Under 5 years
+#'     \item 5_10: c(60, 120) - 5-10 years
+#'     \item u10: c(6, 119) - Under 10 years
+#'     \item 2_10: c(24, 119) - 2-10 years (standard PfPR reference)
 #'   }
 #' @param survey_vars Named list mapping DHS variable names. Required keys:
 #'   \itemize{
@@ -62,7 +62,7 @@ calc_pfpr_mbg <- function(
   test_type = "both",
   age_groups = list(
     u5 = c(6, 59),
-    `5_9` = c(60, 119),
+    `5_10` = c(60, 120),
     u10 = c(6, 119),
     `2_10` = c(24, 119)
   ),
