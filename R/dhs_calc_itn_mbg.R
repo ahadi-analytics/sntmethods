@@ -138,15 +138,17 @@ calc_itn_mbg <- function(
   hr <- dhs_hr |>
     dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
     dplyr::mutate(dplyr::across(dplyr::everything(), as.vector)) |>
+    # Calculate ITN count using pick() to stay within the pipe safely
+    dplyr::mutate(
+      n_itns = dplyr::pick(dplyr::all_of(itn_vars)) |>
+        dplyr::mutate(dplyr::across(dplyr::everything(), ~ dplyr::if_else(. == 1, 1L, 0L))) |>
+        rowSums(na.rm = TRUE)
+    ) |>
     dplyr::transmute(
       cluster_id = .data[[survey_vars$cluster]],
       hhid = .data[[survey_vars$hhid]],
       hh_size = .data[[survey_vars$hhsize]],
-      n_itns = dplyr::select(dhs_hr, dplyr::all_of(itn_vars)) |>
-        dplyr::mutate(dplyr::across(dplyr::everything(), ~ dplyr::if_else(. == 1, 1L, 0L))) |>
-        rowSums(na.rm = TRUE)
-    ) |>
-    dplyr::mutate(
+      n_itns = n_itns,
       has_itn = as.integer(n_itns >= 1),
       potential_users = pmin(n_itns * 2, hh_size)
     )
@@ -185,24 +187,22 @@ calc_itn_mbg <- function(
   # 1. Sort individuals by ITN use (users first) within each household
   # 2. Assign access to the first N individuals where N = potential_users
   # This guarantees use <= access at the individual level
+  #
+  # IMPORTANT: hhid is only unique WITHIN a cluster, not globally.
+  # Must group by (cluster_id, hhid) to avoid mixing households across clusters.
 
   pr <- pr |>
-    # Sort by household, then by ITN use (users first)
-    dplyr::arrange(hhid, dplyr::desc(itn_used)) |>
-    dplyr::group_by(hhid) |>
+    # Sort by cluster + household, then by ITN use (users first)
+    dplyr::arrange(cluster_id, hhid, dplyr::desc(itn_used)) |>
+    dplyr::group_by(cluster_id, hhid) |>
     dplyr::mutate(
       # Rank individuals within household (users get lower ranks)
       person_index = dplyr::row_number(),
-      # Calculate access ratio for the household
-      access_ratio = dplyr::if_else(
-        !is.na(hh_size) & hh_size > 0,
-        pmin(potential_users / hh_size, 1),
-        0
-      ),
       # Deterministic access: first N individuals get access
-      # where N = min(potential_users, hh_size)
+      # Cap by both potential_users and hh_size defensively
       has_access = dplyr::if_else(
-        !is.na(potential_users) & person_index <= potential_users,
+        !is.na(potential_users) & !is.na(hh_size) &
+          person_index <= pmin(potential_users, hh_size),
         1L, 0L
       )
     ) |>

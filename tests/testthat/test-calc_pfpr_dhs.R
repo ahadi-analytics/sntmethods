@@ -1,7 +1,8 @@
 test_that("calc_pfpr_dhs returns list with data, dict, and metadata", {
   # Minimal DHS data with children in target age group (6-59 months)
   mock_pr <- data.frame(
-    hv001 = rep(1:2, each = 5),    # 2 clusters
+    hv001 = rep(1:2, each = 5),    # 2 clusters (cluster number)
+    hv021 = rep(1:2, each = 5),    # PSU (often same as hv001)
     hv005 = 1000000,                # weight
     hv022 = 1,                      # stratum (avoids empty strata error)
     hv000 = "SL7",                  # country/survey ID

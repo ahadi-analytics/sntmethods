@@ -332,11 +332,14 @@ calc_itn_dhs_core <- function(
   # 1. Sort individuals by ITN use (users first) within each household
   # 2. Assign access to the first N individuals where N = potential_users
   # This guarantees use <= access at all levels
+  #
+  # IMPORTANT: hhid is only unique WITHIN a cluster, not globally.
+  # Must group by (cluster_id, hhid) to avoid mixing households across clusters.
 
   person_merged_data <- person_merged_data |>
-    # Sort by household, then by ITN use (users first)
-    dplyr::arrange(hhid, dplyr::desc(itn_used)) |>
-    dplyr::group_by(hhid) |>
+    # Sort by cluster + household, then by ITN use (users first)
+    dplyr::arrange(cluster_id, hhid, dplyr::desc(itn_used)) |>
+    dplyr::group_by(cluster_id, hhid) |>
     dplyr::mutate(
       # Rank individuals within household (users get lower ranks)
       person_index = dplyr::row_number(),
@@ -348,9 +351,10 @@ calc_itn_dhs_core <- function(
         missing = NA_real_
       ),
       # Deterministic access: first N individuals get access
-      # where N = min(potential_users, hh_size)
+      # Cap by both potential_users and hh_size defensively
       itn_access = dplyr::if_else(
-        !is.na(potential_users) & person_index <= potential_users,
+        !is.na(potential_users) & !is.na(hh_size) &
+          person_index <= pmin(potential_users, hh_size),
         1L,
         0L,
         missing = 0L

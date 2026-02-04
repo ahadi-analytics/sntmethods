@@ -35,6 +35,10 @@
 #' Each age group's MBG model produces a mortality risk (q). These are
 #' combined using survival probability multiplication.
 #'
+#' **Right-censoring:** Only children who have fully completed an age group
+#' before the interview date are included. This prevents downward bias from
+#' including children still at risk of dying within the interval.
+#'
 #' @examples
 #' \dontrun{
 #' u5mr_mbg <- calc_u5mr_mbg(
@@ -145,16 +149,17 @@ calc_u5mr_mbg <- function(
       "Processing age group: {age_name} ({age_start}-{age_end} months)"
     )
 
-    # Filter to children who entered this age group during analysis period
+    # Filter to children who completed this age group during analysis period
     # Criteria:
-    # 1. Child was born far enough back to enter this age group
+    # 1. Child must have fully exited the age group before interview (right-censoring)
     # 2. Child didn't die before reaching this age group
-    # 3. Child's exposure to this age group is within retrospective window
+    # 3. Child's entry to this age group was within retrospective window
 
     br_age <- br |>
       dplyr::filter(
-        # Child must have been born at least age_start months before interview
-        months_since_birth >= age_start,
+        # Child must have completed the age group before interview (right-censoring)
+        # This prevents bias from including children still at risk
+        months_since_birth >= age_end,
         # Child didn't die before reaching this age group
         # (child_alive == 0 means died, death_age_months is age at death)
         child_alive == 1 | (child_alive == 0 & !is.na(death_age_months) & death_age_months >= age_start),
