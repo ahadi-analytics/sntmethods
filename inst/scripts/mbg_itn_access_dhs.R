@@ -57,7 +57,7 @@ shp_list <- sntutils::read_snt_data(
 
 adm0_sf <- shp_list$adm0
 adm1_sf <- shp_list$adm1
-adm2_sf <- shp_list$adm2
+adm2_sf <- shp_list$adm
 
 # load population raster
 pop_rast <- terra::rast(here::here(

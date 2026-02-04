@@ -24,6 +24,9 @@ NULL
 #' @param adm0_sf sf object with country boundary.
 #' @param adm1_sf sf object with ADM1 boundaries.
 #' @param adm2_sf sf object with ADM2 boundaries.
+#' @param adm3_sf sf object with ADM3 boundaries (optional). Required when
+#'   `aggregation_level = "adm3"`. Should contain columns for adm3 names and
+#'   parent adm2/adm1/adm0 linkages.
 #' @param pop_raster Total population raster(s). Can be:
 #'   \itemize{
 #'     \item Named list with years as names and file paths as values:
@@ -63,6 +66,11 @@ NULL
 #'     \item "u5mr": Under-5 mortality
 #'     \item "smc": SMC receipt
 #'   }
+#' @param aggregation_level Primary aggregation level for MBG outputs. One of:
+#'   \itemize{
+#'     \item "adm2": Aggregate to ADM2 level (default)
+#'     \item "adm3": Aggregate to ADM3 level (requires `adm3_sf`)
+#'   }
 #' @param run_mbg Logical. If TRUE, runs MBG models. Default: TRUE.
 #' @param save_rasters Logical. If TRUE, saves output rasters. Default: TRUE.
 #' @param generate_maps Logical. If TRUE, generates maps. Default: TRUE.
@@ -75,9 +83,11 @@ NULL
 #'
 #' @return A list containing:
 #'   \itemize{
-#'     \item final_dataset: Combined ADM2 dataset with all indicators
+#'     \item final_dataset: Combined dataset with all indicators at the specified
+#'       aggregation level (ADM2 by default, or ADM3 if `aggregation_level = "adm3"`)
 #'     \item adm1_estimates: Survey-weighted ADM1 estimates (if available)
-#'     \item mbg_estimates: MBG ADM2 predictions (if MBG was run)
+#'     \item mbg_estimates: MBG predictions at the specified aggregation level
+#'       (if MBG was run)
 #'     \item cluster_data: Raw cluster-level data
 #'     \item raster_paths: Paths to saved rasters
 #'     \item survey_metadata: Survey collection dates and metadata
@@ -108,6 +118,7 @@ run_mbg_indicator_pipeline <- function(
   adm0_sf,
   adm1_sf,
   adm2_sf,
+  adm3_sf = NULL,
   pop_raster,
   path_dhs_parquet,
   table_out_path,
@@ -122,6 +133,7 @@ run_mbg_indicator_pipeline <- function(
   indicators = c(
     "pfpr", "itn", "irs", "anc", "csb", "anemia", "iptp"
   ),
+  aggregation_level = c("adm2", "adm3"),
   run_mbg = TRUE,
   save_rasters = TRUE,
   generate_maps = TRUE,
@@ -135,11 +147,24 @@ run_mbg_indicator_pipeline <- function(
   .check_spatial_pkg("sf", "run_mbg_indicator_pipeline")
   .check_spatial_pkg("terra", "run_mbg_indicator_pipeline")
   .check_spatial_pkg("fs", "run_mbg_indicator_pipeline")
+
   .check_spatial_pkg("countrycode", "run_mbg_indicator_pipeline")
+
+  # Validate aggregation_level
+  aggregation_level <- match.arg(aggregation_level)
+
+  # Validate ADM3 is provided when aggregation_level is "adm3"
+  if (aggregation_level == "adm3" && is.null(adm3_sf)) {
+    cli::cli_abort(c(
+      "{.arg adm3_sf} is required when {.arg aggregation_level} is 'adm3'",
+      "i" = "Either provide adm3_sf or set aggregation_level = 'adm2'"
+    ))
+  }
 
   # ---- Setup ----
 
   cli::cli_h1("MBG Indicator Pipeline: {toupper(country_iso3)}")
+  cli::cli_alert_info("Aggregation level: {.val {aggregation_level}}")
 
   # Derive DHS country code from ISO3 if not provided
   if (is.null(country_iso2)) {
@@ -385,11 +410,17 @@ run_mbg_indicator_pipeline <- function(
       adm0_aligned <- sf::st_transform(adm0_sf, crs_master)
       adm1_aligned <- sf::st_transform(adm1_sf, crs_master)
       adm2_aligned <- sf::st_transform(adm2_sf, crs_master)
+      if (!is.null(adm3_sf)) {
+        adm3_aligned <- sf::st_transform(adm3_sf, crs_master)
+      } else {
+        adm3_aligned <- NULL
+      }
     } else {
       # Use a default CRS if no population raster
       adm0_aligned <- adm0_sf
       adm1_aligned <- adm1_sf
       adm2_aligned <- adm2_sf
+      adm3_aligned <- adm3_sf
     }
 
     # ---- Process indicators for this year ----
@@ -426,11 +457,13 @@ run_mbg_indicator_pipeline <- function(
           adm0_sf = adm0_aligned,
           adm1_sf = adm1_aligned,
           adm2_sf = adm2_aligned,
+          adm3_sf = adm3_aligned,
           pop_rast = pop_rast,
           pop_rast_u5 = pop_rast_u5,
           output_dirs = output_dirs,
           country_iso3 = country_iso3,
           survey_year = current_year,
+          aggregation_level = aggregation_level,
           run_mbg = run_mbg,
           save_rasters = save_rasters,
           generate_maps = generate_maps,
@@ -472,6 +505,16 @@ run_mbg_indicator_pipeline <- function(
       })
     }
 
+    # ---- Save cluster data for this year ----
+    if (length(year_results$cluster_data) > 0) {
+      .save_cluster_data(
+        cluster_data = year_results$cluster_data,
+        output_dir = output_dirs$tables,
+        country_iso3 = country_iso3,
+        survey_year = current_year
+      )
+    }
+
     # ---- Summary for this year ----
     cli::cli_h3("Summary for {current_year}")
 
@@ -500,7 +543,9 @@ run_mbg_indicator_pipeline <- function(
       cluster_data = year_results$cluster_data,
       survey_year = current_year,
       country_iso3 = country_iso3,
-      country_iso2 = country_iso2
+      country_iso2 = country_iso2,
+      adm3_sf = adm3_aligned,
+      aggregation_level = aggregation_level
     )
 
     # Apply smart rounding
@@ -683,11 +728,13 @@ run_mbg_indicator_pipeline <- function(
   adm0_sf,
   adm1_sf,
   adm2_sf,
+  adm3_sf = NULL,
   pop_rast,
   pop_rast_u5 = NULL,
   output_dirs,
   country_iso3,
   survey_year,
+  aggregation_level = "adm2",
   run_mbg,
   save_rasters,
   generate_maps,
@@ -940,11 +987,13 @@ run_mbg_indicator_pipeline <- function(
         .run_single_mbg(
           cluster_dt = cluster_data[[ind_name]],
           adm2_sf = adm2_sf,
+          adm3_sf = adm3_sf,
           pop_rast = pop_for_indicator,
           indicator_name = ind_name,
           output_dirs = output_dirs,
           country_iso3 = country_iso3,
           survey_year = survey_year,
+          aggregation_level = aggregation_level,
           save_rasters = save_rasters,
           cache = cache,
           debug = debug
@@ -955,7 +1004,7 @@ run_mbg_indicator_pipeline <- function(
       })
 
       if (!is.null(mbg_result)) {
-        results$mbg_estimates[[ind_name]] <- mbg_result$adm2_estimates
+        results$mbg_estimates[[ind_name]] <- mbg_result$adm_estimates
         if (save_rasters && !is.null(mbg_result$raster_path)) {
           results$raster_paths[[ind_name]] <- mbg_result$raster_path
         }
@@ -967,17 +1016,136 @@ run_mbg_indicator_pipeline <- function(
 }
 
 
+#' Check qs2 Package Availability
+#'
+#' @noRd
+.check_qs2_pkg <- function() {
+  if (!requireNamespace("qs2", quietly = TRUE)) {
+    cli::cli_warn(c(
+      "Package {.pkg qs2} is not installed - cluster data will not be saved",
+      "i" = "Install with: install.packages('qs2')"
+    ))
+    return(FALSE)
+  }
+  TRUE
+}
+
+
+#' Get Indicator Labels
+#'
+#' Maps indicator prefixes to meaningful column labels for numerator/denominator.
+#'
+#' @param ind_name Character. The indicator name (e.g., "pfpr_rdt_u5").
+#'
+#' @return List with `numerator` and `denominator` label strings.
+#'
+#' @noRd
+.get_indicator_labels <- function(ind_name) {
+  # Map indicator prefixes to meaningful labels
+  labels <- list(
+    numerator = "numerator",
+    denominator = "denominator"
+  )
+
+  if (grepl("^pfpr_", ind_name)) {
+    labels <- list(numerator = "n_positive", denominator = "n_tested")
+  } else if (grepl("^itn_ownership", ind_name)) {
+    labels <- list(numerator = "n_hh_with_itn", denominator = "n_households")
+  } else if (grepl("^itn_access", ind_name)) {
+    labels <- list(numerator = "n_with_access", denominator = "n_individuals")
+  } else if (grepl("^itn_use", ind_name)) {
+    labels <- list(numerator = "n_used_itn", denominator = "n_eligible")
+  } else if (grepl("^u5mr", ind_name)) {
+    labels <- list(numerator = "n_deaths", denominator = "n_exposed")
+  } else if (grepl("^anc", ind_name)) {
+    labels <- list(numerator = "n_with_visits", denominator = "n_women")
+  } else if (grepl("^csb_", ind_name)) {
+    labels <- list(numerator = "n_sought_care", denominator = "n_febrile")
+  } else if (grepl("^anemia", ind_name)) {
+    labels <- list(numerator = "n_anemic", denominator = "n_tested_hb")
+  } else if (grepl("^iptp", ind_name)) {
+    labels <- list(numerator = "n_received_sp", denominator = "n_women")
+  } else if (grepl("^irs", ind_name)) {
+    labels <- list(numerator = "n_sprayed", denominator = "n_households")
+  } else if (grepl("^epi_|^bcg|^dpt|^measles|^polio", ind_name)) {
+    labels <- list(numerator = "n_vaccinated", denominator = "n_children")
+  } else if (grepl("^smc", ind_name)) {
+    labels <- list(numerator = "n_received_smc", denominator = "n_children")
+  }
+
+  labels
+}
+
+
+#' Save Cluster Data to qs2 Files
+#'
+#' Saves cluster-level data for each indicator as separate qs2 files.
+#'
+#' @param cluster_data Named list of data.tables from calc_*_mbg functions.
+#' @param output_dir Directory to save files.
+#' @param country_iso3 Three-letter ISO country code.
+#' @param survey_year Survey year.
+#'
+#' @return Invisible character vector of saved file paths.
+#'
+#' @noRd
+.save_cluster_data <- function(
+  cluster_data,
+  output_dir,
+  country_iso3,
+  survey_year
+) {
+  if (!.check_qs2_pkg()) return(invisible(NULL))
+
+  fs::dir_create(output_dir)
+  saved_files <- character()
+
+  for (ind_name in names(cluster_data)) {
+    dt <- cluster_data[[ind_name]]
+    if (is.null(dt) || nrow(dt) == 0) next
+
+    # Copy to avoid modifying original
+    dt <- data.table::copy(dt)
+
+    # Get meaningful column labels for this indicator
+    labels <- .get_indicator_labels(ind_name)
+
+    # Add context-appropriate alias columns
+    data.table::set(dt, j = labels$numerator, value = dt$indicator)
+    data.table::set(dt, j = labels$denominator, value = dt$samplesize)
+    data.table::set(dt, j = "prop_raw", value = dt$indicator / dt$samplesize)
+
+    # Naming: {country}_{indicator}_cluster_points_{year}.qs2
+    filename <- glue::glue(
+      "{tolower(country_iso3)}_{ind_name}_cluster_points_{survey_year}.qs2"
+    )
+    filepath <- fs::path(output_dir, filename)
+
+    qs2::qs_save(dt, filepath)
+    saved_files <- c(saved_files, filepath)
+
+    rel_path <- .relative_path(filepath)
+    cli::cli_alert_success("Saved cluster data: {.file {rel_path}}")
+  }
+
+  invisible(saved_files)
+}
+
+
 #' Run Single MBG Model
 #'
 #' @noRd
 .run_single_mbg <- function(
   cluster_dt,
   adm2_sf,
+  adm3_sf = NULL,
+
   pop_rast,
   indicator_name,
   output_dirs,
   country_iso3,
   survey_year,
+  aggregation_level = "adm2",
   save_rasters,
   cache,
   debug = FALSE
@@ -1008,33 +1176,47 @@ run_mbg_indicator_pipeline <- function(
   }
   fs::dir_create(output_dirs$intermediate)
 
-  # Debug: Show input summary
+  # Determine primary polygon based on aggregation level
+  cli::cli_alert_info("MBG aggregation level: {.val {aggregation_level}}")
+  if (aggregation_level == "adm3") {
+    primary_sf <- adm3_sf
+    polygon_id_field <- "adm3"
+    agg_levels <- list(adm3 = c("adm3", "adm2", "adm1", "adm0"))
+    cache_suffix <- "adm3"
+  } else {
+    primary_sf <- adm2_sf
+    polygon_id_field <- "adm2"
+    agg_levels <- list(adm2 = c("adm2", "adm1", "adm0"))
+    cache_suffix <- "adm2"
+  }
 
+  # Debug: Show input summary
   if (isTRUE(debug)) {
     pop_rel_path <- .relative_path(pop_source)
     interm_rel_path <- .relative_path(output_dirs$intermediate)
     cli::cli_h3("Debug: MBG Inputs for {indicator_name}")
     cli::cli_alert_info("Cluster data: {.val {nrow(cluster_dt)}} rows")
-    cli::cli_alert_info("ADM2 polygons: {.val {nrow(adm2_sf)}} features")
+    cli::cli_alert_info("Aggregation level: {.val {aggregation_level}}")
+    cli::cli_alert_info("Primary polygons: {.val {nrow(primary_sf)}} features")
     cli::cli_alert_info("Population raster: {.file {pop_rel_path}}")
     cli::cli_alert_info("Intermediate dir: {.file {interm_rel_path}}")
   }
 
-  adm2_vect <- terra::vect(adm2_sf)
+  primary_vect <- terra::vect(primary_sf)
 
   # ---- Cache ID raster ----
   id_raster_file <- fs::path(
     output_dirs$intermediate,
-    glue::glue("{tolower(country_iso3)}_id_raster.tif")
+    glue::glue("{tolower(country_iso3)}_id_raster_{cache_suffix}.tif")
   )
 
   if (isTRUE(cache) && fs::file_exists(id_raster_file)) {
-    cli::cli_alert_info("Using cached ID raster")
+    cli::cli_alert_info("Using cached ID raster ({cache_suffix})")
     id_raster <- terra::rast(id_raster_file)
   } else {
-    cli::cli_alert_info("Building ID raster...")
+    cli::cli_alert_info("Building ID raster ({cache_suffix})...")
     id_raster <- mbg::build_id_raster(
-      polygons = adm2_vect,
+      polygons = primary_vect,
       template_raster = pop_rast
     )
     terra::writeRaster(id_raster, id_raster_file, overwrite = TRUE)
@@ -1054,18 +1236,18 @@ run_mbg_indicator_pipeline <- function(
   # ---- Cache aggregation table ----
   agg_file <- fs::path(
     output_dirs$intermediate,
-    glue::glue("{tolower(country_iso3)}_aggregation_table_adm2.parquet")
+    glue::glue("{tolower(country_iso3)}_aggregation_table_{cache_suffix}.parquet")
   )
 
   if (isTRUE(cache) && fs::file_exists(agg_file)) {
-    cli::cli_alert_info("Using cached aggregation table")
+    cli::cli_alert_info("Using cached aggregation table ({cache_suffix})")
     aggregation_table <- arrow::read_parquet(agg_file)
   } else {
-    cli::cli_alert_info("Building aggregation table...")
+    cli::cli_alert_info("Building aggregation table ({cache_suffix})...")
     aggregation_table <- mbg::build_aggregation_table(
-      polygons = adm2_vect,
+      polygons = primary_vect,
       id_raster = id_raster,
-      polygon_id_field = "adm2",
+      polygon_id_field = polygon_id_field,
       verbose = FALSE
     )
     arrow::write_parquet(aggregation_table, agg_file)
@@ -1084,7 +1266,7 @@ run_mbg_indicator_pipeline <- function(
     id_raster = id_raster,
     covariate_rasters = covariates,
     aggregation_table = aggregation_table,
-    aggregation_levels = list(adm2 = c("adm2", "adm1", "adm0")),
+    aggregation_levels = agg_levels,
     population_raster = pop_rast
   )
 
@@ -1112,30 +1294,169 @@ run_mbg_indicator_pipeline <- function(
     cli::cli_alert_success("Saved raster: {.file {rel_path}}")
   }
 
-  # Extract ADM2 estimates
+  # Extract ADM estimates at the primary aggregation level
   mean_col <- paste0(indicator_name, "_mean")
   lower_col <- paste0(indicator_name, "_lower")
   upper_col <- paste0(indicator_name, "_upper")
 
-  adm2_estimates <- adm2_sf |>
+  adm_estimates <- primary_sf |>
     sf::st_drop_geometry() |>
     dplyr::mutate(
       !!mean_col := terra::extract(
-        cell_preds$cell_pred_mean, adm2_sf, fun = mean, na.rm = TRUE
+        cell_preds$cell_pred_mean, primary_sf, fun = mean, na.rm = TRUE
       )[[2]] * 100,
       !!lower_col := terra::extract(
-        cell_preds$cell_pred_lower, adm2_sf, fun = mean, na.rm = TRUE
+        cell_preds$cell_pred_lower, primary_sf, fun = mean, na.rm = TRUE
       )[[2]] * 100,
       !!upper_col := terra::extract(
-        cell_preds$cell_pred_upper, adm2_sf, fun = mean, na.rm = TRUE
+        cell_preds$cell_pred_upper, primary_sf, fun = mean, na.rm = TRUE
       )[[2]] * 100
     )
 
   list(
-    adm2_estimates = adm2_estimates,
+    adm_estimates = adm_estimates,
     raster_path = raster_path,
     cell_predictions = cell_preds
   )
+}
+
+
+#' Aggregate Cluster Data to Administrative Level
+#'
+#' Spatially joins cluster-level data to admin boundaries and aggregates
+#' statistics (n_tested, n_positive, n_clusters, raw proportion) per admin unit.
+#'
+#' @param cluster_data Named list of data.tables from calc_*_mbg functions.
+#'   Each data.table should have columns: cluster_id, indicator, samplesize, x, y.
+#' @param admin_sf sf object with administrative boundaries.
+#' @param admin_col Name of the admin identifier column in admin_sf.
+#' @param join_nearest Logical. If TRUE, assigns clusters outside all polygons
+#'   to the nearest administrative unit. Default: TRUE.
+#'
+#' @return A tibble with one row per admin unit and columns for each indicator:
+#'   - n_tested_{indicator}: Total sample size
+#'   - n_pos_{indicator}: Total positive count
+#'   - n_clusters_{indicator}: Number of clusters
+#'   - {indicator}_raw: Raw proportion (n_pos / n_tested)
+#'
+#' @noRd
+.aggregate_cluster_to_admin <- function(
+  cluster_data,
+  admin_sf,
+  admin_col = "adm2",
+  join_nearest = TRUE
+) {
+  if (is.null(cluster_data) || length(cluster_data) == 0) {
+    return(NULL)
+  }
+
+  # Ensure admin_sf is valid
+  if (!inherits(admin_sf, "sf")) {
+    cli::cli_alert_warning("admin_sf is not an sf object - skipping cluster aggregation")
+    return(NULL)
+  }
+
+  # Check admin_col exists
+ if (!admin_col %in% names(admin_sf)) {
+    cli::cli_alert_warning(
+      "Column '{admin_col}' not found in admin_sf - skipping cluster aggregation"
+    )
+    return(NULL)
+  }
+
+  # Initialize result with admin identifiers
+  result <- admin_sf |>
+    sf::st_drop_geometry() |>
+    dplyr::select(dplyr::all_of(admin_col)) |>
+    dplyr::distinct() |>
+    tibble::as_tibble()
+
+  # Process each indicator
+  for (ind_name in names(cluster_data)) {
+    cluster_dt <- cluster_data[[ind_name]]
+
+    if (is.null(cluster_dt) || nrow(cluster_dt) == 0) {
+      next
+    }
+
+    # Check required columns
+    required_cols <- c("x", "y", "indicator", "samplesize")
+    if (!all(required_cols %in% names(cluster_dt))) {
+      cli::cli_alert_warning(
+        "Cluster data for '{ind_name}' missing required columns - skipping"
+      )
+      next
+    }
+
+    # Convert to sf
+    cluster_sf <- cluster_dt |>
+      tibble::as_tibble() |>
+      dplyr::filter(!is.na(x), !is.na(y), x != 0, y != 0) |>
+      sf::st_as_sf(coords = c("x", "y"), crs = 4326, remove = FALSE)
+
+    # Transform to match admin CRS
+    admin_crs <- sf::st_crs(admin_sf)
+    if (!is.na(admin_crs)) {
+      cluster_sf <- sf::st_transform(cluster_sf, admin_crs)
+    }
+
+    # Spatial join
+    joined <- sf::st_join(
+      cluster_sf,
+      admin_sf |> dplyr::select(dplyr::all_of(admin_col)),
+      join = sf::st_within,
+      left = TRUE
+    )
+
+    # Handle unmatched clusters
+    if (join_nearest) {
+      unmatched <- is.na(joined[[admin_col]])
+      if (any(unmatched)) {
+        nearest_idx <- sf::st_nearest_feature(
+          joined[unmatched, ],
+          admin_sf
+        )
+        joined[[admin_col]][unmatched] <- admin_sf[[admin_col]][nearest_idx]
+      }
+    }
+
+    # Aggregate by admin unit
+    joined_df <- sf::st_drop_geometry(joined)
+
+    agg <- joined_df |>
+      dplyr::filter(!is.na(.data[[admin_col]])) |>
+      dplyr::group_by(dplyr::across(dplyr::all_of(admin_col))) |>
+      dplyr::summarise(
+        n_tested = sum(samplesize, na.rm = TRUE),
+        n_pos = sum(indicator, na.rm = TRUE),
+        n_clusters = dplyr::n(),
+        .groups = "drop"
+      ) |>
+      dplyr::mutate(
+        raw_prop = dplyr::if_else(
+          n_tested > 0,
+          round(n_pos / n_tested * 100, 2),
+          NA_real_
+        )
+      )
+
+    # Rename columns with indicator name
+    full_name <- ind_name
+
+    agg <- agg |>
+      dplyr::rename(
+        !!paste0("n_tested_", full_name) := n_tested,
+        !!paste0("n_pos_", full_name) := n_pos,
+        !!paste0("n_clusters_", full_name) := n_clusters,
+        !!paste0(full_name, "_raw") := raw_prop
+      )
+
+    # Merge into result
+    result <- result |>
+      dplyr::left_join(agg, by = admin_col)
+  }
+
+  result
 }
 
 
@@ -1148,10 +1469,16 @@ run_mbg_indicator_pipeline <- function(
   cluster_data,
   survey_year,
   country_iso3 = NULL,
-  country_iso2 = NULL
+  country_iso2 = NULL,
+  adm3_sf = NULL,
+  aggregation_level = "adm2"
 ) {
-  # Start with ADM2 base
-  final <- adm2_sf |>
+  # Determine base sf object based on aggregation level
+  base_sf <- if (aggregation_level == "adm3") adm3_sf else adm2_sf
+
+  # Start with base sf
+
+  final <- base_sf |>
     sf::st_drop_geometry() |>
     tibble::as_tibble()
 
@@ -1207,16 +1534,32 @@ run_mbg_indicator_pipeline <- function(
     }
   }
 
+  # If aggregation_level is adm3, ensure adm3 column exists
+  if (aggregation_level == "adm3" && !"adm3" %in% names(final)) {
+    adm3_candidates <- c(
+      "ADM3_NAME", "ADMIN3", "commune", "Commune", "NAME_3",
+      "subdistrict", "Subdistrict", "ward", "Ward"
+    )
+    for (col in adm3_candidates) {
+      if (col %in% names(final)) {
+        final$adm3 <- final[[col]]
+        break
+      }
+    }
+  }
+
   # Add survey year
   final$survey_year <- survey_year
 
   # ---- Merge MBG estimates ----
 
-  # Warn if adm2 column not found in final dataset
+  # Determine merge key based on aggregation level
+  merge_key <- if (aggregation_level == "adm3") "adm3" else "adm2"
 
-  if (!"adm2" %in% names(final)) {
+  # Warn if merge key column not found in final dataset
+  if (!merge_key %in% names(final)) {
     cli::cli_alert_warning(
-      "Column 'adm2' not found in shapefile - MBG estimates cannot be merged"
+      "Column '{merge_key}' not found in shapefile - MBG estimates cannot be merged"
     )
   }
 
@@ -1227,28 +1570,60 @@ run_mbg_indicator_pipeline <- function(
       # Find columns to merge (exclude admin columns already present)
       merge_cols <- setdiff(names(est), names(final))
 
-      if ("adm2" %in% names(est) && "adm2" %in% names(final)) {
+      if (merge_key %in% names(est) && merge_key %in% names(final)) {
         final <- final |>
           dplyr::left_join(
-            est |> dplyr::select(adm2, dplyr::all_of(merge_cols)),
-            by = "adm2"
+            est |> dplyr::select(dplyr::all_of(merge_key), dplyr::all_of(merge_cols)),
+            by = merge_key
           )
-      } else if (!"adm2" %in% names(est)) {
+      } else if (!merge_key %in% names(est)) {
         cli::cli_alert_warning(
-          "MBG estimates for '{name}' missing 'adm2' column - skipping merge"
+          "MBG estimates for '{name}' missing '{merge_key}' column - skipping merge"
         )
+      }
+    }
+  }
+
+  # ---- Aggregate cluster data to admin level ----
+
+  if (!is.null(cluster_data) && length(cluster_data) > 0) {
+    cluster_stats <- .aggregate_cluster_to_admin(
+      cluster_data = cluster_data,
+      admin_sf = base_sf,
+      admin_col = merge_key,
+      join_nearest = TRUE
+    )
+
+    if (!is.null(cluster_stats) && nrow(cluster_stats) > 0) {
+      # Merge cluster stats into final
+      cluster_cols <- setdiff(names(cluster_stats), names(final))
+      if (length(cluster_cols) > 0 && merge_key %in% names(cluster_stats)) {
+        final <- final |>
+          dplyr::left_join(
+            cluster_stats |> dplyr::select(
+              dplyr::all_of(merge_key),
+              dplyr::all_of(cluster_cols)
+            ),
+            by = merge_key
+          )
       }
     }
   }
 
   # ---- Select and reorder final columns ----
 
-  # Define required identifier columns
-  id_cols <- c("iso3_code", "dhs_code", "adm0", "adm1", "adm2", "survey_year")
+  # Define required identifier columns (include adm3 if aggregation_level is adm3)
+  if (aggregation_level == "adm3") {
+    id_cols <- c("iso3_code", "dhs_code", "adm0", "adm1", "adm2", "adm3", "survey_year")
+  } else {
+    id_cols <- c("iso3_code", "dhs_code", "adm0", "adm1", "adm2", "survey_year")
+  }
   id_cols_present <- intersect(id_cols, names(final))
 
-  # Identify indicator columns (end with _mean, _lower, _upper)
-  indicator_cols <- names(final)[grepl("_(mean|lower|upper)$", names(final))]
+  # Identify indicator columns (MBG estimates and cluster statistics)
+  mbg_cols <- names(final)[grepl("_(mean|lower|upper)$", names(final))]
+  cluster_stat_cols <- names(final)[grepl("^(n_tested_|n_pos_|n_clusters_|.*_raw$)", names(final))]
+  indicator_cols <- c(mbg_cols, cluster_stat_cols)
 
   # Select only required columns (drop GUIDs, hashes, etc.)
   final <- final |>
@@ -1465,7 +1840,7 @@ run_mbg_indicator_pipeline <- function(
 
   # Columns that should be integers (counts, sample sizes, IDs)
   integer_patterns <- c(
-    "^n_", "^dhs_n_", "samplesize", "sample_size", "n_clusters",
+    "^n_", "samplesize", "sample_size", "n_clusters",
     "n_tested", "n_pos", "n_households", "n_births", "n_deaths",
     "n_fever", "n_sought", "n_women", "n_recent", "n_iptp",
     "n_public", "n_private", "n_none", "n_trained", "n_individuals",
@@ -1474,13 +1849,11 @@ run_mbg_indicator_pipeline <- function(
 
   # Columns that are proportions (0-1 scale) → 2 decimal places
   proportion_patterns <- c(
-    "^pfpr_", "^dhs_pfpr", "^itn_", "^dhs_itn", "^irs_", "^dhs_irs",
-    "^anc_", "^dhs_anc", "^csb_", "^dhs_csb", "^anemia", "^dhs_anemia",
-    "^dhs_severe_anemia", "^iptp_", "^dhs_iptp", "^epi_", "^dhs_epi",
-    "^u5mr", "^dhs_u5mr", "^smc_", "^dhs_smc", "^act_", "^dhs_act",
+    "^pfpr_", "^itn_", "^irs_", "^anc_", "^csb_", "^anemia",
+    "^severe_anemia", "^iptp_", "^epi_", "^u5mr", "^smc_", "^act_",
     "access", "use", "ownership", "coverage", "proportion", "prop_",
     "_low$", "_upp$", "_se$", "^ci_l", "^ci_u",
-    "^mean$", "^lower$", "^upper$",
+    "^mean$", "^lower$", "^upper$", "_raw$",
     "tpr", "reprate", "cs_public", "cs_private", "cs_none"
   )
 

@@ -327,34 +327,43 @@ calc_itn_dhs_core <- function(
     )
   }
 
-  # individual access to itn
-  # Create random values outside of mutate for proper evaluation
-  n_persons <- nrow(person_merged_data)
-  random_vals <- stats::runif(n_persons)
+  # ---- Calculate ITN access using deterministic assignment ----
+  # Standard DHS methodology:
+  # 1. Sort individuals by ITN use (users first) within each household
+  # 2. Assign access to the first N individuals where N = potential_users
+  # This guarantees use <= access at all levels
 
   person_merged_data <- person_merged_data |>
+    # Sort by household, then by ITN use (users first)
+    dplyr::arrange(hhid, dplyr::desc(itn_used)) |>
+    dplyr::group_by(hhid) |>
     dplyr::mutate(
-      # Calculate access ratio - handle NA and zero hh_size
+      # Rank individuals within household (users get lower ranks)
+      person_index = dplyr::row_number(),
+      # Calculate access ratio for the household
       itn_access_ratio = dplyr::if_else(
         !is.na(potential_users) & !is.na(hh_size) & hh_size > 0,
         pmin(potential_users / hh_size, 1),
         NA_real_,
         missing = NA_real_
       ),
-      # Use pre-generated random values for access allocation
+      # Deterministic access: first N individuals get access
+      # where N = min(potential_users, hh_size)
       itn_access = dplyr::if_else(
-        itn_access_ratio >= random_vals,
+        !is.na(potential_users) & person_index <= potential_users,
         1L,
         0L,
         missing = 0L
       ),
+      # Used ITN among those with access
       itn_use_if_access = dplyr::if_else(
-        itn_access == 1 & itn_used == 1,
+        itn_access == 1L & itn_used == 1L,
         1L,
         0L,
         missing = 0L
       )
-    )
+    ) |>
+    dplyr::ungroup()
 
   # add admin variables if not present
   if (

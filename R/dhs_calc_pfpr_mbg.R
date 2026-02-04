@@ -30,11 +30,13 @@
 #'   each with columns:
 #'   \itemize{
 #'     \item cluster_id: Cluster identifier
-#'     \item indicator: Number of positive tests (numerator)
-#'     \item samplesize: Number of children tested (denominator)
+#'     \item indicator: Number of positive tests (numerator for MBG)
+#'     \item samplesize: Number of children tested (denominator for MBG)
 #'     \item x: Longitude
 #'     \item y: Latitude
 #'   }
+#'   Use [save_mbg_cluster_data()] to save with additional columns (n_positive,
+#'   n_tested, prop_raw) or [plot_mbg_clusters()] to visualize.
 #'
 #' @details
 #' This function prepares data for MBG spatial modeling. Unlike the survey-
@@ -274,11 +276,198 @@ calc_pfpr_mbg <- function(
     }
   }
 
+  # Filter out redundant age groups (e.g., u10 identical to u5 when no 5-10 data)
+  results <- .filter_redundant_mbg_results(results, age_groups)
+
   if (length(results) == 0) {
     cli::cli_abort("No valid MBG data could be prepared from the input data")
   }
 
   results
+}
+
+
+#' Filter Redundant MBG Results
+#'
+#' Detects and removes redundant age groups from MBG results. Two results are
+#' considered redundant if they have identical cluster data (same cluster_ids
+#' with same indicator and samplesize values). When redundant pairs are found,
+#' the more specific age group (narrower age range) is kept.
+#'
+#' @param results Named list of data.tables from calc_pfpr_mbg
+#' @param age_groups Named list of age ranges used to generate results
+#'
+#' @return Filtered list with redundant results removed
+#'
+#' @keywords internal
+#' @noRd
+.filter_redundant_mbg_results <- function(results, age_groups) {
+  if (length(results) <= 1) {
+    return(results)
+  }
+
+  result_names <- names(results)
+  to_remove <- character(0)
+
+  # Group results by test type (rdt or mic)
+  rdt_results <- result_names[grepl("_rdt_", result_names)]
+  mic_results <- result_names[grepl("_mic_", result_names)]
+
+  # Check for redundancy within each test type
+  for (test_results in list(rdt_results, mic_results)) {
+    if (length(test_results) <= 1) next
+
+    # Pairwise comparison
+    for (i in seq_len(length(test_results) - 1)) {
+      for (j in (i + 1):length(test_results)) {
+        name_i <- test_results[i]
+        name_j <- test_results[j]
+
+        # Skip if already marked for removal
+        if (name_i %in% to_remove || name_j %in% to_remove) next
+
+        dt_i <- results[[name_i]]
+        dt_j <- results[[name_j]]
+
+        # Check if identical
+        if (.are_mbg_results_identical(dt_i, dt_j)) {
+          # Determine which to keep (narrower age range)
+          age_i <- .extract_age_group_from_name(name_i)
+          age_j <- .extract_age_group_from_name(name_j)
+
+          range_i <- age_groups[[age_i]]
+          range_j <- age_groups[[age_j]]
+
+          # Handle case where age group not found in age_groups
+          if (is.null(range_i) || is.null(range_j)) next
+
+          span_i <- range_i[2] - range_i[1]
+          span_j <- range_j[2] - range_j[1]
+
+          if (span_i <= span_j) {
+            # Keep i (narrower), remove j
+            to_remove <- c(to_remove, name_j)
+            cli::cli_alert_warning(
+              "Age group '{age_j}' skipped - identical to '{age_i}' ",
+              "(no data in {range_j[1]}-{range_j[2]} month range outside {range_i[1]}-{range_i[2]})"
+            )
+          } else {
+            # Keep j (narrower), remove i
+            to_remove <- c(to_remove, name_i)
+            cli::cli_alert_warning(
+              "Age group '{age_i}' skipped - identical to '{age_j}' ",
+              "(no data in {range_i[1]}-{range_i[2]} month range outside {range_j[1]}-{range_j[2]})"
+            )
+          }
+        }
+      }
+    }
+  }
+
+  # Remove redundant results
+  if (length(to_remove) > 0) {
+    results <- results[!names(results) %in% to_remove]
+  }
+
+  results
+}
+
+
+#' Check if Two MBG Results are Practically Identical
+#'
+#' Compares two data.tables to determine if they have essentially the same
+#' cluster data. Uses tolerance-based comparison to catch cases where small
+#' differences exist but the results are practically redundant.
+#'
+#' @param dt1 First data.table
+#' @param dt2 Second data.table
+#' @param tol Tolerance for considering results identical. Default 0.99 means
+#'   results are considered identical if correlation > 0.99 and total counts
+#'   differ by less than 1%.
+#'
+#' @return TRUE if results are practically identical, FALSE otherwise
+#'
+#' @keywords internal
+#' @noRd
+.are_mbg_results_identical <- function(dt1, dt2, tol = 0.99) {
+  # Must have same or nearly same number of rows (within 5%)
+  n1 <- nrow(dt1)
+  n2 <- nrow(dt2)
+  if (abs(n1 - n2) / max(n1, n2) > 0.05) {
+    return(FALSE)
+  }
+
+  # Find common clusters
+  common_clusters <- intersect(dt1$cluster_id, dt2$cluster_id)
+
+  # Must have substantial overlap (at least 95% of smaller set)
+  min_clusters <- min(n1, n2)
+  if (length(common_clusters) / min_clusters < 0.95) {
+    return(FALSE)
+  }
+
+  # Compare on common clusters
+ dt1_common <- dt1[dt1$cluster_id %in% common_clusters, ]
+  dt2_common <- dt2[dt2$cluster_id %in% common_clusters, ]
+
+  # Sort by cluster_id
+  dt1_sorted <- dt1_common[order(dt1_common$cluster_id), ]
+  dt2_sorted <- dt2_common[order(dt2_common$cluster_id), ]
+
+  # Check if total samplesize is nearly identical (within 1%)
+  total_ss1 <- sum(dt1_sorted$samplesize)
+  total_ss2 <- sum(dt2_sorted$samplesize)
+  ss_diff <- abs(total_ss1 - total_ss2) / max(total_ss1, total_ss2)
+
+  if (ss_diff > 0.01) {
+    return(FALSE)
+  }
+
+  # Check if total indicator is nearly identical (within 1%)
+  total_ind1 <- sum(dt1_sorted$indicator)
+  total_ind2 <- sum(dt2_sorted$indicator)
+
+  # Handle case where both are zero
+ if (total_ind1 == 0 && total_ind2 == 0) {
+    return(TRUE)
+  }
+
+  ind_diff <- abs(total_ind1 - total_ind2) / max(total_ind1, total_ind2, 1)
+
+  if (ind_diff > 0.01) {
+    return(FALSE)
+  }
+
+  # Check correlation of proportions (if enough variation)
+  prop1 <- dt1_sorted$indicator / dt1_sorted$samplesize
+  prop2 <- dt2_sorted$indicator / dt2_sorted$samplesize
+
+  # If no variation in either, they're identical if means are close
+  if (stats::sd(prop1) < 0.001 || stats::sd(prop2) < 0.001) {
+    return(abs(mean(prop1) - mean(prop2)) < 0.01)
+  }
+
+  # High correlation indicates redundancy
+  correlation <- stats::cor(prop1, prop2, use = "complete.obs")
+
+  !is.na(correlation) && correlation > tol
+}
+
+
+#' Extract Age Group Name from Result Name
+#'
+#' Extracts the age group portion from a result name like "pfpr_rdt_u5".
+#'
+#' @param result_name Result name string
+#'
+#' @return Age group name (e.g., "u5", "2_10")
+#'
+#' @keywords internal
+#' @noRd
+.extract_age_group_from_name <- function(result_name) {
+  # Pattern: pfpr_{test}_{age_group}
+  # Remove "pfpr_rdt_" or "pfpr_mic_" prefix
+  sub("^pfpr_(rdt|mic)_", "", result_name)
 }
 
 

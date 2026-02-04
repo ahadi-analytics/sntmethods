@@ -22,6 +22,8 @@
 #'   Default: all indicators.
 #' @param survey_vars Named list mapping DHS variable names.
 #' @param gps_vars Named list for GPS variable mapping.
+#' @param seed Deprecated. Previously used for probabilistic access assignment.
+#'   Access is now calculated deterministically following standard DHS methodology.
 #'
 #' @return A list of data.tables (one per indicator), each with columns:
 #'   \itemize{
@@ -36,8 +38,15 @@
 #' This function prepares data for MBG spatial modeling. Unlike the survey-
 #' weighted `calc_itn_dhs()` function, this uses simple cluster-level counts.
 #'
-#' ITN access is calculated as: min(ITNs * 2, household_size) / household_size,
-#' then converted to individual-level access using probabilistic assignment.
+#' ITN access is calculated using the standard DHS deterministic assignment method:
+#' \enumerate{
+#'   \item Calculate potential users per household: min(ITNs * 2, household_size)
+#'   \item Sort individuals within each household by ITN use (users first)
+#'   \item Assign access to the first N individuals where N = potential_users
+#' }
+#'
+#' This method guarantees that use <= access at the individual level, since
+#' anyone who used an ITN is prioritized for access assignment.
 #'
 #' @examples
 #' \dontrun{
@@ -48,10 +57,6 @@
 #'   indicators = c("access", "use_u5")
 #' )
 #' }
-#'
-#' @param seed Optional random seed for reproducibility of probabilistic access
-#'   assignment. Set to NULL to disable (different results each run).
-#'   Default: 42 for reproducibility.
 #'
 #' @seealso [calc_itn_dhs()] for survey-weighted estimates
 #' @export
@@ -78,7 +83,7 @@ calc_itn_mbg <- function(
     lat = "LATNUM",
     lon = "LONGNUM"
   ),
-  seed = 42
+  seed = NULL
 ) {
   # ---- Input validation ----
 
@@ -175,22 +180,33 @@ calc_itn_mbg <- function(
       by = c("cluster_id", "hhid")
     )
 
-  # Calculate access ratio and probabilistic access
-  if (!is.null(seed)) {
-    set.seed(seed)  # For reproducibility
-  }
+  # ---- Calculate ITN access using deterministic assignment ----
+  # Standard DHS methodology:
+  # 1. Sort individuals by ITN use (users first) within each household
+  # 2. Assign access to the first N individuals where N = potential_users
+  # This guarantees use <= access at the individual level
+
   pr <- pr |>
+    # Sort by household, then by ITN use (users first)
+    dplyr::arrange(hhid, dplyr::desc(itn_used)) |>
+    dplyr::group_by(hhid) |>
     dplyr::mutate(
+      # Rank individuals within household (users get lower ranks)
+      person_index = dplyr::row_number(),
+      # Calculate access ratio for the household
       access_ratio = dplyr::if_else(
         !is.na(hh_size) & hh_size > 0,
         pmin(potential_users / hh_size, 1),
         0
       ),
+      # Deterministic access: first N individuals get access
+      # where N = min(potential_users, hh_size)
       has_access = dplyr::if_else(
-        access_ratio >= stats::runif(dplyr::n()),
+        !is.na(potential_users) & person_index <= potential_users,
         1L, 0L
       )
-    )
+    ) |>
+    dplyr::ungroup()
 
   # ---- Calculate indicators ----
 
@@ -433,7 +449,7 @@ prep_itn_mbg <- function(
     lat = "LATNUM",
     lon = "LONGNUM"
   ),
-  seed = 42
+  seed = NULL
 ) {
   result <- calc_itn_mbg(
     dhs_hr = dhs_hr,

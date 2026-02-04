@@ -8,6 +8,407 @@
 NULL
 
 
+#' Add Proportion Columns to MBG Cluster Data
+#'
+#' Adds user-friendly columns (n_positive, n_tested, prop_raw) to MBG
+#' cluster data.tables that have indicator/samplesize columns.
+#'
+#' @param dt data.table with indicator and samplesize columns
+#'
+#' @return data.table with additional columns
+#'
+#' @keywords internal
+#' @noRd
+.add_mbg_proportion_cols <- function(dt) {
+  if (!data.table::is.data.table(dt)) {
+    dt <- data.table::as.data.table(dt)
+  }
+
+  if (all(c("indicator", "samplesize") %in% names(dt))) {
+    # Use set() to avoid data.table namespace issues in package context
+    data.table::set(dt, j = "n_positive", value = dt$indicator)
+    data.table::set(dt, j = "n_tested", value = dt$samplesize)
+    data.table::set(dt, j = "prop_raw", value = dt$indicator / dt$samplesize)
+  }
+
+  dt
+}
+
+
+#' Save MBG Cluster Data
+#'
+#' Saves cluster-level MBG data to CSV files for later reuse. Works with
+#' output from any calc_*_mbg() function. Each indicator is saved as a
+#' separate file containing cluster coordinates, sample sizes, and values.
+#'
+#' @param mbg_results Named list of data.tables from any calc_*_mbg() function.
+#' @param output_dir Directory to save CSV files.
+#' @param file_prefix Prefix for output filenames. Default: "mbg_cluster_data".
+#' @param country_iso3 Optional ISO3 country code to include in filename.
+#' @param survey_year Optional survey year to include in filename.
+#'
+#' @return Invisibly returns a character vector of saved file paths.
+#'
+#' @details
+#' Each saved CSV contains:
+#' \itemize{
+#'   \item cluster_id: DHS cluster identifier
+#'   \item x: Longitude
+#'   \item y: Latitude
+#'   \item indicator: Numerator count (for MBG input)
+#'   \item samplesize: Denominator count (for MBG input)
+#'   \item n_positive: Numerator (alias)
+#'   \item n_tested: Denominator (alias)
+#'   \item prop_raw: Raw proportion (indicator / samplesize)
+#' }
+#'
+#' @examples
+#' \dontrun{
+#' # Works with any MBG indicator
+#' itn_results <- calc_itn_mbg(hr_data, pr_data, gps_data)
+#' save_mbg_cluster_data(itn_results, "data/clusters", country_iso3 = "BDI")
+#'
+#' pfpr_results <- calc_pfpr_mbg(pr_data, gps_data)
+#' save_mbg_cluster_data(pfpr_results, "data/clusters", country_iso3 = "BDI")
+#'
+#' anc_results <- calc_anc_mbg(ir_data, gps_data)
+#' save_mbg_cluster_data(anc_results, "data/clusters", country_iso3 = "BDI")
+#' }
+#'
+#' @export
+save_mbg_cluster_data <- function(
+  mbg_results,
+  output_dir,
+  file_prefix = "mbg_cluster_data",
+  country_iso3 = NULL,
+  survey_year = NULL
+) {
+  if (!is.list(mbg_results) || is.data.frame(mbg_results)) {
+    cli::cli_abort(
+      "`mbg_results` must be a named list from a calc_*_mbg() function"
+    )
+  }
+
+  if (length(mbg_results) == 0) {
+    cli::cli_abort("No indicators found in `mbg_results`")
+  }
+
+  # Create output directory if needed
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE)
+    cli::cli_alert_info("Created directory: {output_dir}")
+  }
+
+  saved_files <- character(0)
+
+  for (indicator_name in names(mbg_results)) {
+    mbg_data <- mbg_results[[indicator_name]]
+
+    # Ensure proportion columns are present
+    mbg_data <- .add_mbg_proportion_cols(mbg_data)
+
+    # Build filename
+    name_parts <- c(file_prefix, indicator_name)
+    if (!is.null(country_iso3)) {
+      name_parts <- c(country_iso3, name_parts)
+    }
+    if (!is.null(survey_year)) {
+      name_parts <- c(name_parts, survey_year)
+    }
+
+    filename <- paste0(paste(name_parts, collapse = "_"), ".csv")
+    filepath <- file.path(output_dir, filename)
+
+    # Save as CSV
+    data.table::fwrite(mbg_data, filepath)
+    saved_files <- c(saved_files, filepath)
+
+    cli::cli_alert_success(
+      "Saved {indicator_name}: {nrow(mbg_data)} clusters -> {filepath}"
+    )
+  }
+
+  cli::cli_alert_info("Saved {length(saved_files)} cluster data files")
+
+  invisible(saved_files)
+}
+
+
+#' Plot MBG Cluster Map
+#'
+#' Creates a map of DHS cluster-level estimates from any MBG indicator,
+#' with points colored by proportion and sized by sample size.
+#'
+#' @param mbg_data Data.table or data.frame from any calc_*_mbg() function
+#'   containing columns: cluster_id, x, y, indicator, samplesize.
+#' @param adm0_sf sf object with country boundary (optional).
+#' @param adm_sf sf object with admin boundaries to overlay (optional).
+#' @param title Plot title. Default: "Indicator by DHS Cluster".
+#' @param subtitle Plot subtitle. Default: NULL.
+#' @param caption Plot caption. Default: NULL.
+#' @param legend_label Legend label for proportion scale. Default: "Proportion".
+#' @param point_alpha Point transparency. Default: 0.9.
+#' @param point_size_range Size range for points. Default: c(0.8, 5).
+#' @param palette Color palette - either "heat" (yellow-red) or "blue" (YlGnBu).
+#'   Default: "heat".
+#'
+#' @return A ggplot2 object.
+#'
+#' @examples
+#' \dontrun{
+#' itn_data <- calc_itn_mbg(hr_data, pr_data, gps_data)
+#' plot_mbg_clusters(
+#'   itn_data[["itn_access"]],
+#'   adm0_sf = country_boundary,
+#'   title = "ITN Access by DHS Cluster"
+#' )
+#' }
+#'
+#' @export
+plot_mbg_clusters <- function(
+  mbg_data,
+  adm0_sf = NULL,
+  adm_sf = NULL,
+  title = "Indicator by DHS Cluster",
+  subtitle = NULL,
+  caption = NULL,
+  legend_label = "Proportion",
+  point_alpha = 0.9,
+  point_size_range = c(0.8, 5),
+  palette = "heat"
+) {
+  # Check for ggplot2
+  if (!requireNamespace("ggplot2", quietly = TRUE)) {
+    cli::cli_abort("Package {.pkg ggplot2} is required for plotting")
+  }
+
+  # Check for sf if boundaries provided
+  if (!is.null(adm0_sf) || !is.null(adm_sf)) {
+    .check_spatial_pkg("sf", "plot_mbg_clusters")
+  }
+
+  # Validate input data
+  required_cols <- c("x", "y", "indicator", "samplesize")
+  missing_cols <- setdiff(required_cols, names(mbg_data))
+
+  if (length(missing_cols) > 0) {
+    cli::cli_abort(
+      "Missing required columns: {.var {missing_cols}}. ",
+      "Use output from a calc_*_mbg() function."
+    )
+  }
+
+  # Ensure proportion column exists
+  mbg_data <- .add_mbg_proportion_cols(mbg_data)
+
+  # Convert to sf for plotting
+  cluster_sf <- sf::st_as_sf(
+    mbg_data,
+    coords = c("x", "y"),
+    crs = 4326
+  ) |>
+    dplyr::mutate(prop_pct = .data$prop_raw * 100)
+
+  # Select color palette
+  if (palette == "heat") {
+    colors <- c(
+      "#ffffcc", "#ffeda0", "#fed976", "#feb24c",
+      "#fd8d3c", "#fc4e2a", "#e31a1c", "#bd0026", "#800026"
+    )
+  } else {
+    colors <- c(
+      "#ffffd9", "#edf8b1", "#c7e9b4", "#7fcdbb",
+      "#41b6c4", "#1d91c0", "#225ea8", "#253494", "#081d58"
+    )
+  }
+
+  # Build plot
+  p <- ggplot2::ggplot()
+
+  # Add country boundary if provided
+  if (!is.null(adm0_sf)) {
+    p <- p +
+      ggplot2::geom_sf(
+        data = adm0_sf,
+        fill = ggplot2::alpha("grey98", 0.5),
+        color = "grey70",
+        linewidth = 0.4
+      )
+  }
+
+  # Add admin boundaries if provided
+  if (!is.null(adm_sf)) {
+    p <- p +
+      ggplot2::geom_sf(
+        data = adm_sf,
+        fill = ggplot2::alpha("grey99", 0.25),
+        color = "grey85",
+        linewidth = 0.2
+      )
+  }
+
+  # Add cluster points
+  p <- p +
+    ggplot2::geom_sf(
+      data = cluster_sf,
+      ggplot2::aes(color = .data$prop_pct, size = .data$n_tested),
+      alpha = point_alpha
+    ) +
+    ggplot2::scale_color_gradientn(
+      colors = colors,
+      limits = c(0, 100),
+      breaks = seq(0, 100, 20),
+      labels = function(x) paste0(x, "%"),
+      name = legend_label
+    ) +
+    ggplot2::scale_size_continuous(
+      range = point_size_range,
+      name = "Sample size"
+    ) +
+    ggplot2::labs(
+      title = title,
+      subtitle = subtitle,
+      caption = caption
+    ) +
+    ggplot2::theme_void(base_size = 13) +
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(face = "bold"),
+      legend.position = "bottom",
+      legend.title.position = "top",
+      legend.key.width = grid::unit(1, "cm"),
+      legend.spacing.x = ggplot2::unit(3.2, "cm")
+    )
+
+  p
+}
+
+
+#' Plot All MBG Cluster Maps
+#'
+#' Creates cluster-level maps for all indicators in the output from any
+#' calc_*_mbg() function. Optionally saves each plot to disk.
+#'
+#' @param mbg_results Named list of data.tables from any calc_*_mbg() function.
+#' @param adm0_sf sf object with country boundary (optional).
+#' @param adm_sf sf object with admin boundaries to overlay (optional).
+#' @param country_name Country name for plot titles. Default: NULL.
+#' @param survey_year Survey year for plot titles. Default: NULL.
+#' @param output_dir Directory to save plots. If NULL, plots are returned
+#'   but not saved. Default: NULL.
+#' @param file_prefix Prefix for output filenames. Default: "mbg_clusters".
+#' @param width Plot width in inches. Default: 10.
+#' @param height Plot height in inches. Default: 9.
+#' @param dpi Plot resolution. Default: 320.
+#' @param ... Additional arguments passed to `plot_mbg_clusters()`.
+#'
+#' @return A named list of ggplot2 objects (one per indicator).
+#'
+#' @examples
+#' \dontrun{
+#' # Works with any MBG indicator
+#' itn_results <- calc_itn_mbg(hr_data, pr_data, gps_data)
+#' plots <- plot_mbg_clusters_all(
+#'   itn_results,
+#'   adm0_sf = country_boundary,
+#'   country_name = "Burundi",
+#'   survey_year = 2021,
+#'   output_dir = "outputs/"
+#' )
+#' }
+#'
+#' @export
+plot_mbg_clusters_all <- function(
+  mbg_results,
+  adm0_sf = NULL,
+  adm_sf = NULL,
+  country_name = NULL,
+  survey_year = NULL,
+  output_dir = NULL,
+  file_prefix = "mbg_clusters",
+  width = 10,
+  height = 9,
+  dpi = 320,
+  ...
+) {
+  if (!is.list(mbg_results) || is.data.frame(mbg_results)) {
+    cli::cli_abort(
+      "`mbg_results` must be a named list from a calc_*_mbg() function"
+    )
+  }
+
+  if (length(mbg_results) == 0) {
+    cli::cli_abort("No indicators found in `mbg_results`")
+  }
+
+  # Create output directory if saving
+  if (!is.null(output_dir)) {
+    if (!dir.exists(output_dir)) {
+      dir.create(output_dir, recursive = TRUE)
+    }
+  }
+
+  plots <- list()
+
+  for (indicator_name in names(mbg_results)) {
+    mbg_data <- mbg_results[[indicator_name]]
+
+    # Build title
+    indicator_label <- gsub("_", " ", indicator_name) |> toupper()
+    title <- if (!is.null(country_name) && !is.null(survey_year)) {
+      glue::glue("{country_name}: {indicator_label} by DHS cluster ({survey_year})")
+    } else if (!is.null(country_name)) {
+      glue::glue("{country_name}: {indicator_label} by DHS cluster")
+    } else {
+      glue::glue("{indicator_label} by DHS cluster")
+    }
+
+    caption <- if (!is.null(survey_year)) {
+      glue::glue("Data source: DHS {survey_year}")
+    } else {
+      NULL
+    }
+
+    # Create plot
+    p <- plot_mbg_clusters(
+      mbg_data = mbg_data,
+      adm0_sf = adm0_sf,
+      adm_sf = adm_sf,
+      title = title,
+      caption = caption,
+      legend_label = indicator_label,
+      ...
+    )
+
+    plots[[indicator_name]] <- p
+
+    # Save if output directory provided
+    if (!is.null(output_dir)) {
+      filename <- if (!is.null(survey_year)) {
+        glue::glue("{file_prefix}_{indicator_name}_{survey_year}.png")
+      } else {
+        glue::glue("{file_prefix}_{indicator_name}.png")
+      }
+
+      filepath <- file.path(output_dir, filename)
+
+      ggplot2::ggsave(
+        filename = filepath,
+        plot = p,
+        width = width,
+        height = height,
+        dpi = dpi
+      )
+
+      cli::cli_alert_success("Saved: {filepath}")
+    }
+  }
+
+  cli::cli_alert_info("Generated {length(plots)} cluster maps")
+
+  invisible(plots)
+}
+
+
 #' Save MBG Rasters
 #'
 #' Saves MBG prediction rasters (mean, lower, upper) to files.

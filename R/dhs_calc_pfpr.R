@@ -154,7 +154,8 @@ join_dhs_coords <- function(
 #'   tibble).
 #' @param survey_vars Named list mapping DHS variable names. Required keys:
 #'   \itemize{
-#'     \item `cluster`: Cluster ID (default: "hv001")
+#'     \item `cluster`: Primary sampling unit (default: "hv021"). Note: Use
+#'       hv021 (PSU) for proper survey design, not hv001 (cluster number).
 #'     \item `weight`: Survey weight (default: "hv005", divided by 1,000,000)
 #'     \item `stratum`: Explicit stratum variable if available (default:
 #'       "hv022")
@@ -180,7 +181,7 @@ join_dhs_coords <- function(
 #' # pfpr <- calc_pfpr_dhs_core(
 #' #   dhs_pr = pr_data,
 #' #   survey_vars = list(
-#' #     cluster = "hv001",
+#' #     cluster = "hv021",
 #' #     weight = "hv005",
 #' #     stratum = "hv022",
 #' #     adm1 = "hv024",
@@ -197,7 +198,7 @@ join_dhs_coords <- function(
 calc_pfpr_dhs_core <- function(
   dhs_pr,
   survey_vars = list(
-    cluster = "hv001",
+    cluster = "hv021",
     weight = "hv005",
     stratum = "hv022",
     adm1 = "hv024",
@@ -684,7 +685,8 @@ extract_dhs_metadata <- function(dhs_pr, survey_vars = NULL) {
 #' @param dhs_pr DHS Person Records dataset in tidy format.
 #' @param survey_vars Named list mapping DHS variable names. Required keys:
 #'   \itemize{
-#'     \item `cluster`: Cluster ID (default: "hv001")
+#'     \item `cluster`: Primary sampling unit (default: "hv021"). Note: Use
+#'       hv021 (PSU) for proper survey design, not hv001 (cluster number).
 #'     \item `weight`: Survey weight (default: "hv005", divided by 1,000,000)
 #'     \item `stratum`: Explicit stratum variable if available (default: "hv022")
 #'     \item `adm1`: First administrative level (default: "hv024")
@@ -754,7 +756,7 @@ extract_dhs_metadata <- function(dhs_pr, survey_vars = NULL) {
 calc_pfpr_dhs <- function(
   dhs_pr,
   survey_vars = list(
-    cluster = "hv001",
+    cluster = "hv021",
     weight = "hv005",
     stratum = "hv022",
     adm1 = "hv024",

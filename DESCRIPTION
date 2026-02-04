@@ -47,6 +47,7 @@ Suggests:
     writexl (>= 1.4.0),
     zoo (>= 1.8.15),
     purrr (>= 1.2.0),
+    qs2 (>= 0.1.0),
     rlang (>= 1.1.6),
     sf (>= 1.0.22),
     stringr (>= 1.6.0),
