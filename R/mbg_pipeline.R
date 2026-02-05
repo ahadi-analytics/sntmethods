@@ -143,12 +143,39 @@ run_mbg_indicator_pipeline <- function(
 ) {
 
   # Check for required spatial packages
-  .check_spatial_pkg("mbg", "run_mbg_indicator_pipeline")
   .check_spatial_pkg("sf", "run_mbg_indicator_pipeline")
   .check_spatial_pkg("terra", "run_mbg_indicator_pipeline")
   .check_spatial_pkg("fs", "run_mbg_indicator_pipeline")
-
   .check_spatial_pkg("countrycode", "run_mbg_indicator_pipeline")
+
+  # Warn about MBG dependencies (soft check - will abort later if run_mbg = TRUE)
+  mbg_deps_missing <- character(0)
+
+  if (!requireNamespace("mbg", quietly = TRUE)) {
+    mbg_deps_missing <- c(mbg_deps_missing, "mbg")
+  }
+  if (!requireNamespace("INLA", quietly = TRUE)) {
+    mbg_deps_missing <- c(mbg_deps_missing, "INLA")
+  }
+  if (!requireNamespace("fmesher", quietly = TRUE)) {
+    mbg_deps_missing <- c(mbg_deps_missing, "fmesher")
+  }
+  if (!requireNamespace("MatrixModels", quietly = TRUE)) {
+    mbg_deps_missing <- c(mbg_deps_missing, "MatrixModels")
+  }
+
+  if (length(mbg_deps_missing) > 0) {
+    cli::cli_warn(c(
+      "MBG dependencies not installed: {.pkg {mbg_deps_missing}}",
+      "i" = "MBG modeling will not be available until these are installed",
+      "i" = "Install INLA dependencies first:",
+      " " = "{.code install.packages(c('fmesher', 'MatrixModels'))}",
+      "i" = "Then install INLA:",
+      " " = "{.code install.packages('INLA', repos = c(INLA = 'https://inla.r-inla-download.org/R/stable'), dep = TRUE)}",
+      "i" = "Then install mbg:",
+      " " = "{.code devtools::install_github('ihmeuw/mbg')}"
+    ))
+  }
 
   # Validate aggregation_level
   aggregation_level <- match.arg(aggregation_level)
@@ -161,13 +188,33 @@ run_mbg_indicator_pipeline <- function(
     ))
   }
 
-  # Check mbg package is available when run_mbg = TRUE
-  if (isTRUE(run_mbg) && !requireNamespace("mbg", quietly = TRUE)) {
-    cli::cli_abort(c(
-      "Package {.pkg mbg} is required when {.arg run_mbg = TRUE}",
-      "i" = "Install with: {.code devtools::install_github('ihmeuw/mbg')}",
-      "i" = "Or set {.arg run_mbg = FALSE} to skip MBG modeling"
-    ))
+  # Check mbg package and its dependencies are available when run_mbg = TRUE
+  if (isTRUE(run_mbg)) {
+    mbg_required_missing <- character(0)
+
+    if (!requireNamespace("fmesher", quietly = TRUE)) {
+      mbg_required_missing <- c(mbg_required_missing, "fmesher")
+    }
+    if (!requireNamespace("MatrixModels", quietly = TRUE)) {
+      mbg_required_missing <- c(mbg_required_missing, "MatrixModels")
+    }
+    if (!requireNamespace("INLA", quietly = TRUE)) {
+      mbg_required_missing <- c(mbg_required_missing, "INLA")
+    }
+    if (!requireNamespace("mbg", quietly = TRUE)) {
+      mbg_required_missing <- c(mbg_required_missing, "mbg")
+    }
+
+    if (length(mbg_required_missing) > 0) {
+      cli::cli_abort(c(
+        "MBG dependencies required when {.arg run_mbg = TRUE}: {.pkg {mbg_required_missing}}",
+        "i" = "Install in this order:",
+        " " = "1. {.code install.packages(c('fmesher', 'MatrixModels'))}",
+        " " = "2. {.code install.packages('INLA', repos = c(INLA = 'https://inla.r-inla-download.org/R/stable'), dep = TRUE)}",
+        " " = "3. {.code devtools::install_github('ihmeuw/mbg')}",
+        "i" = "Or set {.arg run_mbg = FALSE} to skip MBG modeling"
+      ))
+    }
   }
 
   # ---- Input Validation ----
