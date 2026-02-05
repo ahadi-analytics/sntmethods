@@ -807,10 +807,13 @@ calc_itn_dhs_core <- function(
   }
 
   # 7e. children under 5 who used itn
+  # Skip if age stratification includes "u5" (will be calculated in age loop)
+  skip_fixed_u5 <- !is.null(age_strat_config) && "u5" %in% age_strat_config$labels
+
   person_under5_data <- person_merged_data |>
     dplyr::filter(is_under5 == 1)
 
-  if (nrow(person_under5_data) > 0) {
+  if (nrow(person_under5_data) > 0 && !skip_fixed_u5) {
     if (use_strata) {
       design_u5 <- survey::svydesign(
         ids = ~cluster_id,
@@ -861,6 +864,11 @@ calc_itn_dhs_core <- function(
       )
     }
   } else {
+    u5_use <- NULL
+  }
+
+  # Set to NULL if skipped for age stratification
+  if (skip_fixed_u5) {
     u5_use <- NULL
   }
 
@@ -1437,6 +1445,34 @@ calc_itn_dhs_core <- function(
       }))
     }
   )
+
+  # ---- 12. cleanup duplicate/intermediate columns ---------------------------
+
+  # Remove any columns with .x or .y suffixes (from duplicate joins)
+  cols_to_remove <- names(itn_results)[
+    grepl("\\.(x|y)$", names(itn_results))
+  ]
+
+  # Also remove unrenamed intermediate columns (should not exist but safety check)
+  intermediate_patterns <- c(
+    "^itn_used_", "^ci_l\\.itn_used_", "^ci_u\\.itn_used_",
+    "^itn_access_", "^ci_l\\.itn_access_", "^ci_u\\.itn_access_",
+    "^itn_use_if_access_", "^ci_l\\.itn_use_if_access_", "^ci_u\\.itn_use_if_access_"
+  )
+
+  for (pattern in intermediate_patterns) {
+    intermediate_cols <- names(itn_results)[grepl(pattern, names(itn_results))]
+    # Only remove if they don't start with "dhs_"
+    intermediate_cols <- intermediate_cols[!grepl("^dhs_", intermediate_cols)]
+    cols_to_remove <- c(cols_to_remove, intermediate_cols)
+  }
+
+  if (length(cols_to_remove) > 0) {
+    itn_results <- itn_results |>
+      dplyr::select(-dplyr::any_of(cols_to_remove))
+  }
+
+  # ---- 13. reorder columns ---------------------------------------------------
 
   column_order <- base::intersect(
     column_order,
