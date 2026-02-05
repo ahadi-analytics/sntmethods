@@ -35,10 +35,10 @@
 #' @param join_nearest Logical; if TRUE, assigns unmatched clusters to nearest
 #'   polygon. Default TRUE.
 #' @param age_breaks Numeric vector of age group boundaries (e.g., c(0, 5, 15,
-#'   Inf)). If NULL (default), no age stratification is performed. Must be
-#'   strictly increasing and non-negative.
-#' @param age_labels Character vector of labels for age groups (e.g., c("0_4",
-#'   "5_14", "15_plus")). Must have length equal to length(age_breaks) - 1.
+#'   Inf)). Default NULL for internal use. Must be strictly increasing and
+#'   non-negative. Use calc_itn_dhs() wrapper for default age stratification.
+#' @param age_labels Character vector of labels for age groups (e.g., c("u5",
+#'   "5_14", "ov15")). Must have length equal to length(age_breaks) - 1.
 #'   Used for column naming. Labels should contain only letters, numbers,
 #'   and underscores.
 #' @param min_sample_size Minimum sample size threshold for warnings when
@@ -1618,22 +1618,22 @@ extract_dhs_metadata_itn <- function(
 #' @param admin_level Character vector of admin columns in shapefile.
 #' @param join_nearest Logical; assign unmatched clusters to nearest polygon.
 #' @param age_breaks Numeric vector of age group boundaries for stratified
-#'   analysis (e.g., c(0, 5, 15, Inf)). Default NULL (no stratification).
-#' @param age_labels Character vector of age group labels (e.g., c("0_4",
-#'   "5_14", "15_plus")). Required if age_breaks is provided.
+#'   analysis. Default c(0, 5, 15, Inf) for standard age groups (0-4, 5-14, 15+).
+#' @param age_labels Character vector of age group labels. Default c("u5",
+#'   "5_14", "ov15") to align with ITN schema. Must match length of age_breaks - 1.
 #' @param min_sample_size Minimum sample size for age group estimates. Default 25.
 #'
 #' @return List containing:
 #'   \itemize{
-#'     \item data: Tibble with ITN indicators (includes age-stratified columns
-#'           if age_breaks/age_labels provided)
+#'     \item data: Tibble with ITN indicators including age-stratified columns
+#'           (use_if_access, use, access by age group with confidence intervals)
 #'     \item dict: Data dictionary
 #'     \item metadata: Survey metadata (includes age stratification info)
 #'   }
 #'
 #' @examples
 #' \dontrun{
-#' # Basic usage without age stratification
+#' # Basic usage with default age stratification (u5, 5_14, ov15)
 #' result <- calc_itn_dhs(dhs_hr = hr_data, dhs_pr = pr_data)
 #'
 #' # With custom age groups
@@ -1641,7 +1641,15 @@ extract_dhs_metadata_itn <- function(
 #'   dhs_hr = hr_data,
 #'   dhs_pr = pr_data,
 #'   age_breaks = c(0, 5, 15, 25, Inf),
-#'   age_labels = c("0_4", "5_14", "15_24", "25_plus")
+#'   age_labels = c("u5", "5_14", "15_24", "ov25")
+#' )
+#'
+#' # Without age stratification (set to NULL)
+#' result <- calc_itn_dhs(
+#'   dhs_hr = hr_data,
+#'   dhs_pr = pr_data,
+#'   age_breaks = NULL,
+#'   age_labels = NULL
 #' )
 #' }
 #'
@@ -1672,8 +1680,8 @@ calc_itn_dhs <- function(
   shapefile = NULL,
   admin_level = NULL,
   join_nearest = TRUE,
-  age_breaks = NULL,
-  age_labels = NULL,
+  age_breaks = c(0, 5, 15, Inf),
+  age_labels = c("u5", "5_14", "ov15"),
   min_sample_size = 25
 ) {
   # validate age stratification to pass to metadata
