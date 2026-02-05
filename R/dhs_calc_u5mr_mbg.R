@@ -25,8 +25,14 @@
 #'     \item samplesize: Number of children exposed (from under1 group)
 #'     \item x: Longitude
 #'     \item y: Latitude
-#'     \item u5mr: Combined U5MR per 1,000 live births (matches DHS.rates scale)
+#'     \item u5mr: Combined U5MR per 1,000 live births
 #'   }
+#'
+#' @details
+#' **Important:** The `indicator` and `samplesize` columns are used by MBG to model
+#' the death proportion (indicator/samplesize). The MBG pipeline automatically
+#' converts model outputs to "per 1,000" units to match epidemiological standards
+#' and the scale of the `u5mr` column.
 #'
 #' @details
 #' U5MR is modeled as a composite of age-specific mortality risks:
@@ -238,7 +244,7 @@ calc_u5mr_mbg <- function(
 
   # Calculate composite U5MR
   # U5MR = 1 - (1-q0)*(1-q1)*(1-q2)*(1-q3)*(1-q4)
-  # Then convert to per 1,000 live births to match DHS.rates output
+  # Multiply by 1000 to convert to "per 1,000 live births" (standard epidemiological unit)
   combined <- combined |>
     dplyr::mutate(
       u5mr_raw = (1 - (1 - q_under1) * (1 - q_age1) * (1 - q_age2) * (1 - q_age3) * (1 - q_age4)) * 1000,

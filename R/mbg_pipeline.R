@@ -163,6 +163,9 @@ run_mbg_indicator_pipeline <- function(
   if (!requireNamespace("MatrixModels", quietly = TRUE)) {
     mbg_deps_missing <- c(mbg_deps_missing, "MatrixModels")
   }
+  if (!requireNamespace("sn", quietly = TRUE)) {
+    mbg_deps_missing <- c(mbg_deps_missing, "sn")
+  }
 
   if (length(mbg_deps_missing) > 0) {
     cli::cli_warn(c(
@@ -204,12 +207,15 @@ run_mbg_indicator_pipeline <- function(
     if (!requireNamespace("mbg", quietly = TRUE)) {
       mbg_required_missing <- c(mbg_required_missing, "mbg")
     }
+    if (!requireNamespace("sn", quietly = TRUE)) {
+      mbg_required_missing <- c(mbg_required_missing, "sn")
+    }
 
     if (length(mbg_required_missing) > 0) {
       cli::cli_abort(c(
         "MBG dependencies required when {.arg run_mbg = TRUE}: {.pkg {mbg_required_missing}}",
         "i" = "Install in this order:",
-        " " = "1. {.code install.packages(c('fmesher', 'MatrixModels'))}",
+        " " = "1. {.code install.packages(c('fmesher', 'MatrixModels', 'sn'))}",
         " " = "2. {.code install.packages('INLA', repos = c(INLA = 'https://inla.r-inla-download.org/R/stable'), dep = TRUE)}",
         " " = "3. {.code devtools::install_github('ihmeuw/mbg')}",
         "i" = "Or set {.arg run_mbg = FALSE} to skip MBG modeling"
@@ -1423,18 +1429,22 @@ run_mbg_indicator_pipeline <- function(
   lower_col <- paste0(indicator_name, "_lower")
   upper_col <- paste0(indicator_name, "_upper")
 
+  # U5MR uses "per 1,000" units (epidemiological standard)
+  # Other indicators use percentage units (0-100)
+  multiplier <- if (grepl("^u5mr", indicator_name, ignore.case = TRUE)) 1000 else 100
+
   adm_estimates <- primary_sf |>
     sf::st_drop_geometry() |>
     dplyr::mutate(
       !!mean_col := terra::extract(
         cell_preds$cell_pred_mean, primary_sf, fun = mean, na.rm = TRUE
-      )[[2]] * 100,
+      )[[2]] * multiplier,
       !!lower_col := terra::extract(
         cell_preds$cell_pred_lower, primary_sf, fun = mean, na.rm = TRUE
-      )[[2]] * 100,
+      )[[2]] * multiplier,
       !!upper_col := terra::extract(
         cell_preds$cell_pred_upper, primary_sf, fun = mean, na.rm = TRUE
-      )[[2]] * 100
+      )[[2]] * multiplier
     )
 
   list(
@@ -1547,6 +1557,10 @@ run_mbg_indicator_pipeline <- function(
     # Aggregate by admin unit
     joined_df <- sf::st_drop_geometry(joined)
 
+    # U5MR uses "per 1,000" units (epidemiological standard)
+    # Other indicators use percentage units (0-100)
+    multiplier <- if (grepl("^u5mr", ind_name, ignore.case = TRUE)) 1000 else 100
+
     agg <- joined_df |>
       dplyr::filter(!is.na(.data[[admin_col]])) |>
       dplyr::group_by(dplyr::across(dplyr::all_of(admin_col))) |>
@@ -1559,7 +1573,7 @@ run_mbg_indicator_pipeline <- function(
       dplyr::mutate(
         raw_prop = dplyr::if_else(
           n_tested > 0,
-          round(n_pos / n_tested * 100, 2),
+          round(n_pos / n_tested * multiplier, 2),
           NA_real_
         )
       )
@@ -2027,7 +2041,7 @@ run_mbg_indicator_pipeline <- function(
 #'
 #' Applies smart rounding to MBG indicator output:
 #' - Integer columns (counts, sample sizes) → whole numbers
-#' - Proportion columns (0-1 indicators) → 2 decimal places
+#' - Indicator columns (percentages, rates) → 2 decimal places
 #'
 #' @param df Data frame to round.
 #'
@@ -2048,7 +2062,7 @@ run_mbg_indicator_pipeline <- function(
     "n_with_access", "positive", "pop", "cluster_id", "_id$"
   )
 
-  # Columns that are proportions (0-1 scale) → 2 decimal places
+  # Indicator columns (percentages 0-100, or rates like u5mr per 1,000) → 2 decimal places
   proportion_patterns <- c(
     "^pfpr_", "^itn_", "^irs_", "^anc_", "^csb_", "^anemia",
     "^severe_anemia", "^iptp_", "^epi_", "^u5mr", "^smc_", "^act_",
