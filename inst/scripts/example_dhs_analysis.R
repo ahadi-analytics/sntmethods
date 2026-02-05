@@ -137,7 +137,10 @@ for (admin_level in admin_levels) {
     dhs_pr = pr_dhs,
     gps_data = ge_dhs,
     shapefile = shp_admin,
-    admin_level = admin_level
+    admin_level = admin_level,
+    # Enable age stratification to get use_if_access indicator
+    age_breaks = c(0, 5, 15, Inf),
+    age_labels = c("u5", "5_14", "15plus")
   )
 
   wealth_results <- calc_wealth_dhs(
