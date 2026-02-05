@@ -161,6 +161,73 @@ run_mbg_indicator_pipeline <- function(
     ))
   }
 
+  # Check mbg package is available when run_mbg = TRUE
+  if (isTRUE(run_mbg) && !requireNamespace("mbg", quietly = TRUE)) {
+    cli::cli_abort(c(
+      "Package {.pkg mbg} is required when {.arg run_mbg = TRUE}",
+      "i" = "Install with: {.code devtools::install_github('ihmeuw/mbg')}",
+      "i" = "Or set {.arg run_mbg = FALSE} to skip MBG modeling"
+    ))
+  }
+
+  # ---- Input Validation ----
+
+  # Validate indicator names
+  valid_indicators <- c("pfpr", "itn", "irs", "anc", "csb", "anemia", "iptp", "u5mr")
+  invalid_indicators <- setdiff(indicators, valid_indicators)
+  if (length(invalid_indicators) > 0) {
+    cli::cli_abort(c(
+      "Invalid indicator(s): {.val {invalid_indicators}}",
+      "i" = "Valid indicators: {.val {valid_indicators}}"
+    ))
+  }
+
+  # Validate DHS parquet path exists
+  if (!fs::dir_exists(path_dhs_parquet)) {
+    cli::cli_abort(c(
+      "DHS parquet path does not exist",
+      "x" = "Path not found: {.path {path_dhs_parquet}}",
+      "i" = "Check that the path is correct and accessible"
+    ))
+  }
+
+  # Validate shapefile inputs are sf objects
+  if (!inherits(adm0_sf, "sf")) {
+    cli::cli_abort("{.arg adm0_sf} must be an sf object, not {.cls {class(adm0_sf)}}")
+  }
+  if (!inherits(adm1_sf, "sf")) {
+    cli::cli_abort("{.arg adm1_sf} must be an sf object, not {.cls {class(adm1_sf)}}")
+  }
+  if (!inherits(adm2_sf, "sf")) {
+    cli::cli_abort("{.arg adm2_sf} must be an sf object, not {.cls {class(adm2_sf)}}")
+  }
+  if (!is.null(adm3_sf) && !inherits(adm3_sf, "sf")) {
+    cli::cli_abort("{.arg adm3_sf} must be an sf object, not {.cls {class(adm3_sf)}}")
+  }
+
+  # Validate population raster paths exist (if run_mbg = TRUE)
+  if (isTRUE(run_mbg)) {
+    .validate_raster_paths(pop_raster, country_iso3, "pop_raster")
+    if (!is.null(pop_raster_u5)) {
+      .validate_raster_paths(pop_raster_u5, country_iso3, "pop_raster_u5")
+    }
+  }
+
+  # Validate/create output directories
+  output_paths <- c(table_out_path, fig_out_path, raster_out_path, intermediate_out_path)
+  output_paths <- output_paths[!is.null(output_paths) & output_paths != ""]
+  for (out_path in output_paths) {
+    tryCatch({
+      fs::dir_create(out_path, recurse = TRUE)
+    }, error = function(e) {
+      cli::cli_abort(c(
+        "Cannot create output directory",
+        "x" = "Path: {.path {out_path}}",
+        "i" = "Error: {e$message}"
+      ))
+    })
+  }
+
   # ---- Setup ----
 
   cli::cli_h1("MBG Indicator Pipeline: {toupper(country_iso3)}")
@@ -401,6 +468,16 @@ run_mbg_indicator_pipeline <- function(
         )
         NULL
       })
+    }
+
+    # Abort if run_mbg = TRUE but population raster is missing
+    if (isTRUE(run_mbg) && is.null(pop_rast)) {
+      cli::cli_abort(c(
+        "Population raster is required when {.arg run_mbg = TRUE}",
+        "x" = "Could not load population raster for year {current_year}",
+        "i" = "Check that {.arg pop_raster} paths exist and use correct country code",
+        "i" = "Or set {.arg run_mbg = FALSE} to skip MBG modeling"
+      ))
     }
 
     # ---- Align CRS ----
@@ -1630,6 +1707,83 @@ run_mbg_indicator_pipeline <- function(
     dplyr::select(dplyr::all_of(c(id_cols_present, indicator_cols)))
 
   final
+}
+
+
+#' Validate Raster Paths
+#'
+#' Validates that population raster paths exist and warns about country code mismatches.
+#'
+#' @param raster_input Raster input (list of paths, single path, or SpatRaster).
+#' @param country_iso3 Expected country ISO3 code.
+#' @param arg_name Name of the argument for error messages.
+#'
+#' @noRd
+.validate_raster_paths <- function(raster_input, country_iso3, arg_name) {
+  iso3_lower <- tolower(country_iso3)
+
+  # Case 1: Already a SpatRaster - nothing to validate
+  if (inherits(raster_input, "SpatRaster")) {
+    return(invisible(TRUE))
+  }
+
+  # Case 2: Named list of paths
+  if (is.list(raster_input) && !is.null(names(raster_input))) {
+    for (year in names(raster_input)) {
+      path <- raster_input[[year]]
+      if (is.character(path) && length(path) == 1) {
+        .validate_single_raster_path(path, iso3_lower, arg_name, year)
+      }
+    }
+    return(invisible(TRUE))
+  }
+
+  # Case 3: Single file path
+  if (is.character(raster_input) && length(raster_input) == 1) {
+    .validate_single_raster_path(raster_input, iso3_lower, arg_name, NULL)
+    return(invisible(TRUE))
+  }
+
+  # Unknown format - will be caught later by .load_raster_for_year
+  invisible(TRUE)
+}
+
+
+#' Validate Single Raster Path
+#'
+#' @noRd
+.validate_single_raster_path <- function(path, iso3_lower, arg_name, year) {
+  # Check file exists
+  if (!file.exists(path)) {
+    year_msg <- if (!is.null(year)) glue::glue(" for year {year}") else ""
+    cli::cli_abort(c(
+      "Population raster file not found{year_msg}",
+      "x" = "Path: {.path {path}}",
+      "i" = "Check that {.arg {arg_name}} paths are correct"
+    ))
+  }
+
+  # Check for country code mismatch in filename
+  filename <- tolower(basename(path))
+
+  # Common country code patterns in WorldPop filenames
+  # e.g., "bfa_ppp_2010.tif", "bdi_total_00_04_2010.tif"
+  country_pattern <- "^([a-z]{3})_"
+  match <- regmatches(filename, regexpr(country_pattern, filename))
+
+  if (length(match) > 0 && nchar(match) >= 3) {
+    file_iso3 <- substr(match, 1, 3)
+    if (file_iso3 != iso3_lower) {
+      cli::cli_abort(c(
+        "Country code mismatch in population raster filename",
+        "x" = "Expected: {.val {toupper(iso3_lower)}} but file has: {.val {toupper(file_iso3)}}",
+        "i" = "File: {.file {basename(path)}}",
+        "i" = "Check that {.arg {arg_name}} uses the correct country's rasters"
+      ))
+    }
+  }
+
+  invisible(TRUE)
 }
 
 
