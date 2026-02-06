@@ -806,7 +806,67 @@ calc_itn_dhs_core <- function(
     )
   }
 
-  # 7e. children under 5 who used itn
+  # 7e. population use if access (among those with access)
+  person_with_access_data <- person_merged_data |>
+    dplyr::filter(itn_access == 1)
+
+  if (nrow(person_with_access_data) > 0) {
+    if (use_strata) {
+      design_access <- survey::svydesign(
+        ids = ~cluster_id,
+        strata = ~stratum_id,
+        weights = ~survey_weight,
+        data = person_with_access_data,
+        nest = TRUE
+      )
+    } else {
+      design_access <- survey::svydesign(
+        ids = ~cluster_id,
+        weights = ~survey_weight,
+        data = person_with_access_data,
+        nest = TRUE
+      )
+    }
+
+    if (!is.null(grouping_vars)) {
+      population_use_if_access <- survey::svyby(
+        ~itn_used,
+        by = grouping_formula,
+        design = design_access,
+        FUN = survey::svymean,
+        vartype = "ci",
+        keep.names = FALSE
+      ) |>
+        tibble::as_tibble() |>
+        dplyr::rename(
+          itn_use_if_access = itn_used,
+          ci_l.itn_use_if_access = ci_l,
+          ci_u.itn_use_if_access = ci_u
+        )
+    } else {
+      population_use_if_access_mean <- survey::svymean(
+        ~itn_used,
+        design = design_access
+      )
+
+      population_use_if_access_ci <- stats::confint(
+        population_use_if_access_mean
+      )
+
+      population_use_if_access <- tibble::tibble(
+        level = "National",
+        itn_use_if_access = base::as.numeric(
+          population_use_if_access_mean
+        ),
+        ci_l.itn_use_if_access = population_use_if_access_ci[1, 1],
+        ci_u.itn_use_if_access = population_use_if_access_ci[1, 2]
+      )
+    }
+  } else {
+    population_use_if_access <- NULL
+  }
+
+  # 7f. children under 5 who used itn
   # Skip if age stratification includes "u5" (will be calculated in age loop)
   skip_fixed_u5 <- !is.null(age_strat_config) && "u5" %in% age_strat_config$labels
 
@@ -1043,6 +1103,10 @@ calc_itn_dhs_core <- function(
           itn_used,
           na.rm = TRUE
         ),
+        dhs_n_used_among_access = base::sum(
+          itn_access * itn_used,
+          na.rm = TRUE
+        ),
         dhs_n_under5 = base::sum(
           is_under5,
           na.rm = TRUE
@@ -1084,6 +1148,10 @@ calc_itn_dhs_core <- function(
       ),
       dhs_n_used_itn = base::sum(
         person_merged_data$itn_used,
+        na.rm = TRUE
+      ),
+      dhs_n_used_among_access = base::sum(
+        person_merged_data$itn_access * person_merged_data$itn_used,
         na.rm = TRUE
       ),
       dhs_n_under5 = base::sum(
@@ -1130,6 +1198,11 @@ calc_itn_dhs_core <- function(
     if (!is.null(preg_use)) {
       itn_results <- itn_results |>
         dplyr::left_join(preg_use, by = grouping_vars)
+    }
+
+    if (!is.null(population_use_if_access)) {
+      itn_results <- itn_results |>
+        dplyr::left_join(population_use_if_access, by = grouping_vars)
     }
 
     itn_results <- itn_results |>
@@ -1202,6 +1275,14 @@ calc_itn_dhs_core <- function(
         )
     }
 
+    if (!is.null(population_use_if_access)) {
+      itn_results <- itn_results |>
+        dplyr::bind_cols(
+          population_use_if_access |>
+            dplyr::select(-level)
+        )
+    }
+
     itn_results <- itn_results |>
       dplyr::bind_cols(
         household_samples |>
@@ -1261,7 +1342,10 @@ calc_itn_dhs_core <- function(
     dhs_itn_access_upp = "ci_u.itn_access_ratio",
     dhs_itn_use = "itn_used",
     dhs_itn_use_low = "ci_l.itn_used",
-    dhs_itn_use_upp = "ci_u.itn_used"
+    dhs_itn_use_upp = "ci_u.itn_used",
+    dhs_itn_use_if_access = "itn_use_if_access",
+    dhs_itn_use_if_access_low = "ci_l.itn_use_if_access",
+    dhs_itn_use_if_access_upp = "ci_u.itn_use_if_access"
   )
 
   # Add age-stratified renames
@@ -1387,6 +1471,7 @@ calc_itn_dhs_core <- function(
     "dhs_itn_sufficient",
     "dhs_itn_access",
     "dhs_itn_use",
+    "dhs_itn_use_if_access",
     "dhs_itn_use_u5",
     "dhs_itn_use_preg",
     # age-stratified indicators
@@ -1417,6 +1502,7 @@ calc_itn_dhs_core <- function(
     "dhs_n_hh_sufficient",
     "dhs_n_with_access",
     "dhs_n_used_itn",
+    "dhs_n_used_among_access",
     "dhs_n_under5_used",
     "dhs_n_pregnant_used",
     # confidence intervals
@@ -1428,6 +1514,8 @@ calc_itn_dhs_core <- function(
     "dhs_itn_access_upp",
     "dhs_itn_use_low",
     "dhs_itn_use_upp",
+    "dhs_itn_use_if_access_low",
+    "dhs_itn_use_if_access_upp",
     "dhs_itn_use_u5_low",
     "dhs_itn_use_u5_upp",
     "dhs_itn_use_preg_low",

@@ -77,6 +77,9 @@ test_that("calc_itn_dhs returns list with data, dict, and metadata", {
   expect_true("dhs_itn_sufficient" %in% names(result$data))
   expect_true("dhs_itn_access" %in% names(result$data))
   expect_true("dhs_itn_use" %in% names(result$data))
+  expect_true("dhs_itn_use_if_access" %in% names(result$data))
+  expect_true("dhs_itn_use_if_access_low" %in% names(result$data))
+  expect_true("dhs_itn_use_if_access_upp" %in% names(result$data))
   expect_true("dhs_itn_use_u5" %in% names(result$data))
 
   # Test metadata extraction
@@ -380,8 +383,87 @@ test_that("calc_itn_dhs returns proper confidence intervals", {
     result$data$dhs_itn_ownership <= result$data$dhs_itn_ownership_upp
   ))
 
-  # CIs should be bounded 0-100
+  # CIs should be bounded 0-1
 
   expect_true(all(result$data$dhs_itn_ownership_low >= 0))
-  expect_true(all(result$data$dhs_itn_ownership_upp <= 100))
+  expect_true(all(result$data$dhs_itn_ownership_upp <= 1))
+})
+
+test_that("calc_itn_dhs calculates use_if_access correctly", {
+  # Create mock data with known access and use patterns
+  mock_hr <- data.frame(
+    hv001 = rep(1:3, each = 4),
+    hv005 = 1000000,
+    hv022 = 1,
+    hhid = 1:12,
+    hv024 = rep(1:3, each = 4),
+    hv013 = 4,
+    hv000 = "SL7",
+    hv007 = 2023,
+    # Cluster 1: 4 nets (all HH have nets)
+    # Cluster 2: 2 nets (half HH have nets)
+    # Cluster 3: 0 nets (no HH have nets)
+    hml10_1 = c(1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0),
+    hml10_2 = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+  )
+
+  mock_pr <- data.frame(
+    hv001 = rep(rep(1:3, each = 4), each = 4),
+    hv005 = 1000000,
+    hv022 = 1,
+    hhid = rep(1:12, each = 4),
+    hv105 = rep(c(2, 10, 30, 50), 12),
+    hv104 = rep(c(1, 2, 2, 1), 12),
+    # Cluster 1: Everyone has access, 3/4 use (75% use if access)
+    # Cluster 2: Half have access, 2/4 of those with access use (50% use if access)
+    # Cluster 3: No one has access, no one uses
+    hml12 = c(
+      1, 1, 1, 0,  # HH1: 3/4 use
+      1, 1, 1, 0,  # HH2: 3/4 use
+      1, 1, 1, 0,  # HH3: 3/4 use
+      1, 1, 1, 0,  # HH4: 3/4 use
+      1, 1, 0, 0,  # HH5: 2/4 use
+      1, 1, 0, 0,  # HH6: 2/4 use
+      0, 0, 0, 0,  # HH7: 0/4 use
+      0, 0, 0, 0,  # HH8: 0/4 use
+      0, 0, 0, 0,  # HH9-12: no use
+      0, 0, 0, 0,
+      0, 0, 0, 0,
+      0, 0, 0, 0
+    ),
+    hml18 = 0,
+    hv000 = "SL7",
+    hv007 = 2023
+  )
+
+  result <- calc_itn_dhs(dhs_hr = mock_hr, dhs_pr = mock_pr)
+
+  # Check that use_if_access exists and is proportion (0-1)
+  expect_true("dhs_itn_use_if_access" %in% names(result$data))
+  expect_true(all(result$data$dhs_itn_use_if_access >= 0, na.rm = TRUE))
+  expect_true(all(result$data$dhs_itn_use_if_access <= 1, na.rm = TRUE))
+
+  # Check that use_if_access >= use when access < 1
+  # (Among those with access, usage rate should be >= overall usage rate)
+  expect_true(all(
+    result$data$dhs_itn_use_if_access >= result$data$dhs_itn_use,
+    na.rm = TRUE
+  ))
+
+  # Check confidence intervals
+  expect_true(all(
+    result$data$dhs_itn_use_if_access_low <= result$data$dhs_itn_use_if_access,
+    na.rm = TRUE
+  ))
+  expect_true(all(
+    result$data$dhs_itn_use_if_access_upp >= result$data$dhs_itn_use_if_access,
+    na.rm = TRUE
+  ))
+
+  # Check sample size column exists
+  expect_true("dhs_n_used_among_access" %in% names(result$data))
+  expect_true(all(
+    result$data$dhs_n_used_among_access <= result$data$dhs_n_with_access,
+    na.rm = TRUE
+  ))
 })
