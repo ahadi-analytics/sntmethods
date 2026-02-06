@@ -58,6 +58,12 @@ jobs:
             libssl-dev \
             libcurl4-openssl-dev
 
+      - name: Install INLA (Suggested dependency)
+        continue-on-error: true
+        run: |
+          install.packages("INLA", repos = c(INLA = "https://inla.r-inla-download.org/R/stable", CRAN = "https://cloud.r-project.org"), dep = TRUE)
+        shell: Rscript {0}
+
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           extra-packages: any::rcmdcheck
