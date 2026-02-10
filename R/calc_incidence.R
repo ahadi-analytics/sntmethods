@@ -1,7 +1,7 @@
-#' Calculate Malaria Incidence from Routine Health Facility Data (N0-N4)
+#' Calculate Malaria Incidence from Routine Health Facility Data (N0-N5)
 #'
 #' Calculates malaria incidence at the admin-month level (e.g., district-month)
-#' using a structured cascade framework (N0 through N4) to adjust for testing
+#' using a structured cascade framework (N0 through N5) to adjust for testing
 #' gaps, reporting incompleteness, and care-seeking behavior. Facility-level
 #' data is aggregated to admin level before calculating incidence. Returns a
 #' validated dataset with all incidence levels, quality flags, and source
@@ -39,17 +39,26 @@
 #'         is negligible.
 #'       \item N4 is always between N2 and N3 in magnitude (N2 < N4 < N3).
 #'     }
+#'   \item **N5 (Conservative Non-Seekers Adjusted)**:
+#'     \itemize{
+#'       \item n5_cases = n2_cases * (1 + (cs_none/cs_none_divisor)/cs_public)
+#'       \item n5_incidence = (n5_cases / pop) * rate_multiplier
+#'       \item **Note**: Like N4 but divides the non-care-seeking proportion
+#'         by `cs_none_divisor` (default 2) for a more conservative estimate.
+#'       \item N5 is always between N2 and N4 in magnitude (N2 < N5 < N4).
+#'     }
 #' }
 #'
 #' Each level builds on the previous, with N3 representing the most complete
 #' estimate of true community-level malaria incidence. N4 provides a conservative
-#' alternative to N3 that excludes private sector.
+#' alternative to N3 that excludes private sector. N5 provides an even more
+#' conservative estimate by reducing the non-seeker adjustment.
 #'
 #' @param data Routine health facility data at facility-month level
 #'   (data.frame or tibble). Must contain one row per facility per month.
 #' @param levels Character vector specifying which incidence levels to calculate
 #'   (default: `c("N0", "N1", "N2", "N3")`). Can specify subset like `c("N0",
-#'   "N1")` or include N4 with `c("N0", "N1", "N2", "N3", "N4")`.
+#'   "N1")` or include N4/N5 with `c("N0", "N1", "N2", "N3", "N4", "N5")`.
 #' @param hf_var Column name for health facility unique identifier
 #'   (default: "hf_uid").
 #' @param adm0_var Column name for national/country level. If NULL (default),
@@ -79,7 +88,10 @@
 #' @param cs_private_var Column name for proportion seeking care at private
 #'   facilities (default: "cs_private"). Required for N3.
 #' @param cs_none_var Column name for proportion seeking no care
-#'   (default: "cs_none"). Required for N3.
+#'   (default: "cs_none"). Required for N3/N4/N5.
+#' @param cs_none_divisor Numeric. Divisor applied to cs_none for N5 calculation
+#'   (default: 2). N5 uses `cs_none / cs_none_divisor` instead of `cs_none`,
+#'   producing a more conservative estimate than N4.
 #' @param rate_multiplier Denominator for incidence rate calculation
 #'   (default: 1000, for cases per 1,000 population).
 #' @param scale_factor Deprecated. Use `rate_multiplier` instead.
@@ -97,20 +109,20 @@
 #'
 #' @return A named list with components:
 #'   \describe{
-#'     \item{monthly}{A named list with tibbles at each admin level (N0-N4):
+#'     \item{monthly}{A named list with tibbles at each admin level (N0-N5):
 #'       \itemize{
-#'         \item `adm0`: National level monthly incidence (N0-N4)
-#'         \item `adm1`: First admin level (region) monthly incidence (N0-N4)
-#'         \item `adm2`: Second admin level (district) monthly incidence (N0-N4)
-#'         \item `adm3`: Third admin level monthly incidence (N0-N4, if `adm3_var` provided)
+#'         \item `adm0`: National level monthly incidence (N0-N5)
+#'         \item `adm1`: First admin level (region) monthly incidence (N0-N5)
+#'         \item `adm2`: Second admin level (district) monthly incidence (N0-N5)
+#'         \item `adm3`: Third admin level monthly incidence (N0-N5, if `adm3_var` provided)
 #'       }
 #'     }
-#'     \item{annual}{A named list with tibbles at each admin level (N0-N4):
+#'     \item{annual}{A named list with tibbles at each admin level (N0-N5):
 #'       \itemize{
-#'         \item `adm0`: National level annual incidence (N0-N4)
-#'         \item `adm1`: First admin level (region) annual incidence (N0-N4)
-#'         \item `adm2`: Second admin level (district) annual incidence (N0-N4)
-#'         \item `adm3`: Third admin level annual incidence (N0-N4, if `adm3_var` provided)
+#'         \item `adm0`: National level annual incidence (N0-N5)
+#'         \item `adm1`: First admin level (region) annual incidence (N0-N5)
+#'         \item `adm2`: Second admin level (district) annual incidence (N0-N5)
+#'         \item `adm3`: Third admin level annual incidence (N0-N5, if `adm3_var` provided)
 #'       }
 #'     }
 #'     \item{facility}{(Only if `return_facility = TRUE`) A named list with tibbles:
@@ -135,6 +147,7 @@
 #'     \item `n2_cases`, `n2_incidence`: N2 (reporting-adjusted)
 #'     \item `n3_cases`, `n3_incidence`: N3 (care-seeking-adjusted)
 #'     \item `n4_cases`, `n4_incidence`: N4 (public + non-seekers)
+#'     \item `n5_cases`, `n5_incidence`: N5 (conservative non-seekers)
 #'   }
 #'
 #' @examples
@@ -197,6 +210,7 @@ calc_incidence <- function(
   cs_public_var = "cs_public",
   cs_private_var = "cs_private",
   cs_none_var = "cs_none",
+  cs_none_divisor = 2,
   rate_multiplier = 1000,
   scale_factor = lifecycle::deprecated(),
   include_flags = FALSE,
@@ -225,7 +239,7 @@ calc_incidence <- function(
   }
 
   # Validate levels parameter
-  valid_levels <- c("N0", "N1", "N2", "N3", "N4")
+  valid_levels <- c("N0", "N1", "N2", "N3", "N4", "N5")
   invalid_levels <- setdiff(levels, valid_levels)
 
   if (length(invalid_levels) > 0) {
@@ -381,7 +395,7 @@ calc_incidence <- function(
 
   # ---- warn on inconsistent care-seeking values ----------------------------
 
-  needs_cs <- any(c("N3", "N4") %in% levels)
+  needs_cs <- any(c("N3", "N4", "N5") %in% levels)
 
   if (needs_cs) {
     cs_vars_present <- c(cs_public_var, cs_private_var, cs_none_var) %in% names(data)
@@ -434,7 +448,7 @@ calc_incidence <- function(
     input_vars <- c(input_vars, reprate_var)
   }
 
-  if ("N3" %in% levels || "N4" %in% levels) {
+  if (any(c("N3", "N4", "N5") %in% levels)) {
     if (cs_public_var %in% names(data) && cs_public_var != "cs_public") {
       standard_names <- c(standard_names, "cs_public")
       input_vars <- c(input_vars, cs_public_var)
@@ -506,8 +520,8 @@ calc_incidence <- function(
       dplyr::mutate(reprate = as.numeric(as.character(reprate)))
   }
 
-  # Add care-seeking for N3 and N4
-  if ("N3" %in% levels || "N4" %in% levels) {
+  # Add care-seeking for N3, N4, and N5
+  if (any(c("N3", "N4", "N5") %in% levels)) {
     if (cs_public_var %in% names(data)) {
       df <- df |>
         dplyr::rename(cs_public = !!cs_public_var)
@@ -637,7 +651,7 @@ calc_incidence <- function(
       )
   }
 
-  if ("N3" %in% levels || "N4" %in% levels) {
+  if (any(c("N3", "N4", "N5") %in% levels)) {
     # Only create flag if care-seeking columns exist
     if (all(c("cs_public", "cs_none") %in% names(df))) {
       df <- df |>
@@ -650,7 +664,7 @@ calc_incidence <- function(
   # ---- calculate N0: crude incidence ---------------------------------------
   # N0 is always needed as the base for all higher levels
 
-  needs_n0 <- any(c("N0", "N1", "N2", "N3", "N4") %in% levels)
+  needs_n0 <- any(c("N0", "N1", "N2", "N3", "N4", "N5") %in% levels)
 
   if (needs_n0) {
     if ("N0" %in% levels) {
@@ -671,7 +685,7 @@ calc_incidence <- function(
   # ---- calculate N1: testing-adjusted incidence ----------------------------
 
   # Check if higher levels need N1 but N1 wasn't explicitly requested
-  needs_n1_for_higher <- any(c("N2", "N3", "N4") %in% levels) && !("N1" %in% levels)
+  needs_n1_for_higher <- any(c("N2", "N3", "N4", "N5") %in% levels) && !("N1" %in% levels)
 
   if ("N1" %in% levels) {
     cli::cli_alert_info("Calculating N1 (testing-adjusted incidence)...")
@@ -708,7 +722,7 @@ calc_incidence <- function(
   # ---- calculate N2: reporting-adjusted incidence --------------------------
 
   # Check if higher levels need N2 but N2 wasn't explicitly requested
-  needs_n2_for_higher <- any(c("N3", "N4") %in% levels) && !("N2" %in% levels)
+  needs_n2_for_higher <- any(c("N3", "N4", "N5") %in% levels) && !("N2" %in% levels)
 
   if ("N2" %in% levels) {
     cli::cli_alert_info(
@@ -770,6 +784,24 @@ calc_incidence <- function(
     cli::cli_alert_success("N4 calculated (excludes private sector).")
   }
 
+  # ---- calculate N5: conservative non-seekers adjusted incidence -----------
+
+  if ("N5" %in% levels) {
+    cli::cli_alert_info(
+      "Calculating N5 (conservative non-seekers adjusted incidence)..."
+    )
+
+    df <- df |>
+      .calc_n5_internal(
+        scale_factor = rate_multiplier,
+        cs_none_divisor = cs_none_divisor
+      )
+
+    cli::cli_alert_success(
+      "N5 calculated (non-seekers divided by {cs_none_divisor})."
+    )
+  }
+
   # ---- determine highest valid incidence level -----------------------------
 
   df <- df |>
@@ -821,17 +853,17 @@ calc_incidence <- function(
  # the intermediate columns are still included since they were computed
 
   # N0 is always needed if any level is calculated
-  if (any(c("N0", "N1", "N2", "N3", "N4") %in% levels)) {
+  if (any(c("N0", "N1", "N2", "N3", "N4", "N5") %in% levels)) {
     core_cols <- c(core_cols, "n0_cases", "n0_incidence")
   }
 
   # N1 columns included if N1 requested OR if higher levels need N1 (pass-through)
-  if (any(c("N1", "N2", "N3", "N4") %in% levels)) {
+  if (any(c("N1", "N2", "N3", "N4", "N5") %in% levels)) {
     core_cols <- c(core_cols, "n1_cases", "n1_incidence")
   }
 
   # N2 columns included if N2 requested OR if higher levels need N2 (pass-through)
-  if (any(c("N2", "N3", "N4") %in% levels)) {
+  if (any(c("N2", "N3", "N4", "N5") %in% levels)) {
     core_cols <- c(core_cols, "n2_cases", "n2_incidence")
   }
 
@@ -852,6 +884,20 @@ calc_incidence <- function(
     if (!"adj_none" %in% core_cols) {
       core_cols <- c(core_cols, "adj_none")
     }
+  }
+  if ("N5" %in% levels) {
+    # N5 needs cs_public and cs_none
+    if (!"cs_public" %in% core_cols) {
+      core_cols <- c(core_cols, "cs_public")
+    }
+    if (!"cs_none" %in% core_cols) {
+      core_cols <- c(core_cols, "cs_none")
+    }
+    core_cols <- c(core_cols, "n5_cases", "n5_incidence")
+    if (!"adj_none" %in% core_cols) {
+      core_cols <- c(core_cols, "adj_none")
+    }
+    core_cols <- c(core_cols, "adj_none_reduced")
   }
 
   core_cols <- c(core_cols, "incidence_level")
@@ -881,7 +927,8 @@ calc_incidence <- function(
   df_facility_final <- .calc_facility_incidence(
     df_facility,
     levels = levels,
-    scale_factor = rate_multiplier
+    scale_factor = rate_multiplier,
+    cs_none_divisor = cs_none_divisor
   )
 
   # ---- Build and return output list -----------------------------------------
@@ -895,7 +942,8 @@ calc_incidence <- function(
     df_facility = df_facility_final,
     scale_factor = rate_multiplier,
     has_adm3 = has_adm3,
-    return_facility = return_facility
+    return_facility = return_facility,
+    cs_none_divisor = cs_none_divisor
   )
 
   # ---- Rename TPR column in output if different from "tpr" ------------------
@@ -925,8 +973,8 @@ calc_incidence <- function(
   # Add info about output structure
   cli::cli_alert_success("Output contains:")
   cli::cli_bullets(c(
-    "*" = "monthly: adm0, adm1, adm2{if (has_adm3) ', adm3' else ''} (N0-N4)",
-    "*" = "annual: adm0, adm1, adm2{if (has_adm3) ', adm3' else ''} (N0-N4)"
+    "*" = "monthly: adm0, adm1, adm2{if (has_adm3) ', adm3' else ''} (N0-N5)",
+    "*" = "annual: adm0, adm1, adm2{if (has_adm3) ', adm3' else ''} (N0-N5)"
   ))
 
   # ---- Print CLI Summary -----------------------------------------------------
@@ -969,6 +1017,17 @@ calc_incidence <- function(
     )
     cli::cli_text(
       "    Note: Excludes private sector adjustment"
+    )
+  }
+  if ("N5" %in% levels) {
+    cli::cli_text(
+      "N5: n5_cases{sfx} = n2_cases{sfx} * (1 + (cs_none/{cs_none_divisor})/cs_public)"
+    )
+    cli::cli_text(
+      "    n5_incidence{sfx} = (n5_cases{sfx} / pop{sfx}) * {rate_multiplier}"
+    )
+    cli::cli_text(
+      "    Note: Conservative estimate (non-seekers divided by {cs_none_divisor})"
     )
   }
   cli::cli_rule()
@@ -1079,20 +1138,20 @@ calc_incidence <- function(
 .round_incidence_output <- function(output) {
   # Columns to round to whole numbers (cases/counts)
   integer_cols <- c(
-    "n0_cases", "n1_cases", "n2_cases", "n3_cases", "n4_cases",
+    "n0_cases", "n1_cases", "n2_cases", "n3_cases", "n4_cases", "n5_cases",
     "pop", "conf", "test", "pres"
   )
 
   # Columns to round to 2 decimal places (rates/proportions)
   decimal_cols <- c(
     "n0_incidence", "n1_incidence", "n2_incidence",
-    "n3_incidence", "n4_incidence", "tpr", "reprate",
+    "n3_incidence", "n4_incidence", "n5_incidence", "tpr", "reprate",
     "cs_public", "cs_private", "cs_none",
-    "adj_priv", "adj_none"
+    "adj_priv", "adj_none", "adj_none_reduced"
   )
 
   # Intermediate columns to drop from final output
-  cols_to_drop <- c("adj_priv", "adj_none", "adj_pub")
+  cols_to_drop <- c("adj_priv", "adj_none", "adj_pub", "adj_none_reduced")
 
   # Helper to round columns in a single data frame
   round_df <- function(df) {
@@ -1197,6 +1256,24 @@ calc_incidence <- function(
       }
     }
 
+    # N5 >= N2 (conservative non-seeker adjustment should not decrease cases)
+    if (all(c("n5_cases", "n2_cases") %in% names(df))) {
+      bad <- df |>
+        dplyr::filter(!is.na(n5_cases) & !is.na(n2_cases) & n5_cases < n2_cases)
+      if (nrow(bad) > 0) {
+        issues$n5_lt_n2 <- nrow(bad)
+      }
+    }
+
+    # N4 >= N5 (N4 uses full cs_none, N5 uses cs_none/divisor)
+    if (all(c("n4_cases", "n5_cases") %in% names(df))) {
+      bad <- df |>
+        dplyr::filter(!is.na(n4_cases) & !is.na(n5_cases) & n4_cases < n5_cases)
+      if (nrow(bad) > 0) {
+        issues$n4_lt_n5 <- nrow(bad)
+      }
+    }
+
     if (length(issues) > 0) {
       return(list(df_name = df_name, issues = issues))
     }
@@ -1237,6 +1314,8 @@ calc_incidence <- function(
           "n3_lt_n2" = "N3 < N2 (care-seeking adjustment decreased cases)",
           "n4_lt_n2" = "N4 < N2 (non-seeker adjustment decreased cases)",
           "n3_lt_n4" = "N3 < N4 (private sector adjustment is negative?)",
+          "n5_lt_n2" = "N5 < N2 (conservative non-seeker adjustment decreased cases)",
+          "n4_lt_n5" = "N4 < N5 (N5 should be <= N4)",
           issue_name
         )
         cli::cli_warn("
@@ -1275,7 +1354,8 @@ calc_incidence <- function(
     "n1_cases", "n1_incidence",
     "n2_cases", "n2_incidence",
     "n3_cases", "n3_incidence",
-    "n4_cases", "n4_incidence"
+    "n4_cases", "n4_incidence",
+    "n5_cases", "n5_incidence"
   )
 
   # Helper to rename columns in a single data frame
@@ -1666,9 +1746,90 @@ calc_incidence <- function(
 }
 
 
+#' Calculate N5 (Conservative Non-Seekers Adjusted Incidence) - Internal
+#'
+#' Calculates N5 by applying a reduced non-seeker adjustment (excludes private
+#' sector and divides cs_none by a configurable divisor).
+#'
+#' N5 = N2 * (1 + (CS_None / cs_none_divisor) / CS_Pub)
+#'
+#' @param df Data frame with standardized column names at admin-month level
+#' @param scale_factor Denominator for incidence rate
+#' @param cs_none_divisor Numeric divisor for cs_none (default: 2)
+#'
+#' @return Data frame with n5_cases and n5_incidence columns added
+#'
+#' @keywords internal
+.calc_n5_internal <- function(df, scale_factor, cs_none_divisor = 2) {
+  # If adj_none already exists (from N3 or N4 calculation), derive reduced version
+  if ("adj_none" %in% names(df)) {
+    df <- df |>
+      dplyr::mutate(
+        adj_none_reduced = adj_none / cs_none_divisor,
+        # Calculate N5 cases
+        n5_cases = dplyr::if_else(
+          !is.na(n2_cases) & !is.na(adj_none_reduced),
+          n2_cases * (1 + adj_none_reduced),
+          NA_real_
+        ),
+        # Calculate N5 incidence
+        n5_incidence = dplyr::if_else(
+          pop > 0 & !is.na(pop) & !is.na(n5_cases),
+          (n5_cases / pop) * scale_factor,
+          NA_real_
+        ),
+        # Flag invalid N5
+        flag_n5_invalid = is.na(n5_incidence)
+      )
+  } else {
+    # Calculate adj_none_reduced from scratch
+    df <- df |>
+      dplyr::mutate(
+        # Validate care-seeking proportions
+        cs_public_clean = dplyr::case_when(
+          is.na(cs_public) ~ NA_real_,
+          cs_public <= 0 ~ NA_real_,
+          cs_public > 1 ~ 1,
+          TRUE ~ cs_public
+        ),
+        cs_none_clean = dplyr::case_when(
+          is.na(cs_none) ~ 0,
+          cs_none < 0 ~ 0,
+          cs_none > 1 ~ 1,
+          TRUE ~ cs_none
+        ),
+        # Calculate adjustment factor (non-seekers divided by divisor)
+        adj_none = dplyr::if_else(
+          !is.na(cs_public_clean) & cs_public_clean > 0,
+          cs_none_clean / cs_public_clean,
+          0
+        ),
+        adj_none_reduced = adj_none / cs_none_divisor,
+        # Calculate N5 cases
+        n5_cases = dplyr::if_else(
+          !is.na(n2_cases) & !is.na(cs_public_clean),
+          n2_cases * (1 + adj_none_reduced),
+          NA_real_
+        ),
+        # Calculate N5 incidence
+        n5_incidence = dplyr::if_else(
+          pop > 0 & !is.na(pop) & !is.na(n5_cases),
+          (n5_cases / pop) * scale_factor,
+          NA_real_
+        ),
+        # Flag invalid N5
+        flag_n5_invalid = is.na(n5_incidence)
+      ) |>
+      dplyr::select(-cs_public_clean, -cs_none_clean)
+  }
+
+  df
+}
+
+
 #' Determine Highest Valid Incidence Level - Internal
 #'
-#' @param df Data frame with N0-N4 calculations
+#' @param df Data frame with N0-N5 calculations
 #' @param levels Character vector of requested levels
 #'
 #' @return Data frame with incidence_level column added
@@ -1676,7 +1837,7 @@ calc_incidence <- function(
 #' @keywords internal
 .determine_incidence_level <- function(df, levels) {
   # Build conditions only for levels that were calculated
-  # Priority order: N3 > N4 > N2 > N1 > N0
+  # Priority order: N3 > N4 > N5 > N2 > N1 > N0
   # N3 takes priority over N4 as it's the most complete estimate
   conditions <- list()
 
@@ -1691,6 +1852,13 @@ calc_incidence <- function(
     conditions <- c(
       conditions,
       list(quote(!is.na(n4_incidence) ~ "N4"))
+    )
+  }
+
+  if ("N5" %in% levels && "n5_incidence" %in% names(df)) {
+    conditions <- c(
+      conditions,
+      list(quote(!is.na(n5_incidence) ~ "N5"))
     )
   }
 
@@ -1735,6 +1903,7 @@ calc_incidence <- function(
 #' @param admin_level Character. One of "adm0", "adm1", "adm2", "adm3"
 #' @param scale_factor Numeric. Scale factor for incidence calculation
 #' @param time_period Character. Either "monthly" or "annual"
+#' @param cs_none_divisor Numeric. Divisor for cs_none in N5 calculation
 #'
 #' @return Aggregated tibble at specified admin level
 #'
@@ -1743,7 +1912,8 @@ calc_incidence <- function(
     df,
     admin_level,
     scale_factor,
-    time_period = "monthly"
+    time_period = "monthly",
+    cs_none_divisor = 2
 ) {
 
   has_adm3 <- "adm3" %in% names(df)
@@ -1766,6 +1936,7 @@ calc_incidence <- function(
   has_n1 <- "n1_cases" %in% names(df)
   has_n2 <- "n2_cases" %in% names(df)
   has_cs <- all(c("cs_public", "cs_private", "cs_none") %in% names(df))
+  has_cs_minimal <- all(c("cs_public", "cs_none") %in% names(df))
 
   if (time_period == "monthly") {
     # For monthly: aggregate to admin-month level (sum across lower levels)
@@ -1933,8 +2104,9 @@ calc_incidence <- function(
       }
     )
 
-  # Calculate N3 and N4 for both monthly and annual
+  # Calculate N3, N4, and N5 for both monthly and annual
   if (has_n2 && has_cs) {
+    # Full care-seeking data available (cs_public, cs_private, cs_none)
     df_agg <- df_agg |>
       dplyr::mutate(
         # Calculate adjustment factors from care-seeking proportions
@@ -1969,6 +2141,51 @@ calc_incidence <- function(
           pop > 0 & !is.na(n4_cases),
           (n4_cases / pop) * scale_factor,
           NA_real_
+        ),
+        # N5 = N2 * (1 + adj_none/cs_none_divisor) - conservative non-seekers
+        adj_none_reduced = adj_none / cs_none_divisor,
+        n5_cases = dplyr::if_else(
+          !is.na(n2_cases) & !is.na(cs_public) & cs_public > 0,
+          n2_cases * (1 + adj_none_reduced),
+          NA_real_
+        ),
+        n5_incidence = dplyr::if_else(
+          pop > 0 & !is.na(n5_cases),
+          (n5_cases / pop) * scale_factor,
+          NA_real_
+        )
+      )
+  } else if (has_n2 && has_cs_minimal) {
+    # Only cs_public and cs_none available (N4/N5 without N3)
+    df_agg <- df_agg |>
+      dplyr::mutate(
+        adj_none = dplyr::if_else(
+          !is.na(cs_public) & cs_public > 0,
+          cs_none / cs_public,
+          0
+        ),
+        # N4 = N2 * (1 + adj_none)
+        n4_cases = dplyr::if_else(
+          !is.na(n2_cases) & !is.na(cs_public) & cs_public > 0,
+          n2_cases * (1 + adj_none),
+          NA_real_
+        ),
+        n4_incidence = dplyr::if_else(
+          pop > 0 & !is.na(n4_cases),
+          (n4_cases / pop) * scale_factor,
+          NA_real_
+        ),
+        # N5 = N2 * (1 + adj_none/cs_none_divisor)
+        adj_none_reduced = adj_none / cs_none_divisor,
+        n5_cases = dplyr::if_else(
+          !is.na(n2_cases) & !is.na(cs_public) & cs_public > 0,
+          n2_cases * (1 + adj_none_reduced),
+          NA_real_
+        ),
+        n5_incidence = dplyr::if_else(
+          pop > 0 & !is.na(n5_cases),
+          (n5_cases / pop) * scale_factor,
+          NA_real_
         )
       )
   }
@@ -1983,16 +2200,17 @@ calc_incidence <- function(
 
 #' Calculate Incidence at Facility Level - Internal
 #'
-#' Calculates N0-N4 incidence at facility-month level.
+#' Calculates N0-N5 incidence at facility-month level.
 #'
 #' @param df Data frame with facility-month level data
 #' @param levels Character vector of requested incidence levels
 #' @param scale_factor Numeric. Scale factor for incidence calculation
+#' @param cs_none_divisor Numeric. Divisor for cs_none in N5 calculation
 #'
 #' @return Data frame with facility-level incidence calculations
 #'
 #' @keywords internal
-.calc_facility_incidence <- function(df, levels, scale_factor) {
+.calc_facility_incidence <- function(df, levels, scale_factor, cs_none_divisor = 2) {
 
   # Calculate N0 at facility level
   if ("N0" %in% levels) {
@@ -2156,6 +2374,59 @@ calc_incidence <- function(
     }
   }
 
+  # Calculate N5 at facility level
+  if ("N5" %in% levels && "cs_public" %in% names(df)) {
+    if ("adj_none" %in% names(df)) {
+      df <- df |>
+        dplyr::mutate(
+          adj_none_reduced = adj_none / cs_none_divisor,
+          n5_cases = dplyr::if_else(
+            !is.na(n2_cases) & !is.na(adj_none_reduced),
+            n2_cases * (1 + adj_none_reduced),
+            NA_real_
+          ),
+          n5_incidence = dplyr::if_else(
+            pop > 0 & !is.na(pop) & !is.na(n5_cases),
+            (n5_cases / pop) * scale_factor,
+            NA_real_
+          )
+        )
+    } else {
+      df <- df |>
+        dplyr::mutate(
+          cs_public_clean = dplyr::case_when(
+            is.na(cs_public) ~ NA_real_,
+            cs_public <= 0 ~ NA_real_,
+            cs_public > 1 ~ 1,
+            TRUE ~ cs_public
+          ),
+          cs_none_clean = dplyr::case_when(
+            is.na(cs_none) ~ 0,
+            cs_none < 0 ~ 0,
+            cs_none > 1 ~ 1,
+            TRUE ~ cs_none
+          ),
+          adj_none = dplyr::if_else(
+            !is.na(cs_public_clean) & cs_public_clean > 0,
+            cs_none_clean / cs_public_clean,
+            0
+          ),
+          adj_none_reduced = adj_none / cs_none_divisor,
+          n5_cases = dplyr::if_else(
+            !is.na(n2_cases) & !is.na(cs_public_clean),
+            n2_cases * (1 + adj_none_reduced),
+            NA_real_
+          ),
+          n5_incidence = dplyr::if_else(
+            pop > 0 & !is.na(pop) & !is.na(n5_cases),
+            (n5_cases / pop) * scale_factor,
+            NA_real_
+          )
+        ) |>
+        dplyr::select(-cs_public_clean, -cs_none_clean)
+    }
+  }
+
   tibble::as_tibble(df)
 }
 
@@ -2171,6 +2442,7 @@ calc_incidence <- function(
 #' @param scale_factor Numeric. Scale factor for incidence calculation
 #' @param has_adm3 Logical. Whether adm3 column exists
 #' @param return_facility Logical. Whether to include facility-level data in output
+#' @param cs_none_divisor Numeric. Divisor for cs_none in N5 calculation
 #'
 #' @return Named list with monthly and annual components, and optionally facility
 #'
@@ -2180,7 +2452,8 @@ calc_incidence <- function(
     df_facility,
     scale_factor,
     has_adm3 = FALSE,
-    return_facility = FALSE
+    return_facility = FALSE,
+    cs_none_divisor = 2
 ) {
 
   admin_levels <- c("adm0", "adm1", "adm2")
@@ -2194,7 +2467,8 @@ calc_incidence <- function(
   # Add admin-level monthly aggregations
   for (level in admin_levels) {
     monthly[[level]] <- .aggregate_to_level(
-      df_admin, level, scale_factor, "monthly"
+      df_admin, level, scale_factor, "monthly",
+      cs_none_divisor = cs_none_divisor
     )
   }
 
@@ -2204,7 +2478,8 @@ calc_incidence <- function(
   # Add admin-level annual aggregations
   for (level in admin_levels) {
     annual[[level]] <- .aggregate_to_level(
-      df_admin, level, scale_factor, "annual"
+      df_admin, level, scale_factor, "annual",
+      cs_none_divisor = cs_none_divisor
     )
   }
 
@@ -2230,11 +2505,12 @@ calc_incidence <- function(
 #'
 #' @param df Data frame with facility-month level data
 #' @param scale_factor Numeric. Scale factor for incidence calculation
+#' @param cs_none_divisor Numeric. Divisor for cs_none in N5 calculation
 #'
 #' @return Aggregated tibble at facility-year level
 #'
 #' @keywords internal
-.aggregate_facility_to_annual <- function(df, scale_factor) {
+.aggregate_facility_to_annual <- function(df, scale_factor, cs_none_divisor = 2) {
 
   has_adm3 <- "adm3" %in% names(df)
 
@@ -2250,6 +2526,7 @@ calc_incidence <- function(
   has_n1 <- "n1_cases" %in% names(df)
   has_n2 <- "n2_cases" %in% names(df)
   has_cs <- all(c("cs_public", "cs_private", "cs_none") %in% names(df))
+  has_cs_minimal <- all(c("cs_public", "cs_none") %in% names(df))
 
   df_agg <- df |>
     dplyr::group_by(dplyr::across(dplyr::all_of(group_cols))) |>
@@ -2326,8 +2603,9 @@ calc_incidence <- function(
       }
     )
 
-  # Calculate N3 and N4
+  # Calculate N3, N4, and N5
   if (has_n2 && has_cs) {
+    # Full care-seeking data available
     df_agg <- df_agg |>
       dplyr::mutate(
         adj_priv = dplyr::if_else(
@@ -2359,6 +2637,51 @@ calc_incidence <- function(
         n4_incidence = dplyr::if_else(
           pop > 0 & !is.na(n4_cases),
           (n4_cases / pop) * scale_factor,
+          NA_real_
+        ),
+        # N5 = N2 * (1 + adj_none/cs_none_divisor) - conservative non-seekers
+        adj_none_reduced = adj_none / cs_none_divisor,
+        n5_cases = dplyr::if_else(
+          !is.na(n2_cases) & !is.na(cs_public) & cs_public > 0,
+          n2_cases * (1 + adj_none_reduced),
+          NA_real_
+        ),
+        n5_incidence = dplyr::if_else(
+          pop > 0 & !is.na(n5_cases),
+          (n5_cases / pop) * scale_factor,
+          NA_real_
+        )
+      )
+  } else if (has_n2 && has_cs_minimal) {
+    # Only cs_public and cs_none available (N4/N5 without N3)
+    df_agg <- df_agg |>
+      dplyr::mutate(
+        adj_none = dplyr::if_else(
+          !is.na(cs_public) & cs_public > 0,
+          cs_none / cs_public,
+          0
+        ),
+        # N4 = N2 * (1 + adj_none)
+        n4_cases = dplyr::if_else(
+          !is.na(n2_cases) & !is.na(cs_public) & cs_public > 0,
+          n2_cases * (1 + adj_none),
+          NA_real_
+        ),
+        n4_incidence = dplyr::if_else(
+          pop > 0 & !is.na(n4_cases),
+          (n4_cases / pop) * scale_factor,
+          NA_real_
+        ),
+        # N5 = N2 * (1 + adj_none/cs_none_divisor)
+        adj_none_reduced = adj_none / cs_none_divisor,
+        n5_cases = dplyr::if_else(
+          !is.na(n2_cases) & !is.na(cs_public) & cs_public > 0,
+          n2_cases * (1 + adj_none_reduced),
+          NA_real_
+        ),
+        n5_incidence = dplyr::if_else(
+          pop > 0 & !is.na(n5_cases),
+          (n5_cases / pop) * scale_factor,
           NA_real_
         )
       )
@@ -2488,6 +2811,9 @@ create_incidence <- function(
   if ("n4_incidence" %in% names(data)) {
     detected_levels <- c(detected_levels, "N4")
   }
+  if ("n5_incidence" %in% names(data)) {
+    detected_levels <- c(detected_levels, "N5")
+  }
 
   if (length(detected_levels) == 0) {
     cli::cli_abort(
@@ -2501,7 +2827,8 @@ create_incidence <- function(
     N1 = "N1 = conf + (pres * tpr)",
     N2 = "N2 = N1 / reprate",
     N3 = "N3 = N2 + (N2 * CS_Priv / CS_Pub) + (N2 * CS_None / CS_Pub)",
-    N4 = "N4 = N2 * (1 + CS_None / CS_Pub)"
+    N4 = "N4 = N2 * (1 + CS_None / CS_Pub)",
+    N5 = "N5 = N2 * (1 + (CS_None / divisor) / CS_Pub)"
   )
 
   # Keep only formulas for detected levels
@@ -2870,7 +3197,7 @@ plot.snt_incidence <- function(
 #' Check Incidence Trends
 #'
 #' Creates diagnostic plots to visualize incidence trends across the cascade
-#' levels (N0-N4) over time, faceted by location (adm1 ~ adm2).
+#' levels (N0-N5) over time, faceted by location (adm1 ~ adm2).
 #'
 #' @param incidence_output Output from `calc_incidence()` containing monthly
 #'   and annual aggregations at different admin levels.
@@ -2879,9 +3206,9 @@ plot.snt_incidence <- function(
 #'
 #' @return A list containing:
 #'   \describe{
-#'     \item{monthly_plot}{ggplot2 object showing monthly incidence (N0-N4)
+#'     \item{monthly_plot}{ggplot2 object showing monthly incidence (N0-N5)
 #'       by date}
-#'     \item{annual_plot}{ggplot2 object showing annual incidence (N0-N4)
+#'     \item{annual_plot}{ggplot2 object showing annual incidence (N0-N5)
 #'       by year}
 #'   }
 #'
@@ -2931,12 +3258,12 @@ check_incidence <- function(
   # Determine which incidence columns exist (with or without suffix)
   # Pattern matches n0_incidence, n1_incidence_u5, etc.
   monthly_inc_cols <- grep(
-    "^n[0-4]_incidence(_[a-zA-Z0-9_]+)?$",
+    "^n[0-5]_incidence(_[a-zA-Z0-9_]+)?$",
     names(monthly_data),
     value = TRUE
   )
   annual_inc_cols <- grep(
-    "^n[0-4]_incidence(_[a-zA-Z0-9_]+)?$",
+    "^n[0-5]_incidence(_[a-zA-Z0-9_]+)?$",
     names(annual_data),
     value = TRUE
   )
@@ -2946,7 +3273,7 @@ check_incidence <- function(
   if (length(monthly_inc_cols) > 0) {
     suffix_match <- regmatches(
       monthly_inc_cols[1],
-      regexec("^n[0-4]_incidence(_([a-zA-Z0-9_]+))?$", monthly_inc_cols[1])
+      regexec("^n[0-5]_incidence(_([a-zA-Z0-9_]+))?$", monthly_inc_cols[1])
     )[[1]]
     if (length(suffix_match) >= 3 && nchar(suffix_match[3]) > 0) {
       detected_suffix <- suffix_match[3]
@@ -2980,7 +3307,7 @@ check_incidence <- function(
       yearmon = zoo::as.yearmon(date),
       # Remove _incidence and any suffix (e.g., n0_incidence_u5 -> N0)
       level = toupper(gsub("_incidence(_[a-zA-Z0-9_]+)?$", "", level)),
-      level = factor(level, levels = c("N0", "N1", "N2", "N3", "N4"))
+      level = factor(level, levels = c("N0", "N1", "N2", "N3", "N4", "N5"))
     )
 
   # Pivot annual data to long format
@@ -2997,7 +3324,7 @@ check_incidence <- function(
     dplyr::mutate(
       # Remove _incidence and any suffix (e.g., n0_incidence_u5 -> N0)
       level = toupper(gsub("_incidence(_[a-zA-Z0-9_]+)?$", "", level)),
-      level = factor(level, levels = c("N0", "N1", "N2", "N3", "N4"))
+      level = factor(level, levels = c("N0", "N1", "N2", "N3", "N4", "N5"))
     )
 
   # Create monthly plot (N0-N4)
@@ -3017,16 +3344,17 @@ check_incidence <- function(
     ggplot2::scale_colour_manual(
       values = c(
         "N0" = "#1b9e77", "N1" = "#d95f02", "N2" = "#7570b3",
-        "N3" = "#e7298a", "N4" = "#66a61e"
+        "N3" = "#e7298a", "N4" = "#66a61e", "N5" = "#e6ab02"
       ),
       name = "Incidence Level"
     ) +
     ggplot2::labs(
       title = "Monthly Incidence Trends by ADM1 ~ ADM2",
       subtitle = paste0(
-        "Shows incidence cascade (N0-N4) over time. ",
+        "Shows incidence cascade (N0-N5) over time. ",
         "N0=crude, N1=testing-adjusted, N2=reporting-adjusted, ",
-        "N3=care-seeking-adjusted, N4=public+non-seekers.\n"
+        "N3=care-seeking-adjusted, N4=public+non-seekers, ",
+        "N5=conservative non-seekers.\n"
       ),
       x = NULL,
       y = "Incidence (per 1,000)\n"
@@ -3065,14 +3393,16 @@ check_incidence <- function(
     ggplot2::scale_x_continuous(breaks = unique(annual_long$year)) +
     ggplot2::scale_colour_manual(
       values = c("N0" = "#1b9e77", "N1" = "#d95f02",
-      "N2" = "#7570b3", "N3" = "#e7298a", "N4" = "#66a61e"),
+      "N2" = "#7570b3", "N3" = "#e7298a", "N4" = "#66a61e",
+      "N5" = "#e6ab02"),
       name = "Incidence Level"
     ) +
     ggplot2::labs(
       title = "Annual Incidence Trends by ADM1 ~ ADM2",
       subtitle = paste0(
-        "Shows full incidence cascade (N0-N4) by year. ",
-        "N3=full CSB, N4=public+non-seekers only.\n"
+        "Shows full incidence cascade (N0-N5) by year. ",
+        "N3=full CSB, N4=public+non-seekers, ",
+        "N5=conservative non-seekers.\n"
       ),
       x = NULL,
       y = "Incidence (per 1,000)\n"

@@ -55,7 +55,7 @@ test_that("calc_incidence validates parameters", {
 
   # Test invalid levels
   expect_error(
-    calc_incidence(valid_data, levels = c("N0", "N5")),
+    calc_incidence(valid_data, levels = c("N0", "N6")),
     "Invalid incidence level"
   )
 
@@ -732,4 +732,134 @@ test_that("plot.snt_incidence works", {
   p <- plot(result_obj)
 
   expect_s3_class(p, "ggplot")
+})
+
+
+# =============================================================================
+# N5 Tests
+# =============================================================================
+
+test_that("calc_incidence calculates N5 with default divisor (2)", {
+  skip_if_not_installed("sntutils")
+
+  test_data <- data.frame(
+    hf_uid = "HF001",
+    adm1 = "Region1",
+    adm2 = "District1",
+    date = as.Date("2023-01-01"),
+    conf = 100,
+    test = 500,
+    pres = 10,
+    tpr = 0.20,
+    reprate = 1.0,
+    pop = 10000,
+    cs_public = 0.60,
+    cs_private = 0.25,
+    cs_none = 0.15
+  )
+
+  result <- calc_incidence(
+    test_data,
+    levels = c("N0", "N1", "N2", "N4", "N5")
+  )
+  result_monthly <- result$monthly$adm2
+  result_annual <- result$annual$adm2
+
+  # Verify N5 columns exist in output
+
+  expect_true("n5_cases" %in% names(result_monthly))
+  expect_true("n5_incidence" %in% names(result_monthly))
+  expect_true("n5_cases" %in% names(result_annual))
+  expect_true("n5_incidence" %in% names(result_annual))
+
+  # Manual calculation:
+  # N1 = 100 + 10 * 0.20 = 102
+  # N2 = 102 / 1.0 = 102
+  # adj_none = 0.15 / 0.60 = 0.25
+  # N4 = 102 * (1 + 0.25) = 127.5
+  # adj_none_reduced = 0.25 / 2 = 0.125
+  # N5 = 102 * (1 + 0.125) = 114.75
+  adj_none <- 0.15 / 0.60
+  n2_cases <- 102
+  expected_n4 <- n2_cases * (1 + adj_none)
+  expected_n5 <- n2_cases * (1 + adj_none / 2)
+
+  expect_equal(result_annual$n4_cases, expected_n4, tolerance = 1)
+  expect_equal(result_annual$n5_cases, expected_n5, tolerance = 1)
+
+  # N5 should be between N2 and N4
+  expect_true(result_annual$n5_cases > result_annual$n2_cases)
+  expect_true(result_annual$n5_cases < result_annual$n4_cases)
+})
+
+
+test_that("calc_incidence calculates N5 with custom divisor", {
+  skip_if_not_installed("sntutils")
+
+  test_data <- data.frame(
+    hf_uid = "HF001",
+    adm1 = "Region1",
+    adm2 = "District1",
+    date = as.Date("2023-01-01"),
+    conf = 100,
+    test = 500,
+    pres = 10,
+    tpr = 0.20,
+    reprate = 1.0,
+    pop = 10000,
+    cs_public = 0.60,
+    cs_private = 0.25,
+    cs_none = 0.15
+  )
+
+  result <- calc_incidence(
+    test_data,
+    levels = c("N0", "N1", "N2", "N4", "N5"),
+    cs_none_divisor = 3
+  )
+  result_annual <- result$annual$adm2
+
+  # With divisor = 3:
+  # adj_none = 0.15 / 0.60 = 0.25
+  # adj_none_reduced = 0.25 / 3 = 0.0833
+  # N5 = 102 * (1 + 0.0833) = 110.5
+  n2_cases <- 102
+  adj_none <- 0.15 / 0.60
+  expected_n5 <- n2_cases * (1 + adj_none / 3)
+
+  expect_equal(result_annual$n5_cases, expected_n5, tolerance = 1)
+  # N5 with divisor=3 should be less than N5 with divisor=2
+  expect_true(result_annual$n5_cases < n2_cases * (1 + adj_none / 2))
+})
+
+
+test_that("calc_incidence N5 equals N4 when divisor is 1", {
+  skip_if_not_installed("sntutils")
+
+  test_data <- data.frame(
+    hf_uid = "HF001",
+    adm1 = "Region1",
+    adm2 = "District1",
+    date = as.Date("2023-01-01"),
+    conf = 100,
+    test = 500,
+    pres = 10,
+    tpr = 0.20,
+    reprate = 1.0,
+    pop = 10000,
+    cs_public = 0.60,
+    cs_private = 0.25,
+    cs_none = 0.15
+  )
+
+  result <- calc_incidence(
+    test_data,
+    levels = c("N0", "N1", "N2", "N4", "N5"),
+    cs_none_divisor = 1
+  )
+  result_annual <- result$annual$adm2
+
+  # With divisor = 1, N5 should equal N4
+  expect_equal(result_annual$n5_cases, result_annual$n4_cases, tolerance = 0.01)
+  expect_equal(result_annual$n5_incidence, result_annual$n4_incidence, tolerance = 0.01)
 })

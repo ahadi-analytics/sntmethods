@@ -294,7 +294,7 @@ calc_itn_mbg <- function(
 
   # 5. Ages 5-10 use
   if ("use_5_10" %in% indicators) {
-    pr_5_10 <- pr |> dplyr::filter(age >= 5, age <= 10)
+    pr_5_10 <- pr |> dplyr::filter(age >= 5, age <= 9)
 
     if (nrow(pr_5_10) > 0) {
       age_cluster <- pr_5_10 |>
@@ -317,7 +317,7 @@ calc_itn_mbg <- function(
 
   # 6. Ages 10-20 use
   if ("use_10_20" %in% indicators) {
-    pr_10_20 <- pr |> dplyr::filter(age >= 10, age <= 20)
+    pr_10_20 <- pr |> dplyr::filter(age >= 10, age <= 19)
 
     if (nrow(pr_10_20) > 0) {
       age_cluster <- pr_10_20 |>

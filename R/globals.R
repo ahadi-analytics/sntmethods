@@ -3,6 +3,7 @@ globalVariables(
   c(
     # Data manipulation
     ".data",
+    ".env",
     ":=",
     ".row_id",
     ".should_fallback",

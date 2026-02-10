@@ -52,7 +52,12 @@ NULL
 #' @param min_year Minimum survey year to include. Surveys before this year
 #'   will be excluded. Useful for filtering out older surveys that may lack
 #'   key indicators. Default: NULL (no minimum).
-#' @param survey_type Survey type ("DHS" or "MIS"). Default: "DHS".
+#' @param survey_type Survey type(s) to process. Can be:
+#'   \itemize{
+#'     \item NULL (default): Auto-detect all available survey types (DHS, MIS, etc.)
+#'     \item Single string: Process only that type (e.g., "DHS")
+#'     \item Character vector: Process specific types (e.g., c("DHS", "MIS"))
+#'   }
 #' @param indicators Character vector of indicator categories to process:
 #'   \itemize{
 #'     \item "pfpr": Parasite prevalence
@@ -129,7 +134,7 @@ run_mbg_indicator_pipeline <- function(
   country_iso2 = NULL,
   survey_year = NULL,
   min_year = NULL,
-  survey_type = "DHS",
+  survey_type = NULL,
   indicators = c(
     "pfpr", "itn", "irs", "anc", "csb", "anemia", "iptp"
   ),
@@ -226,7 +231,7 @@ run_mbg_indicator_pipeline <- function(
   # ---- Input Validation ----
 
   # Validate indicator names
-  valid_indicators <- c("pfpr", "itn", "irs", "anc", "csb", "anemia", "iptp", "u5mr")
+  valid_indicators <- c("pfpr", "itn", "irs", "anc", "csb", "anemia", "iptp", "epi", "u5mr", "smc")
   invalid_indicators <- setdiff(indicators, valid_indicators)
   if (length(invalid_indicators) > 0) {
     cli::cli_abort(c(
@@ -333,12 +338,12 @@ run_mbg_indicator_pipeline <- function(
 
   cli::cli_h2("Discovering available surveys")
 
-  # Use dhs_read to find available survey years with GPS data
+  # Use dhs_read to find available surveys with GPS data (no survey_type filter
+  # so we can discover all available types)
   gps_check <- tryCatch({
     dhs_read(
       path = path_dhs_parquet,
       file_type = "GE",
-      survey_type = survey_type,
       country_code = country_iso2
     )
   }, error = function(e) {
@@ -352,67 +357,91 @@ run_mbg_indicator_pipeline <- function(
     cli::cli_abort("No surveys with GPS data found for {country_iso2}")
   }
 
-  # Extract available years from DHSYEAR column
-  available_years <- gps_check |>
-    dplyr::pull(DHSYEAR) |>
-    unique() |>
-    sort()
+  # Build available surveys data frame with (year, type) pairs
+  available_surveys <- gps_check |>
+    dplyr::select(DHSYEAR, survey_type) |>
+    dplyr::distinct() |>
+    dplyr::arrange(DHSYEAR, survey_type)
 
-  years_str <- paste(available_years, collapse = ", ")
+  avail_str <- paste(
+    apply(available_surveys, 1, function(r) paste0(r["survey_type"], " ", r["DHSYEAR"])),
+    collapse = ", "
+  )
   cli::cli_alert_success(
-    "Found GPS data for {length(available_years)} survey(s): {years_str}"
+    "Found GPS data for {nrow(available_surveys)} survey(s): {avail_str}"
   )
 
-  # Determine which years to process
-  if (is.null(survey_year)) {
-    # Process ALL available surveys with GPS
-    years_to_process <- available_years
-    cli::cli_alert_info(
-      "Processing ALL {length(years_to_process)} survey(s)"
-    )
-  } else {
-    # Process specific year(s)
-    years_to_process <- as.integer(survey_year)
-
-    # Validate requested years exist
-    missing_years <- setdiff(years_to_process, available_years)
+  # Filter by survey_year if specified
+  if (!is.null(survey_year)) {
+    requested_years <- as.integer(survey_year)
+    missing_years <- setdiff(requested_years, available_surveys$DHSYEAR)
     if (length(missing_years) > 0) {
       missing_str <- paste(missing_years, collapse = ", ")
-      avail_str <- paste(available_years, collapse = ", ")
       cli::cli_abort(c(
         "Requested survey year(s) not found with GPS data: {missing_str}",
-        "i" = "Available years with GPS: {avail_str}"
+        "i" = "Available surveys: {avail_str}"
       ))
     }
-
-    process_str <- paste(years_to_process, collapse = ", ")
-    cli::cli_alert_info(
-      "Processing {length(years_to_process)} survey(s): {process_str}"
-    )
+    available_surveys <- available_surveys |>
+      dplyr::filter(DHSYEAR %in% requested_years)
   }
+
+  # Filter by survey_type if specified (non-NULL)
+  if (!is.null(survey_type)) {
+    available_surveys <- available_surveys |>
+      dplyr::filter(survey_type %in% .env$survey_type)
+    if (nrow(available_surveys) == 0) {
+      cli::cli_abort(c(
+        "No surveys found matching survey_type: {paste(survey_type, collapse = ', ')}",
+        "i" = "Available surveys: {avail_str}"
+      ))
+    }
+  }
+
+  surveys_to_process <- available_surveys
+  years_to_process <- sort(unique(surveys_to_process$DHSYEAR))
+
+  process_str <- paste(
+    apply(surveys_to_process, 1, function(r) paste0(r["survey_type"], " ", r["DHSYEAR"])),
+    collapse = ", "
+  )
+  cli::cli_alert_info(
+    "Processing {nrow(surveys_to_process)} survey(s): {process_str}"
+  )
 
   # Apply min_year filter if specified
   if (!is.null(min_year)) {
     min_year <- as.integer(min_year)
-    excluded_years <- years_to_process[years_to_process < min_year]
+    excluded <- surveys_to_process |>
+      dplyr::filter(DHSYEAR < min_year)
 
-    if (length(excluded_years) > 0) {
+    if (nrow(excluded) > 0) {
+      excl_str <- paste(
+        apply(excluded, 1, function(r) paste0(r["survey_type"], " ", r["DHSYEAR"])),
+        collapse = ", "
+      )
       cli::cli_alert_info(
-        "Excluding {length(excluded_years)} survey(s) before {min_year}: {paste(excluded_years, collapse = ', ')}"
+        "Excluding {nrow(excluded)} survey(s) before {min_year}: {excl_str}"
       )
     }
 
-    years_to_process <- years_to_process[years_to_process >= min_year]
+    surveys_to_process <- surveys_to_process |>
+      dplyr::filter(DHSYEAR >= min_year)
+    years_to_process <- sort(unique(surveys_to_process$DHSYEAR))
 
-    if (length(years_to_process) == 0) {
+    if (nrow(surveys_to_process) == 0) {
       cli::cli_abort(c(
         "No surveys remaining after applying min_year filter ({min_year})",
-        "i" = "Available years: {paste(available_years, collapse = ', ')}"
+        "i" = "Available surveys: {avail_str}"
       ))
     }
 
+    remaining_str <- paste(
+      apply(surveys_to_process, 1, function(r) paste0(r["survey_type"], " ", r["DHSYEAR"])),
+      collapse = ", "
+    )
     cli::cli_alert_success(
-      "Processing {length(years_to_process)} survey(s) >= {min_year}: {paste(years_to_process, collapse = ', ')}"
+      "Processing {nrow(surveys_to_process)} survey(s) >= {min_year}: {remaining_str}"
     )
   }
 
@@ -446,22 +475,24 @@ run_mbg_indicator_pipeline <- function(
   # Store metadata
   results$survey_metadata$country <- country_iso2
   results$survey_metadata$country_iso3 <- country_iso3
-  results$survey_metadata$survey_type <- survey_type
+  results$survey_metadata$surveys_processed <- surveys_to_process
   results$survey_metadata$years_processed <- years_to_process
-  results$survey_metadata$available_years <- available_years
+  results$survey_metadata$available_surveys <- available_surveys
 
   # ---- Process each survey year ----
 
-  all_year_results <- list()
+  all_survey_results <- list()
 
-  for (current_year in years_to_process) {
-    cli::cli_h2("Processing survey year: {current_year}")
+  for (i in seq_len(nrow(surveys_to_process))) {
+    current_year <- surveys_to_process$DHSYEAR[i]
+    current_survey_type <- surveys_to_process$survey_type[i]
+    survey_key <- paste(tolower(current_survey_type), current_year, sep = "_")
 
-    year_key <- as.character(current_year)
+    cli::cli_h2("Processing survey: {current_survey_type} {current_year}")
 
-    # ---- Load survey data for this year using dhs_read() ----
+    # ---- Load survey data for this survey using dhs_read() ----
 
-    cli::cli_alert_info("Loading survey data for {current_year}...")
+    cli::cli_alert_info("Loading survey data for {current_survey_type} {current_year}...")
 
     survey_data <- list()
 
@@ -470,7 +501,7 @@ run_mbg_indicator_pipeline <- function(
         ft_data <- dhs_read(
           path = path_dhs_parquet,
           file_type = ft,
-          survey_type = survey_type,
+          survey_type = current_survey_type,
           country_code = country_iso2,
           survey_year = current_year
         )
@@ -593,6 +624,7 @@ run_mbg_indicator_pipeline <- function(
           output_dirs = output_dirs,
           country_iso3 = country_iso3,
           survey_year = current_year,
+          survey_type = current_survey_type,
           aggregation_level = aggregation_level,
           run_mbg = run_mbg,
           save_rasters = save_rasters,
@@ -641,12 +673,13 @@ run_mbg_indicator_pipeline <- function(
         cluster_data = year_results$cluster_data,
         output_dir = output_dirs$tables,
         country_iso3 = country_iso3,
-        survey_year = current_year
+        survey_year = current_year,
+        survey_type = current_survey_type
       )
     }
 
-    # ---- Summary for this year ----
-    cli::cli_h3("Summary for {current_year}")
+    # ---- Summary for this survey ----
+    cli::cli_h3("Summary for {current_survey_type} {current_year}")
 
     if (length(processed_indicators) > 0) {
       cli::cli_alert_success(
@@ -672,6 +705,7 @@ run_mbg_indicator_pipeline <- function(
       mbg_estimates = year_results$mbg_estimates,
       cluster_data = year_results$cluster_data,
       survey_year = current_year,
+      survey_type = current_survey_type,
       country_iso3 = country_iso3,
       country_iso2 = country_iso2,
       adm3_sf = adm3_aligned,
@@ -684,7 +718,7 @@ run_mbg_indicator_pipeline <- function(
     # ---- Save outputs for this year ----
 
     output_basename <- glue::glue(
-      "{tolower(country_iso3)}_dhs_mbg_indicators_{current_year}"
+      "{tolower(country_iso3)}_{tolower(current_survey_type)}_mbg_indicators_{current_year}"
     )
 
     if (isTRUE(debug)) {
@@ -725,8 +759,8 @@ run_mbg_indicator_pipeline <- function(
     output_rel_path <- .relative_path(fs::path(output_dirs$tables, output_basename))
     cli::cli_alert_success("Saved: {.file {output_rel_path}}")
 
-    # Store results for this year
-    all_year_results[[year_key]] <- list(
+    # Store results for this survey
+    all_survey_results[[survey_key]] <- list(
       dataset = year_dataset,
       cluster_data = year_results$cluster_data,
       mbg_estimates = year_results$mbg_estimates,
@@ -736,22 +770,22 @@ run_mbg_indicator_pipeline <- function(
     )
 
     # Also add to main results structure
-    results$cluster_data[[year_key]] <- year_results$cluster_data
-    results$mbg_estimates[[year_key]] <- year_results$mbg_estimates
-    results$raster_paths[[year_key]] <- year_results$raster_paths
-    results$skipped_indicators[[year_key]] <- skipped_indicators
+    results$cluster_data[[survey_key]] <- year_results$cluster_data
+    results$mbg_estimates[[survey_key]] <- year_results$mbg_estimates
+    results$raster_paths[[survey_key]] <- year_results$raster_paths
+    results$skipped_indicators[[survey_key]] <- skipped_indicators
 
-  }  # End loop over years
+  }  # End loop over surveys
 
   # ---- Build combined final dataset ----
 
   cli::cli_h2("Building combined dataset")
 
-  # Combine all years into one dataset with year column
-  combined_datasets <- lapply(names(all_year_results), function(yr) {
-    df <- all_year_results[[yr]]$dataset
+  # Combine all surveys into one dataset (survey_year and survey_type already set
+  # by .build_final_dataset())
+  combined_datasets <- lapply(names(all_survey_results), function(key) {
+    df <- all_survey_results[[key]]$dataset
     if (!is.null(df) && nrow(df) > 0) {
-      df$survey_year <- as.integer(yr)
       df
     } else {
       NULL
@@ -766,10 +800,10 @@ run_mbg_indicator_pipeline <- function(
     # Apply smart rounding to combined dataset
     results$final_dataset <- .round_mbg_output(results$final_dataset)
 
-    # Save combined dataset
-    if (length(years_to_process) > 1) {
+    # Save combined dataset when processing multiple surveys
+    if (nrow(surveys_to_process) > 1) {
       combined_basename <- glue::glue(
-        "{tolower(country_iso3)}_dhs_mbg_indicators_combined"
+        "{tolower(country_iso3)}_mbg_indicators_combined"
       )
 
       # Coerce to plain character to avoid glue class issues
@@ -804,11 +838,11 @@ run_mbg_indicator_pipeline <- function(
 
   cli::cli_h2("Pipeline Summary")
 
-  n_surveys <- length(years_to_process)
-  cli::cli_alert_success("Processed {n_surveys} survey year(s)")
+  n_surveys <- nrow(surveys_to_process)
+  cli::cli_alert_success("Processed {n_surveys} survey(s)")
 
 
-  # Summarize skipped indicators across all years
+  # Summarize skipped indicators across all surveys
   all_skipped <- results$skipped_indicators
   if (length(all_skipped) > 0 && any(sapply(all_skipped, length) > 0)) {
     cli::cli_h3("Skipped Indicators Summary")
@@ -864,6 +898,7 @@ run_mbg_indicator_pipeline <- function(
   output_dirs,
   country_iso3,
   survey_year,
+  survey_type = "DHS",
   aggregation_level = "adm2",
   run_mbg,
   save_rasters,
@@ -1123,6 +1158,7 @@ run_mbg_indicator_pipeline <- function(
           output_dirs = output_dirs,
           country_iso3 = country_iso3,
           survey_year = survey_year,
+          survey_type = survey_type,
           aggregation_level = aggregation_level,
           save_rasters = save_rasters,
           cache = cache,
@@ -1223,7 +1259,8 @@ run_mbg_indicator_pipeline <- function(
   cluster_data,
   output_dir,
   country_iso3,
-  survey_year
+  survey_year,
+  survey_type = "DHS"
 ) {
   if (!.check_qs2_pkg()) return(invisible(NULL))
 
@@ -1245,9 +1282,9 @@ run_mbg_indicator_pipeline <- function(
     data.table::set(dt, j = labels$denominator, value = dt$samplesize)
     data.table::set(dt, j = "prop_raw", value = dt$indicator / dt$samplesize)
 
-    # Naming: {country}_{indicator}_cluster_points_{year}.qs2
+    # Naming: {country}_{indicator}_cluster_points_{type}_{year}.qs2
     filename <- glue::glue(
-      "{tolower(country_iso3)}_{ind_name}_cluster_points_{survey_year}.qs2"
+      "{tolower(country_iso3)}_{ind_name}_cluster_points_{tolower(survey_type)}_{survey_year}.qs2"
     )
     filepath <- fs::path(output_dir, filename)
 
@@ -1275,6 +1312,7 @@ run_mbg_indicator_pipeline <- function(
   output_dirs,
   country_iso3,
   survey_year,
+  survey_type = "DHS",
   aggregation_level = "adm2",
   save_rasters,
   cache,
@@ -1306,6 +1344,16 @@ run_mbg_indicator_pipeline <- function(
   }
   fs::dir_create(output_dirs$intermediate)
 
+  # Pre-compute expected raster paths (used for cache check and saving)
+  raster_base <- glue::glue(
+    "{tolower(country_iso3)}_{indicator_name}_mbg_{tolower(survey_type)}_{survey_year}"
+  )
+  expected_raster_paths <- list(
+    mean  = fs::path(output_dirs$rasters, paste0(raster_base, "_mean.tif")),
+    lower = fs::path(output_dirs$rasters, paste0(raster_base, "_lower.tif")),
+    upper = fs::path(output_dirs$rasters, paste0(raster_base, "_upper.tif"))
+  )
+
   # Determine primary polygon based on aggregation level
   cli::cli_alert_info("MBG aggregation level: {.val {aggregation_level}}")
   if (aggregation_level == "adm3") {
@@ -1330,6 +1378,50 @@ run_mbg_indicator_pipeline <- function(
     cli::cli_alert_info("Primary polygons: {.val {nrow(primary_sf)}} features")
     cli::cli_alert_info("Population raster: {.file {pop_rel_path}}")
     cli::cli_alert_info("Intermediate dir: {.file {interm_rel_path}}")
+  }
+
+  # ---- Cache prediction rasters (early return) ----
+  # If all three prediction rasters exist from a prior run, load them directly
+  # and skip the entire MBG model fitting process
+  if (isTRUE(cache) && isTRUE(save_rasters)) {
+    all_rasters_exist <- all(vapply(
+      expected_raster_paths, fs::file_exists, logical(1)
+    ))
+
+    if (all_rasters_exist) {
+      cli::cli_alert_info("Using cached prediction rasters for {.val {indicator_name}}")
+
+      cached_rasters <- lapply(expected_raster_paths, terra::rast)
+
+      mean_col <- paste0(indicator_name, "_mean")
+      lower_col <- paste0(indicator_name, "_lower")
+      upper_col <- paste0(indicator_name, "_upper")
+      multiplier <- if (grepl("^u5mr", indicator_name, ignore.case = TRUE)) {
+        1000
+      } else {
+        100
+      }
+
+      adm_estimates <- primary_sf |>
+        sf::st_drop_geometry() |>
+        dplyr::mutate(
+          !!mean_col := terra::extract(
+            cached_rasters$mean, primary_sf, fun = mean, na.rm = TRUE
+          )[[2]] * multiplier,
+          !!lower_col := terra::extract(
+            cached_rasters$lower, primary_sf, fun = mean, na.rm = TRUE
+          )[[2]] * multiplier,
+          !!upper_col := terra::extract(
+            cached_rasters$upper, primary_sf, fun = mean, na.rm = TRUE
+          )[[2]] * multiplier
+        )
+
+      return(list(
+        adm_estimates = adm_estimates,
+        raster_path = expected_raster_paths,
+        cell_predictions = NULL
+      ))
+    }
   }
 
   primary_vect <- terra::vect(primary_sf)
@@ -1406,22 +1498,27 @@ run_mbg_indicator_pipeline <- function(
   # Extract predictions
   cell_preds <- model_runner$grid_cell_predictions
 
-  # Save rasters
+  # Save rasters (mean, lower, upper)
   raster_path <- NULL
   if (save_rasters) {
     fs::dir_create(output_dirs$rasters)
-    raster_file <- glue::glue(
-      "{tolower(country_iso3)}_{indicator_name}_mbg_{survey_year}_mean.tif"
-    )
-    raster_path <- fs::path(output_dirs$rasters, raster_file)
+    raster_path <- expected_raster_paths
 
-    terra::writeRaster(
-      cell_preds$cell_pred_mean,
-      raster_path,
-      overwrite = TRUE
+    rasters_to_save <- list(
+      mean  = cell_preds$cell_pred_mean,
+      lower = cell_preds$cell_pred_lower,
+      upper = cell_preds$cell_pred_upper
     )
-    rel_path <- .relative_path(raster_path)
-    cli::cli_alert_success("Saved raster: {.file {rel_path}}")
+
+    for (rast_name in names(rasters_to_save)) {
+      terra::writeRaster(
+        rasters_to_save[[rast_name]],
+        expected_raster_paths[[rast_name]],
+        overwrite = TRUE
+      )
+      rel_path <- .relative_path(expected_raster_paths[[rast_name]])
+      cli::cli_alert_success("Saved raster ({rast_name}): {.file {rel_path}}")
+    }
   }
 
   # Extract ADM estimates at the primary aggregation level
@@ -1606,6 +1703,7 @@ run_mbg_indicator_pipeline <- function(
   mbg_estimates,
   cluster_data,
   survey_year,
+  survey_type = "DHS",
   country_iso3 = NULL,
   country_iso2 = NULL,
   adm3_sf = NULL,
@@ -1686,8 +1784,9 @@ run_mbg_indicator_pipeline <- function(
     }
   }
 
-  # Add survey year
+  # Add survey year and type
   final$survey_year <- survey_year
+  final$survey_type <- survey_type
 
   # ---- Merge MBG estimates ----
 
@@ -1752,9 +1851,9 @@ run_mbg_indicator_pipeline <- function(
 
   # Define required identifier columns (include adm3 if aggregation_level is adm3)
   if (aggregation_level == "adm3") {
-    id_cols <- c("iso3_code", "dhs_code", "adm0", "adm1", "adm2", "adm3", "survey_year")
+    id_cols <- c("iso3_code", "dhs_code", "adm0", "adm1", "adm2", "adm3", "survey_year", "survey_type")
   } else {
-    id_cols <- c("iso3_code", "dhs_code", "adm0", "adm1", "adm2", "survey_year")
+    id_cols <- c("iso3_code", "dhs_code", "adm0", "adm1", "adm2", "survey_year", "survey_type")
   }
   id_cols_present <- intersect(id_cols, names(final))
 

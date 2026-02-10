@@ -145,10 +145,11 @@ methodology:
     one ITN (any hml10_* == 1).
 
   access: >
-    ITN access follows DHS methodology. Potential users per household =
-    min(number_of_ITNs * 2, household_size). Access ratio =
-    potential_users / household_size. For MBG, convert to binary using
-    probabilistic assignment: has_access = 1 if random_uniform < access_ratio.
+    ITN access follows standard DHS deterministic assignment methodology.
+    Potential users per household = min(number_of_ITNs * 2, household_size).
+    Individuals within each household are sorted by ITN use (users first),
+    then access is assigned to the first N individuals where N = potential_users.
+    This guarantees that use <= access at the individual level.
 
   use: >
     ITN use is measured by hml12 variable (slept under net last night).

@@ -32,6 +32,10 @@
 #'     \item `private`: Character vector of h32 codes for private sector
 #'     \item `excluded`: Character vector of h32 codes to exclude
 #'   }
+#' @param region_var Optional column name (character string) in `dhs_kr` to
+#'   use as the grouping variable (e.g., `"v024"` for region). When provided,
+#'   this takes precedence over GPS/shapefile-based grouping and the column
+#'   appears first in the output.
 #' @param gps_data Optional DHS GPS dataset with cluster coordinates.
 #' @param gps_vars Named list for GPS variables (cluster, lat, lon).
 #' @param shapefile Optional sf object with administrative boundaries.
@@ -94,6 +98,7 @@ calc_csb_dhs_core <- function(
   ),
   csb_classification = NULL,
   source_config = NULL,
+  region_var = NULL,
   gps_data = NULL,
   gps_vars = list(
     cluster = "DHSCLUST",
@@ -136,6 +141,28 @@ calc_csb_dhs_core <- function(
         "i" = "Check your survey_vars mapping"
       )
     )
+  }
+
+  # Validate region_var if provided
+  if (!is.null(region_var)) {
+    if (!is.character(region_var) || length(region_var) != 1) {
+      cli::cli_abort(
+        "`region_var` must be a single character string."
+      )
+    }
+    if (!region_var %in% names(dhs_kr)) {
+      cli::cli_abort(
+        c(
+          "Column {.var {region_var}} not found in `dhs_kr`.",
+          "i" = "Available columns: {.var {head(names(dhs_kr), 10)}}..."
+        )
+      )
+    }
+    if (!is.null(gps_data) || !is.null(shapefile)) {
+      cli::cli_alert_warning(
+        "`region_var` provided with GPS/shapefile; `region_var` takes precedence"
+      )
+    }
   }
 
   # Auto-detect available h32 treatment source variables
@@ -398,7 +425,10 @@ calc_csb_dhs_core <- function(
 
   class_var <- NULL
 
-  if (!is.null(gps_data) && !is.null(shapefile)) {
+  if (!is.null(region_var)) {
+    class_var <- region_var
+    cli::cli_alert_info("Using {.var {region_var}} as grouping variable")
+  } else if (!is.null(gps_data) && !is.null(shapefile)) {
     cli::cli_alert_info(
       "Joining GPS coordinates and administrative boundaries"
     )
@@ -623,7 +653,7 @@ calc_csb_dhs_core <- function(
   # Calculate proportions
   if (!is.null(class_var)) {
     # Additional check for single-cluster groups when grouping by admin level
-    if (class_var %in% c("admin_class", admin_level)) {
+    if (class_var != "cluster_id") {
       group_check <- kr_fever |>
         dplyr::group_by(.data[[class_var]]) |>
         dplyr::summarise(
@@ -790,7 +820,7 @@ calc_csb_dhs_core <- function(
     )
 
   # Split admin_class back into individual admin columns if needed
-  if (class_var == "admin_class" && length(admin_level) > 1) {
+  if (!is.null(class_var) && class_var == "admin_class" && length(admin_level) > 1) {
     admin_splits <- stringr::str_split(
       csb_results$admin_class,
       "_",
@@ -828,6 +858,7 @@ calc_csb_dhs_core <- function(
 
   # Reorder columns - simplified to essential columns only
   col_order <- c(
+    region_var,
     admin_level,
     admin_name_cols,
     "dhs_n_fever",
@@ -1127,6 +1158,7 @@ calc_csb_dhs <- function(
   ),
   csb_classification = NULL,
   source_config = NULL,
+  region_var = NULL,
   gps_data = NULL,
   gps_vars = list(
     cluster = "DHSCLUST",
@@ -1149,6 +1181,7 @@ calc_csb_dhs <- function(
     survey_vars = survey_vars,
     csb_classification = csb_classification,
     source_config = source_config,
+    region_var = region_var,
     gps_data = gps_data,
     gps_vars = gps_vars,
     shapefile = shapefile,

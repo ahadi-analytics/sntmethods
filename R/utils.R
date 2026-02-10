@@ -75,7 +75,7 @@ ahadi_path <- function(
   relative = NULL,
   org = "Applied Health Analytics for Delivery and Innovation Inc",
   library = "AHADI Information - technical",
-  base = "Documentation per topic/data/dhs_data",
+  base = "Internal docs and resources/data/dhs_data",
   refresh = FALSE,
   verbose = FALSE
 ) {
@@ -751,33 +751,31 @@ dhs_read <- function(
 #'
 #' @seealso
 #' \code{\link{dhs_read}} for loading DHS parquet datasets
-#'
+#' @export
 make_dhs_raw_dictionary <- function(data) {
-  # extract variable names
   var_names <- names(data)
 
-  # extract labels safely
   var_labels <- purrr::map_chr(var_names, function(v) {
-    attr(data[[v]], "label") |>
-      dplyr::coalesce("") # replace NULL with ""
+    label <- attr(data[[v]], "label")
+    if (is.null(label)) {
+      ""
+    } else {
+      paste(as.character(label), collapse = " | ")
+    }
   })
 
-  # extract types
   var_types <- purrr::map_chr(var_names, function(v) {
-    class(data[[v]]) |> paste(collapse = ", ")
+    paste(class(data[[v]]), collapse = ", ")
   })
 
-  # number of unique values
   var_nunique <- purrr::map_int(var_names, function(v) {
     dplyr::n_distinct(data[[v]], na.rm = TRUE)
   })
 
-  # percent missing
   var_missing <- purrr::map_dbl(var_names, function(v) {
     mean(is.na(data[[v]])) * 100
   })
 
-  # assemble dictionary
   tibble::tibble(
     var_name = var_names,
     var_label = var_labels,
@@ -786,7 +784,6 @@ make_dhs_raw_dictionary <- function(data) {
     pct_missing = round(var_missing, 2)
   )
 }
-
 
 #' Convert DHS Century Month Code to Date
 #'

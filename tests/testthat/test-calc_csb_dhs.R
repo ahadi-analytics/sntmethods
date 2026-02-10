@@ -535,3 +535,73 @@ test_that("overlapping indicators - all visited both sectors", {
   # With overlapping indicators, sum exceeds 1 when children visit both sectors
   expect_equal(result$dhs_csb_public + result$dhs_csb_private + result$dhs_csb_none, 2)
 })
+
+test_that("calc_csb_dhs_core with region_var puts region column first", {
+  skip_if_not_installed("survey")
+
+  set.seed(321)
+  n_children <- 200
+
+  kr_data <- data.frame(
+    v021 = rep(1:20, each = 10),
+    v005 = rep(1000000, n_children),
+    v022 = rep(1:4, each = 50),
+    v024 = rep(c("REGION1", "REGION2"), each = 100),
+    hw1 = sample(0:59, n_children, replace = TRUE),
+    h22 = sample(c(0, 1), n_children, replace = TRUE, prob = c(0.7, 0.3)),
+    b5 = rep(1, n_children)
+  )
+
+  kr_data$h32a <- ifelse(kr_data$h22 == 1,
+    sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE, prob = c(0.8, 0.2)), NA)
+  kr_data$h32j <- ifelse(kr_data$h22 == 1,
+    sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE, prob = c(0.6, 0.4)), NA)
+
+  result <- calc_csb_dhs_core(kr_data, region_var = "v024")
+
+  # v024 should be the first column
+
+  expect_equal(names(result)[1], "v024")
+  # Should have region values
+  expect_true(all(c("REGION1", "REGION2") %in% result$v024))
+})
+
+test_that("calc_csb_dhs_core errors when region_var column not found", {
+  kr_data <- data.frame(
+    v021 = rep(1:5, each = 10),
+    v005 = rep(1000000, 50),
+    v022 = rep(1, 50),
+    hw1 = sample(0:59, 50, replace = TRUE),
+    h22 = sample(c(0, 1), 50, replace = TRUE),
+    h32a = sample(c(0, 1, NA), 50, replace = TRUE)
+  )
+
+  expect_error(
+    calc_csb_dhs_core(kr_data, region_var = "nonexistent"),
+    "not found in `dhs_kr`"
+  )
+})
+
+test_that("calc_csb_dhs_core errors when region_var is not a single string", {
+  kr_data <- data.frame(
+    v021 = rep(1:5, each = 10),
+    v005 = rep(1000000, 50),
+    v022 = rep(1, 50),
+    v024 = rep("REGION1", 50),
+    hw1 = sample(0:59, 50, replace = TRUE),
+    h22 = sample(c(0, 1), 50, replace = TRUE),
+    h32a = sample(c(0, 1, NA), 50, replace = TRUE)
+  )
+
+  # Multiple strings
+  expect_error(
+    calc_csb_dhs_core(kr_data, region_var = c("v024", "v025")),
+    "single character string"
+  )
+
+  # Not a string
+  expect_error(
+    calc_csb_dhs_core(kr_data, region_var = 123),
+    "single character string"
+  )
+})
