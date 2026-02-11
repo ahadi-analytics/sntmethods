@@ -863,3 +863,163 @@ test_that("calc_incidence N5 equals N4 when divisor is 1", {
   expect_equal(result_annual$n5_cases, result_annual$n4_cases, tolerance = 0.01)
   expect_equal(result_annual$n5_incidence, result_annual$n4_incidence, tolerance = 0.01)
 })
+
+
+# ---- Pre-aggregated (admin-level) data tests --------------------------------
+
+test_that("calc_incidence works with pre-aggregated data (hf_var = NULL)", {
+  # Admin-level data without facility identifier
+  admin_data <- data.frame(
+    adm1 = rep("Region1", 3),
+    adm2 = rep("District1", 3),
+    date = as.Date(c("2023-01-01", "2023-02-01", "2023-03-01")),
+    pop = rep(10000, 3),
+    conf = c(50, 60, 70)
+  )
+
+  result <- calc_incidence(admin_data, levels = "N0", hf_var = NULL)
+
+  # Should produce monthly adm2 output with 3 rows
+  expect_equal(nrow(result$monthly$adm2), 3)
+
+  # N0 incidence should be correct: (conf / pop) * 1000
+  expect_equal(result$monthly$adm2$n0_cases, c(50, 60, 70))
+  expect_equal(
+    result$monthly$adm2$n0_incidence,
+    c(50, 60, 70) / 10000 * 1000,
+    tolerance = 0.01
+  )
+
+  # n_facilities should be NA for pre-aggregated data
+  if ("n_facilities" %in% names(result$monthly$adm2)) {
+    expect_true(all(is.na(result$monthly$adm2$n_facilities)))
+  }
+})
+
+test_that("calc_incidence pre-aggregated data works with full cascade", {
+  admin_data <- data.frame(
+    adm1 = rep("Region1", 2),
+    adm2 = rep("District1", 2),
+    date = as.Date(c("2023-01-01", "2023-02-01")),
+    pop = rep(10000, 2),
+    conf = c(50, 60),
+    test = c(200, 250),
+    pres = c(10, 15),
+    tpr = c(0.25, 0.24),
+    reprate = c(0.8, 0.9),
+    cs_public = c(0.6, 0.6),
+    cs_private = c(0.2, 0.2),
+    cs_none = c(0.2, 0.2)
+  )
+
+  result <- calc_incidence(
+    admin_data,
+    levels = c("N0", "N1", "N2", "N3"),
+    hf_var = NULL
+  )
+
+  result_adm2 <- result$monthly$adm2
+  expect_equal(nrow(result_adm2), 2)
+  # N1 >= N0
+
+  expect_true(all(result_adm2$n1_cases >= result_adm2$n0_cases))
+  # N2 >= N1
+  expect_true(all(result_adm2$n2_cases >= result_adm2$n1_cases))
+  # N3 >= N2
+  expect_true(all(result_adm2$n3_cases >= result_adm2$n2_cases))
+})
+
+test_that("calc_incidence warns when return_facility = TRUE with pre-aggregated data", {
+  admin_data <- data.frame(
+    adm1 = "Region1",
+    adm2 = "District1",
+    date = as.Date("2023-01-01"),
+    pop = 10000,
+    conf = 50
+  )
+
+  expect_warning(
+    calc_incidence(admin_data, levels = "N0", hf_var = NULL, return_facility = TRUE),
+    "Cannot return facility-level data"
+  )
+})
+
+
+test_that("calc_incidence validates group_by columns", {
+  test_data <- data.frame(
+    hf_uid = "HF001",
+    adm1 = "Region1",
+    adm2 = "District1",
+    date = as.Date("2023-01-01"),
+    conf = 10,
+    pop = 5000
+  )
+
+  expect_error(
+    calc_incidence(test_data, levels = "N0", group_by = "nonexistent"),
+    "group_by"
+  )
+})
+
+
+test_that("calc_incidence stratifies by group_by variable", {
+  skip_if_not_installed("sntutils")
+
+  test_data <- data.frame(
+    hf_uid = c("HF001", "HF002", "HF003", "HF004"),
+    adm1 = rep("Region1", 4),
+    adm2 = rep("District1", 4),
+    type = c("hospital", "hospital", "clinic", "clinic"),
+    date = rep(as.Date("2023-01-01"), 4),
+    conf = c(30, 20, 10, 5),
+    test = c(100, 80, 50, 30),
+    pres = c(5, 3, 2, 1),
+    tpr = c(0.30, 0.25, 0.20, 0.17),
+    reprate = c(0.90, 0.85, 0.80, 0.75),
+    pop = c(15000, 15000, 15000, 15000)
+  )
+
+  result <- calc_incidence(test_data, levels = "N0", group_by = "type")
+
+  # Monthly adm2 should have 2 rows (one per type)
+  result_adm2 <- result$monthly$adm2
+  expect_equal(nrow(result_adm2), 2)
+  expect_true("type" %in% names(result_adm2))
+  expect_setequal(result_adm2$type, c("hospital", "clinic"))
+
+  # Annual should also be stratified
+  result_annual <- result$annual$adm2
+  expect_true("type" %in% names(result_annual))
+  expect_equal(nrow(result_annual), 2)
+
+  # Hospital should have more cases than clinic
+  hospital_cases <- result_adm2$n0_cases[result_adm2$type == "hospital"]
+  clinic_cases <- result_adm2$n0_cases[result_adm2$type == "clinic"]
+  expect_true(hospital_cases > clinic_cases)
+})
+
+
+test_that("calc_incidence group_by works with pre-aggregated data", {
+  skip_if_not_installed("sntutils")
+
+  admin_data <- data.frame(
+    adm1 = c("Region1", "Region1"),
+    adm2 = c("District1", "District1"),
+    type = c("urban", "rural"),
+    date = rep(as.Date("2023-01-01"), 2),
+    pop = c(10000, 5000),
+    conf = c(50, 30)
+  )
+
+  result <- calc_incidence(
+    admin_data,
+    levels = "N0",
+    hf_var = NULL,
+    group_by = "type"
+  )
+
+  result_adm2 <- result$monthly$adm2
+  expect_equal(nrow(result_adm2), 2)
+  expect_true("type" %in% names(result_adm2))
+  expect_setequal(result_adm2$type, c("urban", "rural"))
+})

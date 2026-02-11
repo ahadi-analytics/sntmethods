@@ -60,7 +60,8 @@
 #'   (default: `c("N0", "N1", "N2", "N3")`). Can specify subset like `c("N0",
 #'   "N1")` or include N4/N5 with `c("N0", "N1", "N2", "N3", "N4", "N5")`.
 #' @param hf_var Column name for health facility unique identifier
-#'   (default: "hf_uid").
+#'   (default: "hf_uid"). Set to `NULL` when data is already aggregated
+#'   at the admin level and has no facility identifier.
 #' @param adm0_var Column name for national/country level. If NULL (default),
 #'   creates a single "country" value for all records.
 #' @param adm1_var Column name for first administrative level/region
@@ -102,6 +103,9 @@
 #'   (default: NULL). If provided (e.g., `suffix = "u5"`), output columns
 #'   will be named `n0_cases_u5`, `n0_incidence_u5`, etc. Useful for
 #'   distinguishing outputs for different population groups.
+#' @param group_by Character vector of additional column names to group by
+#'   (e.g. facility type, urban/rural). These columns are preserved through
+#'   aggregation and appear in output. Default NULL.
 #' @param return_facility Logical; if `TRUE`, includes facility-level data
 #'   in the output with diagnostic flags. If `FALSE` (default), returns only
 #'   aggregated admin-level data. Useful for investigating data quality issues
@@ -215,6 +219,7 @@ calc_incidence <- function(
   scale_factor = lifecycle::deprecated(),
   include_flags = FALSE,
   suffix = NULL,
+  group_by = NULL,
   return_facility = FALSE
 ) {
   # ---- handle deprecated scale_factor parameter -----------------------------
@@ -252,15 +257,21 @@ calc_incidence <- function(
     )
   }
 
+  # Detect pre-aggregated mode (no facility identifier)
+  is_preaggregated <- is.null(hf_var)
+
   # Base required columns for N0
   required <- c(
-    hf_var,
     adm1_var,
     adm2_var,
     date_var,
     pop_var,
     conf_var
   )
+
+  if (!is_preaggregated) {
+    required <- c(hf_var, required)
+  }
 
   # Additional requirements for N1 (only if N1 explicitly requested)
   if ("N1" %in% levels) {
@@ -278,6 +289,18 @@ calc_incidence <- function(
     )
   }
 
+  # ---- validate group_by columns -------------------------------------------
+
+  if (!is.null(group_by)) {
+    missing_gb <- setdiff(group_by, names(data))
+    if (length(missing_gb) > 0) {
+      cli::cli_abort(c(
+        "Column(s) in {.arg group_by} not found:",
+        "{.var {missing_gb}}"
+      ))
+    }
+  }
+
   # ---- validate parameters -------------------------------------------------
 
   if (!is.numeric(rate_multiplier) || length(rate_multiplier) != 1) {
@@ -288,9 +311,15 @@ calc_incidence <- function(
     cli::cli_abort("`rate_multiplier` must be positive.")
   }
 
-  cli::cli_alert_info(
-    "Processing {sntutils::big_mark(nrow(data))} facility-month records."
-  )
+  if (is_preaggregated) {
+    cli::cli_alert_info(
+      "Processing {sntutils::big_mark(nrow(data))} admin-month records (pre-aggregated data)."
+    )
+  } else {
+    cli::cli_alert_info(
+      "Processing {sntutils::big_mark(nrow(data))} facility-month records."
+    )
+  }
 
   # ---- validate TPR presence -----------------------------------------------
   # TPR only required if N1 is explicitly requested
@@ -435,8 +464,13 @@ calc_incidence <- function(
 
   # duplicates (e.g., if data has both "conf" and "conf_u5" and user specifies
   # conf_var = "conf_u5", we need to drop "conf" before renaming "conf_u5")
-  standard_names <- c("hf_uid", "adm1", "adm2", "date_raw", "pop", "conf")
-  input_vars <- c(hf_var, adm1_var, adm2_var, date_var, pop_var, conf_var)
+  if (is_preaggregated) {
+    standard_names <- c("adm1", "adm2", "date_raw", "pop", "conf")
+    input_vars <- c(adm1_var, adm2_var, date_var, pop_var, conf_var)
+  } else {
+    standard_names <- c("hf_uid", "adm1", "adm2", "date_raw", "pop", "conf")
+    input_vars <- c(hf_var, adm1_var, adm2_var, date_var, pop_var, conf_var)
+  }
 
   if (needs_tpr) {
     standard_names <- c(standard_names, "test", "pres", "tpr")
@@ -475,19 +509,34 @@ calc_incidence <- function(
       dplyr::select(-dplyr::all_of(cols_to_drop))
   }
 
-  df <- data |>
-    dplyr::rename(
-      hf_uid = !!hf_var,
-      adm1 = !!adm1_var,
-      adm2 = !!adm2_var,
-      date_raw = !!date_var,
-      pop = !!pop_var,
-      conf = !!conf_var
-    ) |>
-    dplyr::mutate(
-      pop = as.numeric(pop),
-      conf = as.numeric(conf)
-    )
+  if (is_preaggregated) {
+    df <- data |>
+      dplyr::rename(
+        adm1 = !!adm1_var,
+        adm2 = !!adm2_var,
+        date_raw = !!date_var,
+        pop = !!pop_var,
+        conf = !!conf_var
+      ) |>
+      dplyr::mutate(
+        pop = as.numeric(pop),
+        conf = as.numeric(conf)
+      )
+  } else {
+    df <- data |>
+      dplyr::rename(
+        hf_uid = !!hf_var,
+        adm1 = !!adm1_var,
+        adm2 = !!adm2_var,
+        date_raw = !!date_var,
+        pop = !!pop_var,
+        conf = !!conf_var
+      ) |>
+      dplyr::mutate(
+        pop = as.numeric(pop),
+        conf = as.numeric(conf)
+      )
+  }
 
   # Add test and pres for N1+
   if (needs_tpr) {
@@ -569,17 +618,35 @@ calc_incidence <- function(
       month = lubridate::month(date)
     )
 
-  # ---- duplicate check (at facility-month level, before aggregation) -------
+  # ---- duplicate check (before aggregation) ---------------------------------
 
-  n_dup <- df |>
-    dplyr::group_by(hf_uid, date) |>
-    dplyr::filter(dplyr::n() > 1) |>
-    nrow()
+  if (is_preaggregated) {
+    dup_group_vars <- c("adm0", "adm1", "adm2")
+    if (!is.null(adm3_var)) dup_group_vars <- c(dup_group_vars, "adm3")
+    if (!is.null(group_by)) dup_group_vars <- c(dup_group_vars, group_by)
+    dup_group_vars <- c(dup_group_vars, "date")
 
-  if (n_dup > 0) {
-    cli::cli_alert_warning(
-      "Found {sntutils::big_mark(n_dup)} duplicate facility-months."
-    )
+    n_dup <- df |>
+      dplyr::group_by(dplyr::across(dplyr::all_of(dup_group_vars))) |>
+      dplyr::filter(dplyr::n() > 1) |>
+      nrow()
+
+    if (n_dup > 0) {
+      cli::cli_alert_warning(
+        "Found {sntutils::big_mark(n_dup)} duplicate admin-months."
+      )
+    }
+  } else {
+    n_dup <- df |>
+      dplyr::group_by(hf_uid, date) |>
+      dplyr::filter(dplyr::n() > 1) |>
+      nrow()
+
+    if (n_dup > 0) {
+      cli::cli_alert_warning(
+        "Found {sntutils::big_mark(n_dup)} duplicate facility-months."
+      )
+    }
   }
 
   # ---- N1 calculation: ADMIN-LEVEL ONLY (NOT facility-level) ----------------
@@ -610,23 +677,39 @@ calc_incidence <- function(
 
   # ---- store facility-level data before aggregation -------------------------
 
-  # Keep facility-level data for hf-level output
-  df_facility <- df
+  if (is_preaggregated) {
+    df_facility <- NULL
+    if (return_facility) {
+      cli::cli_warn(
+        "Cannot return facility-level data for pre-aggregated input. Setting {.arg return_facility} to {.val FALSE}."
+      )
+      return_facility <- FALSE
+    }
+  } else {
+    # Keep facility-level data for hf-level output
+    df_facility <- df
+  }
 
   # ---- aggregate to admin-month level --------------------------------------
 
-  cli::cli_alert_info("Aggregating to admin-month level...")
-  n_facilities <- length(unique(df$hf_uid))
-  n_admins <- df |>
-    dplyr::distinct(adm0, adm1, adm2) |>
-    nrow()
+  if (is_preaggregated) {
+    cli::cli_alert_info("Data is pre-aggregated at admin-month level, skipping facility aggregation.")
+    df <- df |>
+      dplyr::mutate(n_facilities = NA_integer_)
+  } else {
+    cli::cli_alert_info("Aggregating to admin-month level...")
+    n_facilities <- length(unique(df$hf_uid))
+    n_admins <- df |>
+      dplyr::distinct(adm0, adm1, adm2) |>
+      nrow()
 
-  df <- .aggregate_to_admin_month(df)
+    df <- .aggregate_to_admin_month(df, group_by = group_by)
 
-  cli::cli_alert_success(
-    "Aggregated {sntutils::big_mark(n_facilities)} facilities to ",
-    "{sntutils::big_mark(n_admins)} admin units."
-  )
+    cli::cli_alert_success(
+      "Aggregated {sntutils::big_mark(n_facilities)} facilities to ",
+      "{sntutils::big_mark(n_admins)} admin units."
+    )
+  }
 
   # ---- create flags --------------------------------------------------------
 
@@ -824,6 +907,11 @@ calc_incidence <- function(
     core_cols <- c(core_cols, "adm3")
   }
 
+  # Add group_by columns if specified
+  if (!is.null(group_by)) {
+    core_cols <- c(core_cols, group_by)
+  }
+
   core_cols <- c(
     core_cols,
     "date",
@@ -922,14 +1010,18 @@ calc_incidence <- function(
 
   # ---- Calculate facility-level incidence -----------------------------------
 
-  cli::cli_alert_info("Calculating facility-level incidence...")
+  if (!is.null(df_facility)) {
+    cli::cli_alert_info("Calculating facility-level incidence...")
 
-  df_facility_final <- .calc_facility_incidence(
-    df_facility,
-    levels = levels,
-    scale_factor = rate_multiplier,
-    cs_none_divisor = cs_none_divisor
-  )
+    df_facility_final <- .calc_facility_incidence(
+      df_facility,
+      levels = levels,
+      scale_factor = rate_multiplier,
+      cs_none_divisor = cs_none_divisor
+    )
+  } else {
+    df_facility_final <- NULL
+  }
 
   # ---- Build and return output list -----------------------------------------
 
@@ -943,7 +1035,8 @@ calc_incidence <- function(
     scale_factor = rate_multiplier,
     has_adm3 = has_adm3,
     return_facility = return_facility,
-    cs_none_divisor = cs_none_divisor
+    cs_none_divisor = cs_none_divisor,
+    group_by = group_by
   )
 
   # ---- Rename TPR column in output if different from "tpr" ------------------
@@ -1186,6 +1279,11 @@ calc_incidence <- function(
     output$annual <- lapply(output$annual, round_df)
   }
 
+  # Apply to facility tibbles
+  if (!is.null(output$facility)) {
+    output$facility <- lapply(output$facility, round_df)
+  }
+
   output
 }
 
@@ -1384,6 +1482,11 @@ calc_incidence <- function(
     output$annual <- lapply(output$annual, rename_df)
   }
 
+  # Apply to facility tibbles
+  if (!is.null(output$facility)) {
+    output$facility <- lapply(output$facility, rename_df)
+  }
+
   output
 }
 
@@ -1404,7 +1507,7 @@ calc_incidence <- function(
 #'   - Diagnostics: n_facilities, n_facilities_with_conf, n_facilities_with_tpr
 #'
 #' @keywords internal
-.aggregate_to_admin_month <- function(df) {
+.aggregate_to_admin_month <- function(df, group_by = NULL) {
 
   # Check which columns exist for conditional aggregation
   has_cs <- all(c("cs_public", "cs_private", "cs_none") %in% names(df))
@@ -1417,6 +1520,9 @@ calc_incidence <- function(
   group_vars <- c("adm0", "adm1", "adm2")
   if (has_adm3) {
     group_vars <- c(group_vars, "adm3")
+  }
+  if (!is.null(group_by)) {
+    group_vars <- c(group_vars, group_by)
   }
   group_vars <- c(group_vars, "year", "month", "date")
 
@@ -1913,7 +2019,8 @@ calc_incidence <- function(
     admin_level,
     scale_factor,
     time_period = "monthly",
-    cs_none_divisor = 2
+    cs_none_divisor = 2,
+    group_by = NULL
 ) {
 
   has_adm3 <- "adm3" %in% names(df)
@@ -1930,6 +2037,11 @@ calc_incidence <- function(
       return(NULL)
     }
   )
+
+  # Add group_by columns to admin_cols
+  if (!is.null(group_by)) {
+    admin_cols <- c(admin_cols, group_by)
+  }
 
   # Check which incidence columns exist
   has_n0 <- "n0_cases" %in% names(df)
@@ -2453,7 +2565,8 @@ calc_incidence <- function(
     scale_factor,
     has_adm3 = FALSE,
     return_facility = FALSE,
-    cs_none_divisor = 2
+    cs_none_divisor = 2,
+    group_by = NULL
 ) {
 
   admin_levels <- c("adm0", "adm1", "adm2")
@@ -2468,7 +2581,8 @@ calc_incidence <- function(
   for (level in admin_levels) {
     monthly[[level]] <- .aggregate_to_level(
       df_admin, level, scale_factor, "monthly",
-      cs_none_divisor = cs_none_divisor
+      cs_none_divisor = cs_none_divisor,
+      group_by = group_by
     )
   }
 
@@ -2479,7 +2593,8 @@ calc_incidence <- function(
   for (level in admin_levels) {
     annual[[level]] <- .aggregate_to_level(
       df_admin, level, scale_factor, "annual",
-      cs_none_divisor = cs_none_divisor
+      cs_none_divisor = cs_none_divisor,
+      group_by = group_by
     )
   }
 
@@ -2510,7 +2625,7 @@ calc_incidence <- function(
 #' @return Aggregated tibble at facility-year level
 #'
 #' @keywords internal
-.aggregate_facility_to_annual <- function(df, scale_factor, cs_none_divisor = 2) {
+.aggregate_facility_to_annual <- function(df, scale_factor, cs_none_divisor = 2, group_by = NULL) {
 
   has_adm3 <- "adm3" %in% names(df)
 
@@ -2518,6 +2633,9 @@ calc_incidence <- function(
   group_cols <- c("hf_uid", "adm0", "adm1", "adm2")
   if (has_adm3) {
     group_cols <- c(group_cols, "adm3")
+  }
+  if (!is.null(group_by)) {
+    group_cols <- c(group_cols, group_by)
   }
   group_cols <- c(group_cols, "year")
 
