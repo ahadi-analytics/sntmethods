@@ -6,7 +6,10 @@
 #'
 #' @param dhs_pr DHS Person Records dataset (data.frame or tibble).
 #' @param gps_data DHS GPS dataset with cluster coordinates.
-#' @param test_type Character. Type of test: "rdt", "mic", or "both" (default).
+#' @param test_type Character. Type of test: "rdt", "mic", "both" (default),
+#'   or "either". When "both", produces separate RDT, microscopy, and either
+#'   tables plus a combined table per age group. When "either", produces a
+#'   single table per age group where positive means positive on either test.
 #' @param age_groups Named list of age ranges (in months) to calculate. Each
 #'   element should be a length-2 vector c(min, max). Default includes:
 #'   \itemize{
@@ -35,6 +38,10 @@
 #'     \item x: Longitude
 #'     \item y: Latitude
 #'   }
+#'   When \code{test_type = "both"}, additional \code{pfpr_combined_*} tables
+#'   are included with columns: cluster_id, latitude, longitude, n_tested,
+#'   n_positive_mic, prop_raw_mic, n_positive_rdt, prop_raw_rdt,
+#'   n_positive_either, prop_raw_either.
 #'   Use [save_mbg_cluster_data()] to save with additional columns (n_positive,
 #'   n_tested, prop_raw) or [plot_mbg_clusters()] to visualize.
 #'
@@ -103,7 +110,7 @@ calc_pfpr_mbg <- function(
     cli::cli_abort("`gps_data` is empty")
   }
 
-  test_type <- match.arg(test_type, c("rdt", "mic", "both"))
+  test_type <- match.arg(test_type, c("rdt", "mic", "both", "either"))
 
   # Check required columns
   required_cols <- c(
@@ -113,11 +120,11 @@ calc_pfpr_mbg <- function(
     survey_vars$mother
   )
 
-  if (test_type %in% c("rdt", "both")) {
+  if (test_type %in% c("rdt", "both", "either")) {
     required_cols <- c(required_cols, survey_vars$rdt)
   }
 
-  if (test_type %in% c("mic", "both")) {
+  if (test_type %in% c("mic", "both", "either")) {
     required_cols <- c(required_cols, survey_vars$mic)
   }
 
@@ -274,6 +281,100 @@ calc_pfpr_mbg <- function(
         }
       }
     }
+
+    # Either test results (positive on either RDT or microscopy)
+    if (test_type %in% c("both", "either")) {
+      pr_either <- pr_age |>
+        dplyr::filter(rdt_res %in% c(0, 1) | mic_res %in% c(0, 1, 6)) |>
+        dplyr::mutate(
+          positive = as.integer(
+            dplyr::coalesce(rdt_res == 1L, FALSE) |
+              dplyr::coalesce(mic_res == 1L, FALSE)
+          )
+        )
+
+      if (nrow(pr_either) > 0) {
+        result_name <- paste0("pfpr_either_", age_name)
+
+        either_cluster <- pr_either |>
+          dplyr::group_by(cluster_id) |>
+          dplyr::summarise(
+            indicator = sum(positive, na.rm = TRUE),
+            samplesize = dplyr::n(),
+            .groups = "drop"
+          ) |>
+          dplyr::inner_join(gps_clean, by = "cluster_id") |>
+          dplyr::filter(samplesize > 0)
+
+        if (nrow(either_cluster) > 0) {
+          results[[result_name]] <- data.table::as.data.table(either_cluster)
+
+          cli::cli_alert_success(
+            "{result_name}: {nrow(either_cluster)} clusters, ",
+            "{sum(either_cluster$indicator)} positive / {sum(either_cluster$samplesize)} tested"
+          )
+        }
+      }
+    }
+
+    # Combined table (all test types joined at cluster level)
+    if (test_type == "both") {
+      rdt_name <- paste0("pfpr_rdt_", age_name)
+      mic_name <- paste0("pfpr_mic_", age_name)
+      either_name <- paste0("pfpr_either_", age_name)
+
+      if (either_name %in% names(results)) {
+        combined_name <- paste0("pfpr_combined_", age_name)
+
+        # Start from either result (correct n_tested denominator)
+        combined <- data.table::copy(results[[either_name]])
+        data.table::setnames(
+          combined,
+          c("indicator", "samplesize"),
+          c("n_positive_either", "n_tested")
+        )
+        combined[, prop_raw_either := n_positive_either / n_tested]
+
+        # Rename coordinates to readable names
+        data.table::setnames(combined, c("x", "y"), c("longitude", "latitude"))
+
+        # Left join RDT counts
+        if (rdt_name %in% names(results)) {
+          rdt_dt <- results[[rdt_name]][
+            , .(cluster_id, n_positive_rdt = indicator)
+          ]
+          combined <- merge(combined, rdt_dt, by = "cluster_id", all.x = TRUE)
+          combined[is.na(n_positive_rdt), n_positive_rdt := 0L]
+          combined[, prop_raw_rdt := n_positive_rdt / n_tested]
+        }
+
+        # Left join microscopy counts
+        if (mic_name %in% names(results)) {
+          mic_dt <- results[[mic_name]][
+            , .(cluster_id, n_positive_mic = indicator)
+          ]
+          combined <- merge(combined, mic_dt, by = "cluster_id", all.x = TRUE)
+          combined[is.na(n_positive_mic), n_positive_mic := 0L]
+          combined[, prop_raw_mic := n_positive_mic / n_tested]
+        }
+
+        # Reorder columns
+        col_order <- intersect(
+          c("cluster_id", "latitude", "longitude", "n_tested",
+            "n_positive_mic", "prop_raw_mic",
+            "n_positive_rdt", "prop_raw_rdt",
+            "n_positive_either", "prop_raw_either"),
+          names(combined)
+        )
+        data.table::setcolorder(combined, col_order)
+
+        results[[combined_name]] <- combined
+
+        cli::cli_alert_success(
+          "{combined_name}: {nrow(combined)} clusters with combined test data"
+        )
+      }
+    }
   }
 
   # Filter out redundant age groups (e.g., u10 identical to u5 when no 5-10 data)
@@ -309,12 +410,13 @@ calc_pfpr_mbg <- function(
   result_names <- names(results)
   to_remove <- character(0)
 
-  # Group results by test type (rdt or mic)
+  # Group results by test type (rdt, mic, or either)
   rdt_results <- result_names[grepl("_rdt_", result_names)]
   mic_results <- result_names[grepl("_mic_", result_names)]
+  either_results <- result_names[grepl("_either_", result_names)]
 
-  # Check for redundancy within each test type
-  for (test_results in list(rdt_results, mic_results)) {
+  # Check for redundancy within each test type (skip combined — handled below)
+  for (test_results in list(rdt_results, mic_results, either_results)) {
     if (length(test_results) <= 1) next
 
     # Pairwise comparison
@@ -367,6 +469,15 @@ calc_pfpr_mbg <- function(
   # Remove redundant results
   if (length(to_remove) > 0) {
     results <- results[!names(results) %in% to_remove]
+  }
+
+  # Remove orphaned combined tables (whose either counterpart was removed)
+  combined_names <- names(results)[grepl("^pfpr_combined_", names(results))]
+  for (cn in combined_names) {
+    corresponding_either <- sub("^pfpr_combined_", "pfpr_either_", cn)
+    if (!corresponding_either %in% names(results)) {
+      results[[cn]] <- NULL
+    }
   }
 
   results
@@ -466,8 +577,8 @@ calc_pfpr_mbg <- function(
 #' @noRd
 .extract_age_group_from_name <- function(result_name) {
   # Pattern: pfpr_{test}_{age_group}
-  # Remove "pfpr_rdt_" or "pfpr_mic_" prefix
-  sub("^pfpr_(rdt|mic)_", "", result_name)
+  # Remove "pfpr_rdt_", "pfpr_mic_", "pfpr_either_", or "pfpr_combined_" prefix
+  sub("^pfpr_(rdt|mic|either|combined)_", "", result_name)
 }
 
 

@@ -460,6 +460,7 @@ globalVariables(
     "step",
 
     # MBG variables
+    ".",
     "indicator",
     "samplesize",
     "positive",
@@ -467,6 +468,12 @@ globalVariables(
     "value",
     "level",
     "n_distinct",
+    "n_positive_either",
+    "n_positive_rdt",
+    "n_positive_mic",
+    "prop_raw_either",
+    "prop_raw_rdt",
+    "prop_raw_mic",
 
     # DHS survey output columns (prefixed for sntutils compatibility)
     "dhs_csb_any",

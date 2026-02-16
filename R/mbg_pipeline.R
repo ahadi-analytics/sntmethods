@@ -1146,6 +1146,9 @@ run_mbg_indicator_pipeline <- function(
   # Run MBG if enabled
   if (run_mbg && requireNamespace("mbg", quietly = TRUE)) {
     for (ind_name in names(cluster_data)) {
+      # Skip combined tables — they are reference data, not MBG inputs
+      if (grepl("^pfpr_combined_", ind_name)) next
+
       cli::cli_alert_info("Running MBG for {ind_name}...")
 
       mbg_result <- tryCatch({
@@ -1274,13 +1277,19 @@ run_mbg_indicator_pipeline <- function(
     # Copy to avoid modifying original
     dt <- data.table::copy(dt)
 
-    # Get meaningful column labels for this indicator
-    labels <- .get_indicator_labels(ind_name)
+    # Combined tables already have final column names — save directly
+    if (!grepl("^pfpr_combined_", ind_name)) {
+      # Get meaningful column labels for this indicator
+      labels <- .get_indicator_labels(ind_name)
 
-    # Add context-appropriate alias columns
-    data.table::set(dt, j = labels$numerator, value = dt$indicator)
-    data.table::set(dt, j = labels$denominator, value = dt$samplesize)
-    data.table::set(dt, j = "prop_raw", value = dt$indicator / dt$samplesize)
+      # Add context-appropriate alias columns
+      data.table::set(dt, j = labels$numerator, value = dt$indicator)
+      data.table::set(dt, j = labels$denominator, value = dt$samplesize)
+      data.table::set(dt, j = "prop_raw", value = dt$indicator / dt$samplesize)
+
+      # Drop raw 'indicator' and 'samplesize' columns (redundant with named aliases)
+      dt[, c("indicator", "samplesize") := NULL]
+    }
 
     # Naming: {country}_{indicator}_cluster_points_{type}_{year}.qs2
     filename <- glue::glue(
@@ -1824,8 +1833,13 @@ run_mbg_indicator_pipeline <- function(
   # ---- Aggregate cluster data to admin level ----
 
   if (!is.null(cluster_data) && length(cluster_data) > 0) {
+    # Filter out combined tables (different column structure)
+    cluster_data_for_agg <- cluster_data[
+      !grepl("^pfpr_combined_", names(cluster_data))
+    ]
+
     cluster_stats <- .aggregate_cluster_to_admin(
-      cluster_data = cluster_data,
+      cluster_data = cluster_data_for_agg,
       admin_sf = base_sf,
       admin_col = merge_key,
       join_nearest = TRUE
