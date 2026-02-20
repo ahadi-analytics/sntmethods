@@ -302,6 +302,10 @@ calc_act_dhs <- function(
     )
   }
 
+  # Normalize CI column names (svyby uses ci_l/ci_u for single-variable formulas)
+  names(act_results)[names(act_results) == "ci_l"] <- "ci_l.has_act"
+  names(act_results)[names(act_results) == "ci_u"] <- "ci_u.has_act"
+
   # Rename ACT columns
   act_results <- act_results |>
     dplyr::rename(
@@ -376,6 +380,10 @@ calc_act_dhs <- function(
       }
 
       if (!is.null(tested_results)) {
+        # Normalize CI column names for single-variable svyby
+        names(tested_results)[names(tested_results) == "ci_l"] <- "ci_l.got_act"
+        names(tested_results)[names(tested_results) == "ci_u"] <- "ci_u.got_act"
+
         tested_results <- tested_results |>
           dplyr::rename(
             dhs_act_tested = got_act,

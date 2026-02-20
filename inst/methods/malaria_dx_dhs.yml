@@ -63,10 +63,10 @@ methodology:
     svydesign(id=~cluster, weights=~weight, strata=~strata, nest=TRUE).
     svyciprop for proportions. options(survey.lonely.psu = "adjust").
 
-status: "reference_only"
+status: "implemented"
 note: >
-  Documented for WMR methodology reference. Not yet implemented
-  as a standalone function in sntmethods.
+  Implemented as calc_malaria_dx_dhs_core() and calc_malaria_dx_dhs().
+  Also available as step 2 of calc_case_management_dhs().
 
 references:
   - "WHO World Malaria Report - Diagnostic testing indicators"

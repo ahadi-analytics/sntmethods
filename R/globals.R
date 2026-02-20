@@ -202,7 +202,42 @@ globalVariables(
     "ci_l.is_none",
     "ci_u.is_none",
 
-    # ACT treatment
+    # Fever prevalence (cascade step 0)
+    "fever_raw",
+    "dhs_fever",
+    "dhs_fever_low",
+    "dhs_fever_upp",
+    "dhs_n_children",
+    "ci_l.had_fever",
+    "ci_u.had_fever",
+
+    # Malaria diagnostic testing (cascade step 2)
+    "blood_taken",
+    "had_test",
+    "dhs_malaria_dx",
+    "dhs_malaria_dx_low",
+    "dhs_malaria_dx_upp",
+    "dhs_n_febrile",
+    "dhs_n_tested_dx",
+    "ci_l.had_test",
+    "ci_u.had_test",
+
+    # Antimalarial treatment (cascade step 3)
+    "received_antimalarial",
+    "has_antimalarial",
+    "dhs_antimalarial",
+    "dhs_antimalarial_low",
+    "dhs_antimalarial_upp",
+    "dhs_n_antimalarial",
+    "ci_l.has_antimalarial",
+    "ci_u.has_antimalarial",
+
+    # MBG binary indicators (fever, malaria_dx, antimalarial)
+    "fever_binary",
+    "dx_binary",
+    "am_binary",
+
+    # ACT treatment (cascade step 4)
     "has_act",
     "received_act",
     "test_positive",
@@ -222,6 +257,13 @@ globalVariables(
     "dhs_n_act",
     "dhs_n_fever",
     "dhs_n_tested",
+
+    # Case management cascade
+    "estimate",
+    "low",
+    "upp",
+    "n_eligible",
+    "n_positive",
 
     # IPTp indicators
     "iptp_1plus",

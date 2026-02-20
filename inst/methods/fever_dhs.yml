@@ -58,11 +58,10 @@ methodology:
     svydesign(id=~cluster, weights=~weight, strata=~strata, nest=TRUE).
     Proportions computed via svyciprop with vartype="ci".
 
-status: "reference_only"
+status: "implemented"
 note: >
-  This indicator is documented for WMR methodology reference. The
-  sntmethods package does not currently have a dedicated calc_fever_dhs()
-  function, but fever filtering is embedded in CSB and ACT calculations.
+  Implemented as calc_fever_dhs_core() and calc_fever_dhs(). Also
+  available as step 0 of calc_case_management_dhs().
 
 references:
   - "WHO World Malaria Report methodology"

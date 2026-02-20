@@ -79,11 +79,11 @@ methodology:
     svydesign(id=~cluster, weights=~weight, strata=~strata, nest=TRUE).
     svyciprop for proportions. options(survey.lonely.psu = "adjust").
 
-status: "reference_only"
+status: "implemented"
 note: >
-  Documented for WMR methodology reference. Not yet implemented
-  as a standalone function in sntmethods. The ACT-specific indicators
-  are implemented in calc_act_dhs() and the MBG variant calc_act_mbg().
+  Implemented as calc_antimalarial_dhs_core() and calc_antimalarial_dhs().
+  Also available as step 3 of calc_case_management_dhs(). The ACT-specific
+  subset is implemented in calc_act_dhs() and calc_act_mbg().
 
 references:
   - "WHO World Malaria Report - Antimalarial treatment"
