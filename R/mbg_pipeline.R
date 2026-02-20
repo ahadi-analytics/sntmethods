@@ -75,6 +75,9 @@ NULL
 #'     \item "epi": EPI vaccination
 #'     \item "u5mr": Under-5 mortality
 #'     \item "smc": SMC receipt
+#'     \item "fever": Fever prevalence (U5)
+#'     \item "malaria_dx": Malaria diagnostic testing (febrile U5)
+#'     \item "antimalarial": Any antimalarial treatment (febrile U5)
 #'   }
 #' @param aggregation_level Primary aggregation level for MBG outputs. One of:
 #'   \itemize{
@@ -141,7 +144,8 @@ run_mbg_indicator_pipeline <- function(
   min_year = NULL,
   survey_type = NULL,
   indicators = c(
-    "pfpr", "itn", "irs", "anc", "csb", "anemia", "iptp"
+    "pfpr", "itn", "irs", "anc", "csb", "anemia", "iptp",
+    "fever", "malaria_dx", "antimalarial"
   ),
   aggregation_level = c("adm2", "adm3"),
   run_mbg = TRUE,
@@ -236,7 +240,7 @@ run_mbg_indicator_pipeline <- function(
   # ---- Input Validation ----
 
   # Validate indicator names
-  valid_indicators <- c("pfpr", "itn", "irs", "anc", "csb", "act", "anemia", "iptp", "epi", "u5mr", "smc")
+  valid_indicators <- c("pfpr", "itn", "irs", "anc", "csb", "act", "anemia", "iptp", "epi", "u5mr", "smc", "fever", "malaria_dx", "antimalarial")
   invalid_indicators <- setdiff(indicators, valid_indicators)
   if (length(invalid_indicators) > 0) {
     cli::cli_abort(c(
@@ -755,12 +759,14 @@ run_mbg_indicator_pipeline <- function(
       language = "fr"
     )
 
-    # Write with data dictionary as second tab
+    # Write with data dictionary as second tab (versioned with date)
     sntutils::write_snt_data(
       obj = list(data = year_dataset, data_dict = year_data_dict),
       path = output_dirs$tables,
       data_name = output_basename,
-      file_formats = c("xlsx", "qs2")
+      file_formats = c("xlsx", "qs2"),
+      include_date = TRUE,
+      n_saved = 3
     )
     output_rel_path <- .relative_path(fs::path(output_dirs$tables, output_basename))
     cli::cli_alert_success("Saved: {.file {output_rel_path}}")
@@ -821,12 +827,14 @@ run_mbg_indicator_pipeline <- function(
         language = "fr"
       )
 
-      # Write with data dictionary as second tab
+      # Write with data dictionary as second tab (versioned with date)
       sntutils::write_snt_data(
         obj = list(data = results$final_dataset, data_dict = combined_data_dict),
         path = output_dirs$tables,
         data_name = combined_basename,
-        file_formats = c("xlsx", "qs2")
+        file_formats = c("xlsx", "qs2"),
+        include_date = TRUE,
+        n_saved = 3
       )
       combined_rel_path <- .relative_path(
         fs::path(output_dirs$tables, combined_basename)
@@ -1146,6 +1154,51 @@ run_mbg_indicator_pipeline <- function(
       })
     },
 
+    fever = {
+      if (!"KR" %in% names(survey_data)) {
+        return(skip_indicator("Missing KR data (Children Recode)"))
+      }
+      tryCatch({
+        calc_fever_mbg(
+          dhs_kr = survey_data$KR,
+          gps_data = gps_data
+        )
+      }, error = function(e) {
+        results$skipped <<- glue::glue("Calculation error: {e$message}")
+        list()
+      })
+    },
+
+    malaria_dx = {
+      if (!"KR" %in% names(survey_data)) {
+        return(skip_indicator("Missing KR data (Children Recode)"))
+      }
+      tryCatch({
+        calc_malaria_dx_mbg(
+          dhs_kr = survey_data$KR,
+          gps_data = gps_data
+        )
+      }, error = function(e) {
+        results$skipped <<- glue::glue("Calculation error: {e$message}")
+        list()
+      })
+    },
+
+    antimalarial = {
+      if (!"KR" %in% names(survey_data)) {
+        return(skip_indicator("Missing KR data (Children Recode)"))
+      }
+      tryCatch({
+        calc_antimalarial_mbg(
+          dhs_kr = survey_data$KR,
+          gps_data = gps_data
+        )
+      }, error = function(e) {
+        results$skipped <<- glue::glue("Calculation error: {e$message}")
+        list()
+      })
+    },
+
     {
       # Unknown indicator
       return(skip_indicator(glue::glue("Unknown indicator category")))
@@ -1264,6 +1317,12 @@ run_mbg_indicator_pipeline <- function(
     labels <- list(numerator = "n_vaccinated", denominator = "n_children")
   } else if (grepl("^smc", ind_name)) {
     labels <- list(numerator = "n_received_smc", denominator = "n_children")
+  } else if (grepl("^fever", ind_name)) {
+    labels <- list(numerator = "n_fever", denominator = "n_children")
+  } else if (grepl("^malaria_dx", ind_name)) {
+    labels <- list(numerator = "n_tested", denominator = "n_febrile")
+  } else if (grepl("^antimalarial", ind_name)) {
+    labels <- list(numerator = "n_antimalarial", denominator = "n_febrile")
   }
 
   labels
@@ -1272,12 +1331,16 @@ run_mbg_indicator_pipeline <- function(
 
 #' Save Cluster Data to qs2 Files
 #'
-#' Saves cluster-level data for each indicator as separate qs2 files.
+#' Saves cluster-level data for each indicator as versioned qs2 files.
+#'
+#' Uses \code{sntutils::write_snt_data()} for date-stamped versioning
+#' and automatic pruning of older versions (keeps 3 newest by default).
 #'
 #' @param cluster_data Named list of data.tables from calc_*_mbg functions.
 #' @param output_dir Directory to save files.
 #' @param country_iso3 Three-letter ISO country code.
 #' @param survey_year Survey year.
+#' @param survey_type Survey type (e.g., "DHS", "MIS").
 #'
 #' @return Invisible character vector of saved file paths.
 #'
@@ -1289,8 +1352,6 @@ run_mbg_indicator_pipeline <- function(
   survey_year,
   survey_type = "DHS"
 ) {
-  if (!.check_qs2_pkg()) return(invisible(NULL))
-
   fs::dir_create(output_dir)
   saved_files <- character()
 
@@ -1315,16 +1376,23 @@ run_mbg_indicator_pipeline <- function(
       dt[, c("indicator", "samplesize") := NULL]
     }
 
-    # Naming: {country}_{indicator}_cluster_points_{type}_{year}.qs2
-    filename <- glue::glue(
-      "{tolower(country_iso3)}_{ind_name}_cluster_points_{tolower(survey_type)}_{survey_year}.qs2"
+    # Versioned save: {country}_{indicator}_cluster_points_{type}_{year}_v{date}.qs2
+    data_name <- glue::glue(
+      "{tolower(country_iso3)}_{ind_name}_cluster_points_{tolower(survey_type)}_{survey_year}"
     )
-    filepath <- fs::path(output_dir, filename)
+    data_name <- as.character(data_name)
 
-    qs2::qs_save(dt, filepath)
-    saved_files <- c(saved_files, filepath)
+    write_result <- sntutils::write_snt_data(
+      obj = dt,
+      path = output_dir,
+      data_name = data_name,
+      file_formats = "qs2",
+      include_date = TRUE,
+      n_saved = 3
+    )
+    saved_files <- c(saved_files, write_result$path)
 
-    rel_path <- .relative_path(filepath)
+    rel_path <- .relative_path(write_result$path)
     cli::cli_alert_success("Saved cluster data: {.file {rel_path}}")
   }
 
