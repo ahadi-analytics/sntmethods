@@ -3,6 +3,9 @@
 #' Prepares cluster-level vaccination coverage data for MBG analysis.
 #' Calculates coverage for standard EPI vaccines plus malaria vaccine.
 #'
+#' @details
+#' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/epi_dhs.yml}
+#'
 #' @param dhs_kr DHS Children's Recode (KR) dataset.
 #' @param gps_data DHS GPS dataset with cluster coordinates.
 #' @param indicators Character vector of vaccines to calculate:
@@ -62,14 +65,6 @@ calc_epi_mbg <- function(
 ) {
   # ---- Input validation ----
 
-  if (!is.data.frame(dhs_kr)) {
-    cli::cli_abort("`dhs_kr` must be a data.frame or tibble")
-  }
-
-  if (!is.data.frame(gps_data)) {
-    cli::cli_abort("`gps_data` must be a data.frame or tibble")
-  }
-
   valid_indicators <- c(
     "bcg", "dpt1", "dpt2", "dpt3",
     "polio1", "polio2", "polio3",
@@ -84,69 +79,16 @@ calc_epi_mbg <- function(
 
   # ---- Prepare GPS data ----
 
-  gps_clean <- gps_data |>
-    dplyr::transmute(
-      cluster_id = .data[[gps_vars$cluster]],
-      x = as.numeric(.data[[gps_vars$lon]]),
-      y = as.numeric(.data[[gps_vars$lat]])
-    ) |>
-    dplyr::filter(!is.na(x), !is.na(y), x != 0, y != 0) |>
-    dplyr::distinct()
-
-  cli::cli_alert_info(
-    "GPS data: {nrow(gps_clean)} clusters with valid coordinates"
-  )
+  gps_clean <- .prepare_gps_data(gps_data, gps_vars)
 
   # ---- Prepare KR data ----
 
-  # Build selection columns
-  select_cols <- c(survey_vars$cluster, survey_vars$age)
-
-  # Add vaccine columns that exist in data
-  vaccine_mapping <- list(
-    bcg = survey_vars$bcg,
-    dpt1 = survey_vars$dpt1, dpt2 = survey_vars$dpt2, dpt3 = survey_vars$dpt3,
-    polio1 = survey_vars$polio1, polio2 = survey_vars$polio2, polio3 = survey_vars$polio3,
-    measles1 = survey_vars$measles1, measles2 = survey_vars$measles2,
-    vita1 = survey_vars$vita1, vita2 = survey_vars$vita2,
-    malaria = survey_vars$malaria
+  kr <- .prepare_epi_data(
+    dhs_kr, survey_vars,
+    age_min_months = age_min_months,
+    age_max_months = age_max_months,
+    include_survey_vars = FALSE
   )
-
-  available_vaccines <- sapply(vaccine_mapping, function(v) v %in% names(dhs_kr))
-  available_vaccine_cols <- unlist(vaccine_mapping[available_vaccines])
-  select_cols <- c(select_cols, available_vaccine_cols)
-  select_cols <- unique(select_cols[select_cols %in% names(dhs_kr)])
-
-  kr <- dhs_kr |>
-    dplyr::select(dplyr::all_of(select_cols)) |>
-    dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
-    dplyr::mutate(dplyr::across(dplyr::everything(), as.vector)) |>
-    dplyr::rename(
-      cluster_id = !!survey_vars$cluster,
-      age_months = !!survey_vars$age
-    )
-
-  # Filter to eligible age range
-  kr <- kr |>
-    dplyr::filter(
-      age_months >= age_min_months,
-      age_months <= age_max_months
-    )
-
-  if (nrow(kr) == 0) {
-    cli::cli_abort("No eligible children found in age range {age_min_months}-{age_max_months} months")
-  }
-
-  cli::cli_alert_info(
-    "KR data: {format(nrow(kr), big.mark = ',')} children aged {age_min_months}-{age_max_months} months"
-  )
-
-  # ---- Helper function to check vaccination ----
-  # In DHS: 1 = vaccination card, 2 = reported by mother, 3 = both
-  # Values 1, 2, 3 all indicate child received vaccine
-  check_vaccinated <- function(x) {
-    as.integer(!is.na(x) & x %in% c(1, 2, 3))
-  }
 
   # ---- Calculate vaccine indicators ----
 
@@ -154,72 +96,33 @@ calc_epi_mbg <- function(
 
   for (ind in indicators) {
     if (ind == "fully_vaccinated") {
-      # Fully vaccinated = BCG + DPT3 + Polio3 + Measles1
-      required_vars <- c(
-        survey_vars$bcg, survey_vars$dpt3,
-        survey_vars$polio3, survey_vars$measles1
-      )
-
-      if (!all(required_vars %in% names(kr))) {
+      # Check that vax_fully_vaccinated was created by the helper
+      if (!"vax_fully_vaccinated" %in% names(kr)) {
         cli::cli_alert_warning(
           "Cannot calculate fully_vaccinated - missing required vaccine variables"
         )
         next
       }
 
-      kr_fv <- kr |>
-        dplyr::mutate(
-          has_bcg = check_vaccinated(.data[[survey_vars$bcg]]),
-          has_dpt3 = check_vaccinated(.data[[survey_vars$dpt3]]),
-          has_polio3 = check_vaccinated(.data[[survey_vars$polio3]]),
-          has_measles1 = check_vaccinated(.data[[survey_vars$measles1]]),
-          fully_vaccinated = as.integer(
-            has_bcg == 1 & has_dpt3 == 1 & has_polio3 == 1 & has_measles1 == 1
-          )
-        )
-
-      cluster_data <- kr_fv |>
-        dplyr::group_by(cluster_id) |>
-        dplyr::summarise(
-          indicator = sum(fully_vaccinated, na.rm = TRUE),
-          samplesize = dplyr::n(),
-          .groups = "drop"
-        ) |>
-        dplyr::inner_join(gps_clean, by = "cluster_id") |>
-        dplyr::filter(samplesize > 0)
-
-      results[["epi_fully_vaccinated"]] <- data.table::as.data.table(cluster_data)
-      cli::cli_alert_success("epi_fully_vaccinated: {nrow(cluster_data)} clusters")
+      result <- .aggregate_to_mbg_clusters(
+        kr, "vax_fully_vaccinated", gps_clean, "epi_fully_vaccinated"
+      )
+      if (!is.null(result)) results[["epi_fully_vaccinated"]] <- result
 
     } else {
       # Single vaccine indicator
-      var_name <- vaccine_mapping[[ind]]
+      vax_col <- paste0("vax_", ind)
 
-      if (!var_name %in% names(kr)) {
+      if (!vax_col %in% names(kr)) {
         cli::cli_alert_warning(
-          "Vaccine variable {.var {var_name}} for {ind} not found in data"
+          "Vaccine column {.var {vax_col}} for {ind} not available in prepared data"
         )
         next
       }
 
-      kr_vax <- kr |>
-        dplyr::mutate(
-          vaccinated = check_vaccinated(.data[[var_name]])
-        )
-
-      cluster_data <- kr_vax |>
-        dplyr::group_by(cluster_id) |>
-        dplyr::summarise(
-          indicator = sum(vaccinated, na.rm = TRUE),
-          samplesize = dplyr::n(),
-          .groups = "drop"
-        ) |>
-        dplyr::inner_join(gps_clean, by = "cluster_id") |>
-        dplyr::filter(samplesize > 0)
-
       result_name <- paste0("epi_", ind)
-      results[[result_name]] <- data.table::as.data.table(cluster_data)
-      cli::cli_alert_success("{result_name}: {nrow(cluster_data)} clusters")
+      result <- .aggregate_to_mbg_clusters(kr, vax_col, gps_clean, result_name)
+      if (!is.null(result)) results[[result_name]] <- result
     }
   }
 

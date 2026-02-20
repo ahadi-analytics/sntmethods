@@ -4,6 +4,9 @@
 #' Geostatistics (MBG) analysis. Aggregates to cluster counts WITHOUT survey
 #' weights - MBG handles spatial smoothing internally.
 #'
+#' @details
+#' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/itn_dhs.yml}
+#'
 #' @param dhs_hr DHS Household Records dataset.
 #' @param dhs_pr DHS Person Records dataset.
 #' @param gps_data DHS GPS dataset with cluster coordinates.
@@ -87,18 +90,6 @@ calc_itn_mbg <- function(
 ) {
   # ---- Input validation ----
 
-  if (!is.data.frame(dhs_hr)) {
-    cli::cli_abort("`dhs_hr` must be a data.frame or tibble")
-  }
-
-  if (!is.data.frame(dhs_pr)) {
-    cli::cli_abort("`dhs_pr` must be a data.frame or tibble")
-  }
-
-  if (!is.data.frame(gps_data)) {
-    cli::cli_abort("`gps_data` must be a data.frame or tibble")
-  }
-
   valid_indicators <- c(
     "ownership", "access", "use_all", "use_u5", "use_5_10",
     "use_10_20", "use_20plus", "use_pregnant", "use_if_access"
@@ -111,102 +102,15 @@ calc_itn_mbg <- function(
 
   # ---- Prepare GPS data ----
 
-  gps_clean <- gps_data |>
-    dplyr::transmute(
-      cluster_id = .data[[gps_vars$cluster]],
-      x = as.numeric(.data[[gps_vars$lon]]),
-      y = as.numeric(.data[[gps_vars$lat]])
-    ) |>
-    dplyr::filter(!is.na(x), !is.na(y), x != 0, y != 0) |>
-    dplyr::distinct()
-
-  cli::cli_alert_info(
-    "GPS data: {nrow(gps_clean)} clusters with valid coordinates"
-  )
+  gps_clean <- .prepare_gps_data(gps_data, gps_vars)
 
   # ---- Prepare HR data (household level) ----
 
-  # Find ITN variables
-  itn_vars <- names(dhs_hr)[grepl(paste0("^", survey_vars$itn_prefix), names(dhs_hr))]
+  hr <- .prepare_itn_household_data(dhs_hr, survey_vars, include_survey_vars = FALSE)
 
-  if (length(itn_vars) == 0) {
-    cli::cli_abort("No ITN variables found with prefix {.var {survey_vars$itn_prefix}}")
-  }
+  # ---- Prepare PR data (individual level with deterministic access) ----
 
-  cli::cli_alert_info("Found {length(itn_vars)} ITN variables")
-
-  hr <- dhs_hr |>
-    dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
-    dplyr::mutate(dplyr::across(dplyr::everything(), as.vector)) |>
-    # Calculate ITN count using pick() to stay within the pipe safely
-    dplyr::mutate(
-      n_itns = dplyr::pick(dplyr::all_of(itn_vars)) |>
-        dplyr::mutate(dplyr::across(dplyr::everything(), ~ dplyr::if_else(. == 1, 1L, 0L))) |>
-        rowSums(na.rm = TRUE)
-    ) |>
-    dplyr::transmute(
-      cluster_id = .data[[survey_vars$cluster]],
-      hhid = .data[[survey_vars$hhid]],
-      hh_size = .data[[survey_vars$hhsize]],
-      n_itns = n_itns,
-      has_itn = as.integer(n_itns >= 1),
-      potential_users = pmin(n_itns * 2, hh_size)
-    )
-
-  # ---- Prepare PR data (individual level) ----
-
-  pr <- dhs_pr |>
-    dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
-    dplyr::mutate(dplyr::across(dplyr::everything(), as.vector)) |>
-    dplyr::transmute(
-      cluster_id = .data[[survey_vars$cluster]],
-      hhid = .data[[survey_vars$hhid]],
-      age = .data[[survey_vars$age]],
-      sex = .data[[survey_vars$sex]],
-      itn_used = dplyr::if_else(
-        .data[[survey_vars$itn_use]] %in% c(1, 2),
-        1L, 0L,
-        missing = 0L
-      ),
-      is_pregnant = if (survey_vars$pregnant %in% names(dhs_pr)) {
-        dplyr::if_else(.data[[survey_vars$pregnant]] == 1, 1L, 0L, missing = 0L)
-      } else {
-        0L
-      }
-    )
-
-  # Merge household ITN info
-  pr <- pr |>
-    dplyr::left_join(
-      hr |> dplyr::select(cluster_id, hhid, hh_size, n_itns, potential_users),
-      by = c("cluster_id", "hhid")
-    )
-
-  # ---- Calculate ITN access using deterministic assignment ----
-  # Standard DHS methodology:
-  # 1. Sort individuals by ITN use (users first) within each household
-  # 2. Assign access to the first N individuals where N = potential_users
-  # This guarantees use <= access at the individual level
-  #
-  # IMPORTANT: hhid is only unique WITHIN a cluster, not globally.
-  # Must group by (cluster_id, hhid) to avoid mixing households across clusters.
-
-  pr <- pr |>
-    # Sort by cluster + household, then by ITN use (users first)
-    dplyr::arrange(cluster_id, hhid, dplyr::desc(itn_used)) |>
-    dplyr::group_by(cluster_id, hhid) |>
-    dplyr::mutate(
-      # Rank individuals within household (users get lower ranks)
-      person_index = dplyr::row_number(),
-      # Deterministic access: first N individuals get access
-      # Cap by both potential_users and hh_size defensively
-      has_access = dplyr::if_else(
-        !is.na(potential_users) & !is.na(hh_size) &
-          person_index <= pmin(potential_users, hh_size),
-        1L, 0L
-      )
-    ) |>
-    dplyr::ungroup()
+  pr <- .prepare_itn_person_data(dhs_pr, hr, survey_vars, include_survey_vars = FALSE)
 
   # ---- Calculate indicators ----
 
@@ -214,173 +118,64 @@ calc_itn_mbg <- function(
 
   # 1. Household ownership
   if ("ownership" %in% indicators) {
-    ownership_cluster <- hr |>
-      dplyr::group_by(cluster_id) |>
-      dplyr::summarise(
-        indicator = sum(has_itn, na.rm = TRUE),
-        samplesize = dplyr::n(),
-        .groups = "drop"
-      ) |>
-      dplyr::inner_join(gps_clean, by = "cluster_id") |>
-      dplyr::filter(samplesize > 0)
-
-    results[["itn_ownership"]] <- data.table::as.data.table(ownership_cluster)
-
-    cli::cli_alert_success(
-      "itn_ownership: {nrow(ownership_cluster)} clusters"
-    )
+    result <- .aggregate_to_mbg_clusters(hr, "has_itn", gps_clean, "itn_ownership")
+    if (!is.null(result)) results[["itn_ownership"]] <- result
   }
 
   # 2. Population access
   if ("access" %in% indicators) {
-    access_cluster <- pr |>
-      dplyr::group_by(cluster_id) |>
-      dplyr::summarise(
-        indicator = sum(has_access, na.rm = TRUE),
-        samplesize = dplyr::n(),
-        .groups = "drop"
-      ) |>
-      dplyr::inner_join(gps_clean, by = "cluster_id") |>
-      dplyr::filter(samplesize > 0)
-
-    results[["itn_access"]] <- data.table::as.data.table(access_cluster)
-
-    cli::cli_alert_success(
-      "itn_access: {nrow(access_cluster)} clusters"
-    )
+    result <- .aggregate_to_mbg_clusters(pr, "has_access", gps_clean, "itn_access")
+    if (!is.null(result)) results[["itn_access"]] <- result
   }
 
   # 3. Population use (all ages)
   if ("use_all" %in% indicators) {
-    use_cluster <- pr |>
-      dplyr::group_by(cluster_id) |>
-      dplyr::summarise(
-        indicator = sum(itn_used, na.rm = TRUE),
-        samplesize = dplyr::n(),
-        .groups = "drop"
-      ) |>
-      dplyr::inner_join(gps_clean, by = "cluster_id") |>
-      dplyr::filter(samplesize > 0)
-
-    results[["itn_use_all"]] <- data.table::as.data.table(use_cluster)
-
-    cli::cli_alert_success(
-      "itn_use_all: {nrow(use_cluster)} clusters"
-    )
+    result <- .aggregate_to_mbg_clusters(pr, "itn_used", gps_clean, "itn_use_all")
+    if (!is.null(result)) results[["itn_use_all"]] <- result
   }
 
   # 4. Under-5 use
   if ("use_u5" %in% indicators) {
     pr_u5 <- pr |> dplyr::filter(age < 5)
-
     if (nrow(pr_u5) > 0) {
-      u5_cluster <- pr_u5 |>
-        dplyr::group_by(cluster_id) |>
-        dplyr::summarise(
-          indicator = sum(itn_used, na.rm = TRUE),
-          samplesize = dplyr::n(),
-          .groups = "drop"
-        ) |>
-        dplyr::inner_join(gps_clean, by = "cluster_id") |>
-        dplyr::filter(samplesize > 0)
-
-      results[["itn_use_u5"]] <- data.table::as.data.table(u5_cluster)
-
-      cli::cli_alert_success(
-        "itn_use_u5: {nrow(u5_cluster)} clusters"
-      )
+      result <- .aggregate_to_mbg_clusters(pr_u5, "itn_used", gps_clean, "itn_use_u5")
+      if (!is.null(result)) results[["itn_use_u5"]] <- result
     }
   }
 
   # 5. Ages 5-10 use
   if ("use_5_10" %in% indicators) {
     pr_5_10 <- pr |> dplyr::filter(age >= 5, age <= 9)
-
     if (nrow(pr_5_10) > 0) {
-      age_cluster <- pr_5_10 |>
-        dplyr::group_by(cluster_id) |>
-        dplyr::summarise(
-          indicator = sum(itn_used, na.rm = TRUE),
-          samplesize = dplyr::n(),
-          .groups = "drop"
-        ) |>
-        dplyr::inner_join(gps_clean, by = "cluster_id") |>
-        dplyr::filter(samplesize > 0)
-
-      results[["itn_use_5_10"]] <- data.table::as.data.table(age_cluster)
-
-      cli::cli_alert_success(
-        "itn_use_5_10: {nrow(age_cluster)} clusters"
-      )
+      result <- .aggregate_to_mbg_clusters(pr_5_10, "itn_used", gps_clean, "itn_use_5_10")
+      if (!is.null(result)) results[["itn_use_5_10"]] <- result
     }
   }
 
   # 6. Ages 10-20 use
   if ("use_10_20" %in% indicators) {
     pr_10_20 <- pr |> dplyr::filter(age >= 10, age <= 19)
-
     if (nrow(pr_10_20) > 0) {
-      age_cluster <- pr_10_20 |>
-        dplyr::group_by(cluster_id) |>
-        dplyr::summarise(
-          indicator = sum(itn_used, na.rm = TRUE),
-          samplesize = dplyr::n(),
-          .groups = "drop"
-        ) |>
-        dplyr::inner_join(gps_clean, by = "cluster_id") |>
-        dplyr::filter(samplesize > 0)
-
-      results[["itn_use_10_20"]] <- data.table::as.data.table(age_cluster)
-
-      cli::cli_alert_success(
-        "itn_use_10_20: {nrow(age_cluster)} clusters"
-      )
+      result <- .aggregate_to_mbg_clusters(pr_10_20, "itn_used", gps_clean, "itn_use_10_20")
+      if (!is.null(result)) results[["itn_use_10_20"]] <- result
     }
   }
 
   # 7. Ages 20+ use
   if ("use_20plus" %in% indicators) {
     pr_20plus <- pr |> dplyr::filter(age >= 20)
-
     if (nrow(pr_20plus) > 0) {
-      age_cluster <- pr_20plus |>
-        dplyr::group_by(cluster_id) |>
-        dplyr::summarise(
-          indicator = sum(itn_used, na.rm = TRUE),
-          samplesize = dplyr::n(),
-          .groups = "drop"
-        ) |>
-        dplyr::inner_join(gps_clean, by = "cluster_id") |>
-        dplyr::filter(samplesize > 0)
-
-      results[["itn_use_20plus"]] <- data.table::as.data.table(age_cluster)
-
-      cli::cli_alert_success(
-        "itn_use_20plus: {nrow(age_cluster)} clusters"
-      )
+      result <- .aggregate_to_mbg_clusters(pr_20plus, "itn_used", gps_clean, "itn_use_20plus")
+      if (!is.null(result)) results[["itn_use_20plus"]] <- result
     }
   }
 
   # 8. Pregnant women use
   if ("use_pregnant" %in% indicators) {
     pr_preg <- pr |> dplyr::filter(is_pregnant == 1, sex == 2)
-
     if (nrow(pr_preg) > 0) {
-      preg_cluster <- pr_preg |>
-        dplyr::group_by(cluster_id) |>
-        dplyr::summarise(
-          indicator = sum(itn_used, na.rm = TRUE),
-          samplesize = dplyr::n(),
-          .groups = "drop"
-        ) |>
-        dplyr::inner_join(gps_clean, by = "cluster_id") |>
-        dplyr::filter(samplesize > 0)
-
-      results[["itn_use_pregnant"]] <- data.table::as.data.table(preg_cluster)
-
-      cli::cli_alert_success(
-        "itn_use_pregnant: {nrow(preg_cluster)} clusters"
-      )
+      result <- .aggregate_to_mbg_clusters(pr_preg, "itn_used", gps_clean, "itn_use_pregnant")
+      if (!is.null(result)) results[["itn_use_pregnant"]] <- result
     } else {
       cli::cli_alert_warning("No pregnant women found in data")
     }
@@ -389,23 +184,11 @@ calc_itn_mbg <- function(
   # 9. Use if access (proportion of those with access who used ITN)
   if ("use_if_access" %in% indicators) {
     pr_with_access <- pr |> dplyr::filter(has_access == 1)
-
     if (nrow(pr_with_access) > 0) {
-      use_if_access_cluster <- pr_with_access |>
-        dplyr::group_by(cluster_id) |>
-        dplyr::summarise(
-          indicator = sum(itn_used, na.rm = TRUE),
-          samplesize = dplyr::n(),
-          .groups = "drop"
-        ) |>
-        dplyr::inner_join(gps_clean, by = "cluster_id") |>
-        dplyr::filter(samplesize > 0)
-
-      results[["itn_use_if_access"]] <- data.table::as.data.table(use_if_access_cluster)
-
-      cli::cli_alert_success(
-        "itn_use_if_access: {nrow(use_if_access_cluster)} clusters"
+      result <- .aggregate_to_mbg_clusters(
+        pr_with_access, "itn_used", gps_clean, "itn_use_if_access"
       )
+      if (!is.null(result)) results[["itn_use_if_access"]] <- result
     } else {
       cli::cli_alert_warning("No individuals with access found in data")
     }

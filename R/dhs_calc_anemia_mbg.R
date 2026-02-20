@@ -4,6 +4,9 @@
 #' Supports multiple severity thresholds (mild, moderate, severe) and
 #' both cumulative and exclusive categories.
 #'
+#' @details
+#' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/anemia_dhs.yml}
+#'
 #' @param dhs_pr DHS Person Records dataset.
 #' @param gps_data DHS GPS dataset with cluster coordinates.
 #' @param indicators Character vector of indicators to calculate:
@@ -85,10 +88,6 @@ calc_anemia_mbg <- function(
 ) {
   # ---- Input validation ----
 
-  if (!is.data.frame(dhs_pr)) {
-    cli::cli_abort("`dhs_pr` must be a data.frame or tibble")
-  }
-
   if (!is.data.frame(gps_data)) {
     cli::cli_abort("`gps_data` must be a data.frame or tibble")
   }
@@ -102,91 +101,18 @@ calc_anemia_mbg <- function(
     cli::cli_abort("Invalid indicators: {.val {invalid}}")
   }
 
-  # Check hemoglobin variable
-  if (!survey_vars$hemoglobin %in% names(dhs_pr)) {
-    cli::cli_abort(
-      c(
-        "Hemoglobin variable {.var {survey_vars$hemoglobin}} not found",
-        "i" = "Anemia data may not be available in this survey"
-      )
-    )
-  }
-
   # ---- Prepare GPS data ----
 
-  gps_clean <- gps_data |>
-    dplyr::transmute(
-      cluster_id = .data[[gps_vars$cluster]],
-      x = as.numeric(.data[[gps_vars$lon]]),
-      y = as.numeric(.data[[gps_vars$lat]])
-    ) |>
-    dplyr::filter(!is.na(x), !is.na(y), x != 0, y != 0) |>
-    dplyr::distinct()
-
-  cli::cli_alert_info(
-    "GPS data: {nrow(gps_clean)} clusters with valid coordinates"
-  )
+  gps_clean <- .prepare_gps_data(gps_data, gps_vars)
 
   # ---- Prepare PR data ----
 
-  pr <- dhs_pr |>
-    dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
-    dplyr::mutate(dplyr::across(dplyr::everything(), as.vector)) |>
-    dplyr::transmute(
-      cluster_id = .data[[survey_vars$cluster]],
-      age = .data[[survey_vars$age]],
-      present = .data[[survey_vars$present]],
-      mother = .data[[survey_vars$mother]],
-      hb_raw = .data[[survey_vars$hemoglobin]]
-    ) |>
-    dplyr::filter(
-      present == 1,
-      mother == 1,
-      age >= age_min,
-      age <= age_max,
-      !is.na(hb_raw),
-      hb_raw < 900  # Valid range (exclude not tested, refused, etc.)
-    ) |>
-    dplyr::mutate(
-      # Convert from g/dL * 10 to g/dL
-      hemoglobin = hb_raw / 10
-    )
-
-  if (nrow(pr) == 0) {
-    cli::cli_abort("No eligible children with valid hemoglobin data found")
-  }
-
-  cli::cli_alert_info(
-    "PR data: {format(nrow(pr), big.mark = ',')} children with Hb measurements"
+  pr <- .prepare_anemia_data(
+    dhs_pr, survey_vars, age_min, age_max,
+    include_survey_vars = FALSE
   )
 
-  # ---- Calculate anemia indicators ----
-
-  # Define thresholds (g/dL)
-  threshold_any <- 11      # Any anemia
-  threshold_moderate <- 10 # Moderate or worse
-  threshold_severe <- 8    # Severe
-
-  pr <- pr |>
-    dplyr::mutate(
-      # Cumulative categories
-      has_any_anemia = as.integer(hemoglobin < threshold_any),
-      has_moderate_plus = as.integer(hemoglobin < threshold_moderate),
-      has_severe = as.integer(hemoglobin < threshold_severe),
-
-      # Exclusive categories
-      has_mild_only = as.integer(
-        hemoglobin >= threshold_moderate & hemoglobin < threshold_any
-      ),
-      has_moderate_only = as.integer(
-        hemoglobin >= threshold_severe & hemoglobin < threshold_moderate
-      ),
-      has_severe_only = as.integer(hemoglobin < threshold_severe)
-    )
-
   # ---- Aggregate to cluster level ----
-
-  results <- list()
 
   indicator_map <- list(
     any = "has_any_anemia",
@@ -206,26 +132,15 @@ calc_anemia_mbg <- function(
     severe_only = "anemia_severe_only"
   )
 
+  results <- list()
+
   for (ind in indicators) {
-    var_name <- indicator_map[[ind]]
-    result_name <- result_names[[ind]]
-
-    cluster_data <- pr |>
-      dplyr::group_by(cluster_id) |>
-      dplyr::summarise(
-        indicator = sum(.data[[var_name]], na.rm = TRUE),
-        samplesize = dplyr::n(),
-        .groups = "drop"
-      ) |>
-      dplyr::inner_join(gps_clean, by = "cluster_id") |>
-      dplyr::filter(samplesize > 0)
-
-    results[[result_name]] <- data.table::as.data.table(cluster_data)
-
-    cli::cli_alert_success(
-      "{result_name}: {nrow(cluster_data)} clusters, ",
-      "{sum(cluster_data$indicator)} / {sum(cluster_data$samplesize)} anemic"
+    cluster_dt <- .aggregate_to_mbg_clusters(
+      pr, indicator_map[[ind]], gps_clean, result_names[[ind]]
     )
+    if (!is.null(cluster_dt)) {
+      results[[result_names[[ind]]]] <- cluster_dt
+    }
   }
 
   if (length(results) == 0) {

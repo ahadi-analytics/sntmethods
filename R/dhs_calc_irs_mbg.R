@@ -4,6 +4,9 @@
 #' Model-Based Geostatistics (MBG) analysis. Calculates the proportion of
 #' households sprayed in the last 12 months.
 #'
+#' @details
+#' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/irs_dhs.yml}
+#'
 #' @param dhs_hr DHS Household Records dataset.
 #' @param gps_data DHS GPS dataset with cluster coordinates.
 #' @param survey_vars Named list mapping DHS variable names.
@@ -46,76 +49,27 @@ calc_irs_mbg <- function(
 ) {
   # ---- Input validation ----
 
-  if (!is.data.frame(dhs_hr)) {
-    cli::cli_abort("`dhs_hr` must be a data.frame or tibble")
-  }
-
   if (!is.data.frame(gps_data)) {
     cli::cli_abort("`gps_data` must be a data.frame or tibble")
   }
 
-  # Check IRS variable exists
-  if (!survey_vars$irs %in% names(dhs_hr)) {
-    cli::cli_abort(
-      c(
-        "IRS variable {.var {survey_vars$irs}} not found in HR data",
-        "i" = "IRS coverage data may not be available for this survey"
-      )
-    )
-  }
-
   # ---- Prepare GPS data ----
 
-  gps_clean <- gps_data |>
-    dplyr::transmute(
-      cluster_id = .data[[gps_vars$cluster]],
-      x = as.numeric(.data[[gps_vars$lon]]),
-      y = as.numeric(.data[[gps_vars$lat]])
-    ) |>
-    dplyr::filter(!is.na(x), !is.na(y), x != 0, y != 0) |>
-    dplyr::distinct()
-
-  cli::cli_alert_info(
-    "GPS data: {nrow(gps_clean)} clusters with valid coordinates"
-  )
+  gps_clean <- .prepare_gps_data(gps_data, gps_vars)
 
   # ---- Prepare HR data ----
 
-  hr <- dhs_hr |>
-    dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
-    dplyr::mutate(dplyr::across(dplyr::everything(), as.vector)) |>
-    dplyr::transmute(
-      cluster_id = .data[[survey_vars$cluster]],
-      irs_sprayed = .data[[survey_vars$irs]]
-    ) |>
-    dplyr::filter(!is.na(irs_sprayed)) |>
-    dplyr::mutate(
-      # hv253: 0 = No, 1 = Yes
-      sprayed = as.integer(irs_sprayed == 1)
-    )
-
-  cli::cli_alert_info(
-    "HR data: {format(nrow(hr), big.mark = ',')} households with valid IRS data"
-  )
+  hr <- .prepare_irs_data(dhs_hr, survey_vars, include_survey_vars = FALSE)
 
   # ---- Aggregate to cluster level ----
 
-  irs_cluster <- hr |>
-    dplyr::group_by(cluster_id) |>
-    dplyr::summarise(
-      indicator = sum(sprayed, na.rm = TRUE),
-      samplesize = dplyr::n(),
-      .groups = "drop"
-    ) |>
-    dplyr::inner_join(gps_clean, by = "cluster_id") |>
-    dplyr::filter(samplesize > 0)
+  result <- .aggregate_to_mbg_clusters(hr, "sprayed", gps_clean, "irs_coverage")
 
-  cli::cli_alert_success(
-    "IRS coverage: {nrow(irs_cluster)} clusters, ",
-    "{sum(irs_cluster$indicator)} sprayed / {sum(irs_cluster$samplesize)} households"
-  )
+  if (is.null(result)) {
+    cli::cli_abort("No valid MBG data could be prepared for IRS coverage")
+  }
 
-  data.table::as.data.table(irs_cluster)
+  result
 }
 
 

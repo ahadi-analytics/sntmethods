@@ -3,6 +3,9 @@
 #' Prepares cluster-level Seasonal Malaria Chemoprevention (SMC) receipt data
 #' for MBG analysis. SMC coverage among children under 5.
 #'
+#' @details
+#' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/smc_dhs.yml}
+#'
 #' @param dhs_kr DHS Children's Recode (KR) dataset.
 #' @param gps_data DHS GPS dataset with cluster coordinates.
 #' @param survey_vars Named list mapping DHS variable names.
@@ -53,103 +56,29 @@ calc_smc_mbg <- function(
 ) {
   # ---- Input validation ----
 
-  if (!is.data.frame(dhs_kr)) {
-    cli::cli_abort("`dhs_kr` must be a data.frame or tibble")
-  }
-
   if (!is.data.frame(gps_data)) {
     cli::cli_abort("`gps_data` must be a data.frame or tibble")
   }
 
-  # Determine which SMC variable to use
-  smc_var <- NULL
-
-  if (survey_vars$smc_primary %in% names(dhs_kr)) {
-    smc_var <- survey_vars$smc_primary
-    cli::cli_alert_info("Using SMC variable: {.var {smc_var}} (primary)")
-  } else if (survey_vars$smc_alt %in% names(dhs_kr)) {
-    smc_var <- survey_vars$smc_alt
-    cli::cli_alert_info("Using SMC variable: {.var {smc_var}} (alternative)")
-  } else {
-    cli::cli_abort(
-      c(
-        "No SMC variable found in data",
-        "i" = "Checked for: {.var {survey_vars$smc_primary}}, {.var {survey_vars$smc_alt}}",
-        "i" = "SMC data may not be available for this survey"
-      )
-    )
-  }
-
   # ---- Prepare GPS data ----
 
-  gps_clean <- gps_data |>
-    dplyr::transmute(
-      cluster_id = .data[[gps_vars$cluster]],
-      x = as.numeric(.data[[gps_vars$lon]]),
-      y = as.numeric(.data[[gps_vars$lat]])
-    ) |>
-    dplyr::filter(!is.na(x), !is.na(y), x != 0, y != 0) |>
-    dplyr::distinct()
-
-  cli::cli_alert_info(
-    "GPS data: {nrow(gps_clean)} clusters with valid coordinates"
-  )
+  gps_clean <- .prepare_gps_data(gps_data, gps_vars)
 
   # ---- Prepare KR data ----
 
-  kr <- dhs_kr |>
-    dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
-    dplyr::mutate(dplyr::across(dplyr::everything(), as.vector)) |>
-    dplyr::transmute(
-      cluster_id = .data[[survey_vars$cluster]],
-      age_months = .data[[survey_vars$age]],
-      smc_receipt = .data[[smc_var]]
-    )
-
-  # Filter to U5 children
-  kr <- kr |>
-    dplyr::filter(
-      age_months >= 0,
-      age_months <= 59
-    )
-
-  # Filter valid SMC responses
-  # Typically: 0=No, 1=Yes, 8/9=Don't know
-  kr <- kr |>
-    dplyr::filter(
-      !is.na(smc_receipt),
-      smc_receipt %in% c(0, 1)
-    ) |>
-    dplyr::mutate(
-      received_smc = as.integer(smc_receipt == 1)
-    )
-
-  if (nrow(kr) == 0) {
-    cli::cli_abort("No eligible children with valid SMC data found")
-  }
-
-  cli::cli_alert_info(
-    "KR data: {format(nrow(kr), big.mark = ',')} children with SMC data"
-  )
+  kr <- .prepare_smc_data(dhs_kr, survey_vars, include_survey_vars = FALSE)
 
   # ---- Aggregate to cluster level ----
 
-  smc_cluster <- kr |>
-    dplyr::group_by(cluster_id) |>
-    dplyr::summarise(
-      indicator = sum(received_smc, na.rm = TRUE),
-      samplesize = dplyr::n(),
-      .groups = "drop"
-    ) |>
-    dplyr::inner_join(gps_clean, by = "cluster_id") |>
-    dplyr::filter(samplesize > 0)
-
-  cli::cli_alert_success(
-    "SMC coverage: {nrow(smc_cluster)} clusters, ",
-    "{sum(smc_cluster$indicator)} received / {sum(smc_cluster$samplesize)} children"
+  result <- .aggregate_to_mbg_clusters(
+    kr, "received_smc", gps_clean, "smc_coverage"
   )
 
-  data.table::as.data.table(smc_cluster)
+  if (is.null(result)) {
+    cli::cli_abort("No valid MBG data could be prepared for SMC coverage")
+  }
+
+  result
 }
 
 

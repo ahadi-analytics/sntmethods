@@ -4,6 +4,9 @@
 #' Geostatistics (MBG) analysis. Aggregates individual test results to cluster
 #' counts WITHOUT survey weights - MBG handles spatial smoothing internally.
 #'
+#' @details
+#' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/pfpr_dhs.yml}
+#'
 #' @param dhs_pr DHS Person Records dataset (data.frame or tibble).
 #' @param gps_data DHS GPS dataset with cluster coordinates.
 #' @param test_type Character. Type of test: "rdt", "mic", "both" (default),
@@ -94,99 +97,19 @@ calc_pfpr_mbg <- function(
 
   # ---- Input validation ----
 
-  if (!is.data.frame(dhs_pr)) {
-    cli::cli_abort("`dhs_pr` must be a data.frame or tibble")
-  }
-
-  if (!is.data.frame(gps_data)) {
-    cli::cli_abort("`gps_data` must be a data.frame or tibble")
-  }
-
-  if (nrow(dhs_pr) == 0) {
-    cli::cli_abort("`dhs_pr` is empty")
-  }
-
-  if (nrow(gps_data) == 0) {
-    cli::cli_abort("`gps_data` is empty")
-  }
-
   test_type <- match.arg(test_type, c("rdt", "mic", "both", "either"))
-
-  # Check required columns
-  required_cols <- c(
-    survey_vars$cluster,
-    survey_vars$age,
-    survey_vars$present,
-    survey_vars$mother
-  )
-
-  if (test_type %in% c("rdt", "both", "either")) {
-    required_cols <- c(required_cols, survey_vars$rdt)
-  }
-
-  if (test_type %in% c("mic", "both", "either")) {
-    required_cols <- c(required_cols, survey_vars$mic)
-  }
-
-  missing_cols <- setdiff(required_cols, names(dhs_pr))
-
-  if (length(missing_cols) > 0) {
-    cli::cli_abort("Required columns not found: {.var {missing_cols}}")
-  }
-
-  # Check GPS columns
-  gps_cols <- c(gps_vars$cluster, gps_vars$lat, gps_vars$lon)
-  missing_gps <- setdiff(gps_cols, names(gps_data))
-
-  if (length(missing_gps) > 0) {
-    cli::cli_abort("GPS columns not found: {.var {missing_gps}}")
-  }
 
   # ---- Prepare GPS data ----
 
-  gps_clean <- gps_data |>
-    dplyr::transmute(
-      cluster_id = .data[[gps_vars$cluster]],
-      x = as.numeric(.data[[gps_vars$lon]]),
-      y = as.numeric(.data[[gps_vars$lat]])
-    ) |>
-    dplyr::filter(
-      !is.na(x),
-      !is.na(y),
-      x != 0,
-      y != 0
-    ) |>
-    dplyr::distinct()
-
-  cli::cli_alert_info(
-    "GPS data: {nrow(gps_clean)} clusters with valid coordinates"
-  )
+  gps_clean <- .prepare_gps_data(gps_data, gps_vars)
 
   # ---- Prepare PR data ----
-
-  pr <- dhs_pr |>
-    dplyr::mutate(
-      dplyr::across(dplyr::everything(), haven::zap_labels)
-    ) |>
-    dplyr::mutate(
-      dplyr::across(dplyr::everything(), as.vector)
-    ) |>
-    dplyr::transmute(
-      cluster_id = .data[[survey_vars$cluster]],
-      age = .data[[survey_vars$age]],
-      present = .data[[survey_vars$present]],
-      mother = .data[[survey_vars$mother]],
-      rdt_res = if (survey_vars$rdt %in% names(dhs_pr)) {
-        .data[[survey_vars$rdt]]
-      } else {
-        NA_real_
-      },
-      mic_res = if (survey_vars$mic %in% names(dhs_pr)) {
-        .data[[survey_vars$mic]]
-      } else {
-        NA_real_
-      }
-    )
+  # Use very wide age range; age filtering happens per age group in the loop
+  pr <- .prepare_pfpr_data(
+    dhs_pr, survey_vars,
+    age_min = 0, age_max = 999,
+    include_survey_vars = FALSE
+  )
 
   # ---- Process each age group and test type ----
 
@@ -227,24 +150,11 @@ calc_pfpr_mbg <- function(
 
       if (nrow(pr_rdt) > 0) {
         result_name <- paste0("pfpr_rdt_", age_name)
-
-        rdt_cluster <- pr_rdt |>
-          dplyr::group_by(cluster_id) |>
-          dplyr::summarise(
-            indicator = sum(positive, na.rm = TRUE),
-            samplesize = dplyr::n(),
-            .groups = "drop"
-          ) |>
-          dplyr::inner_join(gps_clean, by = "cluster_id") |>
-          dplyr::filter(samplesize > 0)
-
-        if (nrow(rdt_cluster) > 0) {
-          results[[result_name]] <- data.table::as.data.table(rdt_cluster)
-
-          cli::cli_alert_success(
-            "{result_name}: {nrow(rdt_cluster)} clusters, ",
-            "{sum(rdt_cluster$indicator)} positive / {sum(rdt_cluster$samplesize)} tested"
-          )
+        rdt_cluster <- .aggregate_to_mbg_clusters(
+          pr_rdt, "positive", gps_clean, result_name
+        )
+        if (!is.null(rdt_cluster)) {
+          results[[result_name]] <- rdt_cluster
         }
       }
     }
@@ -260,24 +170,11 @@ calc_pfpr_mbg <- function(
 
       if (nrow(pr_mic) > 0) {
         result_name <- paste0("pfpr_mic_", age_name)
-
-        mic_cluster <- pr_mic |>
-          dplyr::group_by(cluster_id) |>
-          dplyr::summarise(
-            indicator = sum(positive, na.rm = TRUE),
-            samplesize = dplyr::n(),
-            .groups = "drop"
-          ) |>
-          dplyr::inner_join(gps_clean, by = "cluster_id") |>
-          dplyr::filter(samplesize > 0)
-
-        if (nrow(mic_cluster) > 0) {
-          results[[result_name]] <- data.table::as.data.table(mic_cluster)
-
-          cli::cli_alert_success(
-            "{result_name}: {nrow(mic_cluster)} clusters, ",
-            "{sum(mic_cluster$indicator)} positive / {sum(mic_cluster$samplesize)} tested"
-          )
+        mic_cluster <- .aggregate_to_mbg_clusters(
+          pr_mic, "positive", gps_clean, result_name
+        )
+        if (!is.null(mic_cluster)) {
+          results[[result_name]] <- mic_cluster
         }
       }
     }
@@ -295,24 +192,11 @@ calc_pfpr_mbg <- function(
 
       if (nrow(pr_either) > 0) {
         result_name <- paste0("pfpr_either_", age_name)
-
-        either_cluster <- pr_either |>
-          dplyr::group_by(cluster_id) |>
-          dplyr::summarise(
-            indicator = sum(positive, na.rm = TRUE),
-            samplesize = dplyr::n(),
-            .groups = "drop"
-          ) |>
-          dplyr::inner_join(gps_clean, by = "cluster_id") |>
-          dplyr::filter(samplesize > 0)
-
-        if (nrow(either_cluster) > 0) {
-          results[[result_name]] <- data.table::as.data.table(either_cluster)
-
-          cli::cli_alert_success(
-            "{result_name}: {nrow(either_cluster)} clusters, ",
-            "{sum(either_cluster$indicator)} positive / {sum(either_cluster$samplesize)} tested"
-          )
+        either_cluster <- .aggregate_to_mbg_clusters(
+          pr_either, "positive", gps_clean, result_name
+        )
+        if (!is.null(either_cluster)) {
+          results[[result_name]] <- either_cluster
         }
       }
     }
