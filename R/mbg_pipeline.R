@@ -1373,7 +1373,8 @@ run_mbg_indicator_pipeline <- function(
       data.table::set(dt, j = "prop_raw", value = dt$indicator / dt$samplesize)
 
       # Drop raw 'indicator' and 'samplesize' columns (redundant with named aliases)
-      dt[, c("indicator", "samplesize") := NULL]
+      data.table::set(dt, j = "indicator", value = NULL)
+      data.table::set(dt, j = "samplesize", value = NULL)
     }
 
     # Versioned save: {country}_{indicator}_cluster_points_{type}_{year}_v{date}.qs2
