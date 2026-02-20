@@ -48,11 +48,16 @@ variables:
       1: "Yes"
 
   act_treatment:
-    dhs_name: "ml13e"
+    dhs_name: "ml13e (or h37e in older surveys)"
     description: "Child received ACT (artemisinin-based combination therapy)"
     values:
       0: "No"
       1: "Yes"
+    fallback: >
+      When ml13e is absent, sntmethods uses h37e ("Combination with artemisinin
+      taken for fever/cough") as the ACT variable. This occurs in older DHS
+      surveys such as BFA 2021 which use the h37* drug series instead of ml13*.
+      Detection is automatic at runtime.
 
   malaria_test:
     dhs_name: "ml13a"
@@ -77,7 +82,14 @@ methodology:
   wmr_cascade_context: >
     ACT is step 4 (final step) of the WMR care-seeking cascade:
     Fever (h22) -> Sought care (CSB, h32 series) -> Diagnosed (MALARIA_DX, h47) ->
-    Treated (ANTIMALARIAL, ml13 series) -> Received ACT (ml13e).
+    Treated (ANTIMALARIAL, ml13 series or h37 series) -> Received ACT (ml13e or h37e).
+
+  variable_detection: >
+    sntmethods auto-detects the ACT variable at runtime:
+    (1) ml13e preferred — used when present (DHS Phase 7+, most surveys ~2015+).
+    (2) h37e fallback — used when ml13e absent (older surveys, e.g. BFA 2021).
+        h37e = "Combination with artemisinin taken for fever/cough".
+    Similarly, the full antimalarial series uses ml13a-h (primary) or h37a-h (fallback).
 
   wmr_act_levels: >
     WMR computes ACT receipt at multiple levels:

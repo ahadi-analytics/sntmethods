@@ -19,6 +19,7 @@ data_sources:
   primary: "KR (Children's Recode)"
 
 variables:
+  # --- Primary series: ml13* (DHS Phase 7+, most surveys from ~2015 onwards) ---
   drugs_act:
     dhs_name: "ml13e"
     description: "ACT (artemisinin-based combination therapy)"
@@ -52,6 +53,37 @@ variables:
       The actual DHS variable name varies by survey. Check the survey-specific
       recode manual for the appropriate variable.
 
+  # --- Fallback series: h37* (older DHS surveys, e.g. BFA 2021) ---
+  # When ml13* variables are absent, sntmethods auto-detects h37a-h as the
+  # drug-specific treatment series for child fever/cough.
+  # IMPORTANT: ml1 is NOT a valid fallback — in BFA 2021, ml1 = "Times took
+  # Fansidar during pregnancy" (IPTp), not child fever treatment.
+  fallback_act:
+    dhs_name: "h37e"
+    description: "Artemisinin combination taken for fever/cough (older surveys)"
+    note: "Equivalent to ml13e in newer surveys. Used when ml13e is absent."
+  fallback_cq:
+    dhs_name: "h37b"
+    description: "Chloroquine taken for fever/cough (older surveys)"
+    note: "Equivalent to ml13a in newer surveys."
+  fallback_qn:
+    dhs_name: "h37d"
+    description: "Quinine taken for fever/cough (older surveys)"
+    note: "Equivalent to ml13b in newer surveys."
+  fallback_aq:
+    dhs_name: "h37c"
+    description: "Amodiaquine taken for fever/cough (older surveys)"
+    note: "Equivalent to ml13c in newer surveys."
+  fallback_sp:
+    dhs_name: "h37a"
+    description: "SP/Fansidar taken for fever/cough (older surveys)"
+    note: >
+      Used for fever treatment. Distinct from ml1 which records SP taken
+      during pregnancy (IPTp) — do not confuse these two variables.
+  fallback_other:
+    dhs_name: "h37h"
+    description: "Other antimalarial taken for fever/cough (older surveys)"
+
 eligibility:
   - "Child age 0-59 months"
   - "Child had fever in last 2 weeks (h22 == 1)"
@@ -66,7 +98,14 @@ methodology:
   cascade_position: >
     Antimalarial treatment is step 3 of the care-seeking cascade:
     Fever (h22) -> Sought care (CSB, h32 series) -> Diagnosed (MALARIA_DX, h47) ->
-    Treated (ANTIMALARIAL, ml13 series) -> Received ACT (ml13e).
+    Treated (ANTIMALARIAL, ml13 series or h37 series) -> Received ACT (ml13e or h37e).
+
+  variable_detection: >
+    sntmethods auto-detects the available drug series at runtime:
+    (1) ml13* preferred — used when present (DHS Phase 7+, most surveys ~2015+).
+    (2) h37a-h fallback — used when ml13* absent (older DHS surveys, e.g. BFA 2021).
+    (3) ml1 is NOT used as a fallback. In some surveys (e.g. BFA 2021), ml1 encodes
+        "Times took Fansidar during pregnancy" (an IPTp variable), not child treatment.
 
   relationship_to_act: >
     ACT (ml13e) is a SUBSET of antimalarial treatment. All ACT
