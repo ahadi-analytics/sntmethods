@@ -1,8 +1,8 @@
-title: "IRS MBG Indicator Preparation"
-version: "1.0.0"
+title: "IRS DHS Indicator Methodology"
+version: "1.1.0"
 description: >
-  Prepares cluster-level Indoor Residual Spraying (IRS) coverage data for
-  MBG analysis. Calculates proportion of households sprayed in last 12 months.
+  Methodology for estimating Indoor Residual Spraying (IRS) coverage from
+  DHS data. Calculates proportion of households sprayed in last 12 months.
 
 indicators:
   irs_coverage:
@@ -68,6 +68,11 @@ methodology:
     IRS coverage varies seasonally and may depend on spray campaign timing
     relative to survey dates. Consider survey timing when interpreting
     spatial patterns.
+
+  wmr_note: >
+    IRS is NOT included in the WMR DHS analysis debug scripts (2a_functions).
+    IRS coverage (hv253) is typically reported at the household level and
+    analyzed separately from the fever/treatment cascade.
 
 validation:
   - "hv253 must be 0 or 1 (exclude missing/don't know)"

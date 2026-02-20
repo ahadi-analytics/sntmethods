@@ -10,7 +10,11 @@ NULL
 
 #' Run MBG Indicator Pipeline
 #'
-#' Orchestrates the full MBG processing pipeline for DHS indicators:
+#' Orchestrates the full MBG processing pipeline for DHS indicators.
+#' See indicator-specific methodology files at
+#' \url{https://github.com/ahadi-analytics/sntmethods/tree/master/inst/methods}
+#'
+#' Pipeline steps:
 #' 1. Discovers available surveys
 #' 2. Loads survey data
 #' 3. Prepares cluster-level data for each indicator
@@ -65,6 +69,7 @@ NULL
 #'     \item "irs": IRS coverage
 #'     \item "anc": ANC attendance
 #'     \item "csb": Care-seeking behavior
+#'     \item "act": ACT treatment (case management)
 #'     \item "anemia": Anemia prevalence
 #'     \item "iptp": IPTp doses
 #'     \item "epi": EPI vaccination
@@ -231,7 +236,7 @@ run_mbg_indicator_pipeline <- function(
   # ---- Input Validation ----
 
   # Validate indicator names
-  valid_indicators <- c("pfpr", "itn", "irs", "anc", "csb", "anemia", "iptp", "epi", "u5mr", "smc")
+  valid_indicators <- c("pfpr", "itn", "irs", "anc", "csb", "act", "anemia", "iptp", "epi", "u5mr", "smc")
   invalid_indicators <- setdiff(indicators, valid_indicators)
   if (length(invalid_indicators) > 0) {
     cli::cli_abort(c(
@@ -454,6 +459,7 @@ run_mbg_indicator_pipeline <- function(
     irs = "HR",
     anc = "IR",
     csb = "KR",
+    act = "KR",
     anemia = "PR",
     iptp = "IR",
     epi = "KR",
@@ -1040,6 +1046,22 @@ run_mbg_indicator_pipeline <- function(
       })
     },
 
+    act = {
+      if (!"KR" %in% names(survey_data)) {
+        return(skip_indicator("Missing KR data (Children Recode)"))
+      }
+      tryCatch({
+        calc_act_mbg(
+          dhs_kr = survey_data$KR,
+          gps_data = gps_data,
+          indicators = c("act", "act_tested")
+        )
+      }, error = function(e) {
+        results$skipped <<- glue::glue("Calculation error: {e$message}")
+        list()
+      })
+    },
+
     anemia = {
       if (!"PR" %in% names(survey_data)) {
         return(skip_indicator("Missing PR data (Person Recode)"))
@@ -1228,6 +1250,8 @@ run_mbg_indicator_pipeline <- function(
     labels <- list(numerator = "n_deaths", denominator = "n_exposed")
   } else if (grepl("^anc", ind_name)) {
     labels <- list(numerator = "n_with_visits", denominator = "n_women")
+  } else if (grepl("^act", ind_name)) {
+    labels <- list(numerator = "n_received_act", denominator = "n_febrile")
   } else if (grepl("^csb_", ind_name)) {
     labels <- list(numerator = "n_sought_care", denominator = "n_febrile")
   } else if (grepl("^anemia", ind_name)) {

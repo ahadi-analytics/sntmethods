@@ -1,0 +1,90 @@
+title: "Antimalarial Treatment — WMR Methodology Reference"
+version: "1.0.0"
+description: >
+  Documents the WMR approach to antimalarial treatment receipt among
+  febrile children. Captures receipt of ANY antimalarial drug, of which
+  ACT (ml13e) is a subset.
+
+indicators:
+  antimalarial:
+    name: "Received any antimalarial"
+    numerator: "Febrile children who received any antimalarial drug"
+    denominator: "Children under 5 with fever"
+    description: >
+      Proportion of febrile U5 children who received any antimalarial,
+      including ACT, chloroquine, quinine, amodiaquine, SP/Fansidar,
+      artesunate, primaquine, or mefloquine.
+
+data_sources:
+  primary: "KR (Children's Recode)"
+
+variables:
+  drugs_act:
+    dhs_name: "ml13e"
+    description: "ACT (artemisinin-based combination therapy)"
+  drugs_cq:
+    dhs_name: "ml13a"
+    description: "Chloroquine"
+  drugs_qn:
+    dhs_name: "ml13b"
+    description: "Quinine"
+  drugs_aq:
+    dhs_name: "ml13c"
+    description: "Amodiaquine"
+  drugs_as:
+    dhs_name: "ml13d"
+    description: "Artesunate"
+  drugs_sp:
+    dhs_name: "ml13aa"
+    description: "SP/Fansidar"
+  drugs_pq:
+    dhs_name: "ml13f"
+    description: "Primaquine (variable may vary by survey)"
+  drugs_mq:
+    dhs_name: "ml13g"
+    description: "Mefloquine (variable may vary by survey)"
+
+  drugs_antimalarial:
+    dhs_name: "varies by survey"
+    description: "Other antimalarial (catch-all variable)"
+    note: >
+      WMR includes this as a catch-all in the receive_antimalarial formula.
+      The actual DHS variable name varies by survey. Check the survey-specific
+      recode manual for the appropriate variable.
+
+eligibility:
+  - "Child age 0-59 months"
+  - "Child had fever in last 2 weeks (h22 == 1)"
+
+methodology:
+  wmr_approach: >
+    WMR defines receive_antimalarial = 1 if ANY of the ml13 drug
+    variables equals 1. Computed overall and stratified by CSB category
+    (public, CHW, private, pharmacy, trained provider, any treatment,
+    no treatment) and by sociodemographic factors.
+
+  cascade_position: >
+    Antimalarial treatment is step 3 of the care-seeking cascade:
+    Fever (h22) -> Sought care (CSB, h32 series) -> Diagnosed (MALARIA_DX, h47) ->
+    Treated (ANTIMALARIAL, ml13 series) -> Received ACT (ml13e).
+
+  relationship_to_act: >
+    ACT (ml13e) is a SUBSET of antimalarial treatment. All ACT
+    recipients are antimalarial recipients, but not vice versa.
+    WMR computes ACT as a proportion of antimalarial recipients
+    at each CSB level (e.g., ACT among those who received any
+    antimalarial from public sector).
+
+  survey_design: >
+    svydesign(id=~cluster, weights=~weight, strata=~strata, nest=TRUE).
+    svyciprop for proportions. options(survey.lonely.psu = "adjust").
+
+status: "reference_only"
+note: >
+  Documented for WMR methodology reference. Not yet implemented
+  as a standalone function in sntmethods. The ACT-specific indicators
+  are implemented in calc_act_dhs() and the MBG variant calc_act_mbg().
+
+references:
+  - "WHO World Malaria Report - Antimalarial treatment"
+  - "DHS Guide to Statistics - Treatment of fever"

@@ -1,7 +1,7 @@
-title: "ANC MBG Indicator Preparation"
-version: "1.0.0"
+title: "ANC DHS Indicator Methodology"
+version: "1.1.0"
 description: >
-  Prepares cluster-level Antenatal Care (ANC) attendance data for MBG analysis.
+  Methodology for estimating Antenatal Care (ANC) attendance from DHS data.
   Calculates proportion of women with recent births who received specified
   number of ANC visits.
 

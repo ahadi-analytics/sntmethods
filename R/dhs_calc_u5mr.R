@@ -5,6 +5,9 @@
 #' and shapefile are provided, joins spatial data to assign admin boundaries
 #' to each child record before calculating U5MR at the specified admin level.
 #'
+#' @details
+#' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/u5mr_dhs.yml}
+#'
 #' @param dhs_kr dhs children's recode (KR) dataset in tidy format
 #'   (data.frame or tibble).
 #' @param survey_vars named list mapping dhs variable names. required keys:

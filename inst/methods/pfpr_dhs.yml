@@ -1,9 +1,8 @@
-title: "PfPR MBG Indicator Preparation"
-version: "1.0.0"
+title: "PfPR DHS Indicator Methodology"
+version: "1.1.0"
 description: >
-  Prepares cluster-level malaria parasite prevalence data for MBG analysis.
-  Aggregates individual test results to cluster counts without survey weights.
-  MBG handles spatial smoothing internally.
+  Methodology for estimating malaria parasite prevalence (PfPR) from DHS data.
+  Cluster-level counts are used as input for MBG spatial smoothing.
 
 indicators:
   pfpr_rdt_u5:
@@ -24,17 +23,17 @@ indicators:
       Malaria parasite prevalence measured by microscopy among children
       6-59 months of age. Only P. falciparum infections counted as positive.
 
-  pfpr_rdt_5_9:
-    name: "PfPR by RDT (children 5-9 years)"
+  pfpr_rdt_5_10:
+    name: "PfPR by RDT (children 5-10 years)"
     numerator: "Number of RDT-positive children"
     denominator: "Number of children tested by RDT"
-    age_range_months: [60, 119]
+    age_range_months: [60, 120]
 
-  pfpr_mic_5_9:
-    name: "PfPR by microscopy (children 5-9 years)"
+  pfpr_mic_5_10:
+    name: "PfPR by microscopy (children 5-10 years)"
     numerator: "Number of microscopy-positive children"
     denominator: "Number of children tested by microscopy"
-    age_range_months: [60, 119]
+    age_range_months: [60, 120]
 
   pfpr_rdt_u10:
     name: "PfPR by RDT (children 6 months - 10 years)"
@@ -122,6 +121,14 @@ variables:
     dhs_name: "LONGNUM"
     description: "Longitude coordinate (WGS84)"
 
+  malaria_diagnosis:
+    dhs_name: "h47"
+    description: "Blood taken from child for malaria testing (KR file)"
+    note: >
+      WMR uses h47 as the MALARIA_DX indicator — whether a diagnostic test
+      was performed. This is distinct from hml35/hml32 which measure test
+      results. h47 is in KR, hml35/hml32 are in PR.
+
 eligibility:
   - "Child age within specified range (e.g., 6-59 months for u5)"
   - "Present in household (hv103 == 1)"
@@ -138,14 +145,13 @@ output_format:
   note: >
     One row per cluster with valid GPS coordinates. Clusters with zero
     tested children are excluded. This format is ready for direct input
-    to mbg::MbgModelRunner.
+    to MBG spatial modeling.
 
 methodology:
   survey_weights: >
-    MBG prep functions do NOT use survey weights. The MBG model handles
-    spatial smoothing and uncertainty estimation internally. Survey weights
-    are appropriate for direct survey estimates (see calc_pfpr_dhs()) but
-    not for spatial modeling inputs.
+    For DHS direct estimates, survey weights are applied via svydesign().
+    For MBG spatial modeling inputs, unweighted cluster counts are used
+    as MBG handles spatial smoothing and uncertainty internally.
 
   aggregation: >
     Simple counts aggregated at cluster level. Numerator = sum of positive
@@ -153,9 +159,17 @@ methodology:
 
   age_groups: >
     Multiple age groups supported to enable analysis of different populations.
-    Standard groups include: u5 (6-59m), 5-9 (60-119m), u10 (6-119m), and
+    Standard groups include: u5 (6-59m), 5-10 (60-120m), u10 (6-119m), and
     2-10 (24-119m). The 2-10 age group aligns with MAP standard for
     cross-country comparison.
+
+  wmr_comparison: >
+    WMR uses hml35 (RDT) as primary and refers to the indicator as
+    MALARIA_PARASITES. The variable malaria_parasite in WMR derives from
+    hml35. WMR denominates on children 6-59 months selected for parasite
+    screening with non-missing results. WMR also stratifies by age group,
+    wealth, sex, residence, and education using svyciprop. The sntmethods
+    MBG approach uses unweighted cluster counts for spatial modeling input.
 
 validation:
   - "Age range must be valid (min < max, both non-negative)"

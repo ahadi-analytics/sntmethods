@@ -1,7 +1,7 @@
-title: "Anemia MBG Indicator Preparation"
-version: "1.0.0"
+title: "Anemia DHS Indicator Methodology"
+version: "1.1.0"
 description: >
-  Prepares cluster-level anemia prevalence data for MBG analysis.
+  Methodology for estimating anemia prevalence from DHS data.
   Supports multiple severity thresholds and both cumulative and exclusive
   categories for children 6-59 months.
 
@@ -74,6 +74,31 @@ variables:
       Stored as g/dL * 10 (e.g., 110 = 11.0 g/dL). Values >= 900 indicate
       not tested, refused, or other missing values.
 
+  anemia_level:
+    dhs_name: "hw57"
+    description: "DHS anemia classification level (CATEGORICAL — not a hemoglobin value)"
+    values:
+      1: "Severe"
+      2: "Moderate"
+      3: "Mild"
+      4: "Not anemic"
+    note: >
+      Alternative to hc56 threshold approach. WMR uses this classification
+      directly, creating binary anemia_yno = any anemia (severe/moderate/mild)
+      vs not anemic. The hc56 threshold approach gives more flexibility for
+      cumulative/exclusive categories.
+    warning: >
+      hw57 is CATEGORICAL, not a continuous hemoglobin value. Do not apply
+      numeric thresholds (e.g., < 80) to hw57. For altitude-adjusted
+      hemoglobin as a continuous value, use hw53 instead.
+
+  hemoglobin_alt:
+    dhs_name: "hw53"
+    description: "Hemoglobin level altitude-adjusted (PR file variant)"
+    note: >
+      WMR uses hw53 from the PR file (altitude-adjusted). The sntmethods
+      implementation uses hc56 which is the HC module equivalent.
+
   gps_cluster:
     dhs_name: "DHSCLUST"
 
@@ -130,6 +155,14 @@ output_format:
     samplesize: "Total children with valid Hb"
     x: "Longitude"
     y: "Latitude"
+
+  wmr_comparison: >
+    WMR uses anemia_clasif (derived from hw57) with categories "severe",
+    "moderate", "mild", "not anemic". WMR computes binary anemia_yno = any
+    anemia vs not anemic. WMR stratifies by age group (6m intervals),
+    wealth, sex, residence, and education using svyciprop. The sntmethods
+    implementation uses hc56 (hemoglobin value) with numeric thresholds,
+    which gives more flexibility for cumulative/exclusive categories.
 
 references:
   - "WHO. Haemoglobin concentrations for anemia diagnosis. 2011."

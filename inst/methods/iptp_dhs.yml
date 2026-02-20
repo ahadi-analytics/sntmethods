@@ -1,8 +1,9 @@
-title: "IPTp MBG Indicator Preparation"
-version: "1.0.0"
+title: "IPTp DHS Indicator Methodology"
+version: "1.1.0"
 description: >
-  Prepares cluster-level Intermittent Preventive Treatment in pregnancy (IPTp)
-  data for MBG analysis. Supports cumulative and exclusive dose categories.
+  Methodology for estimating IPTp (Intermittent Preventive Treatment in
+  pregnancy) indicators from DHS data. Supports cumulative and exclusive
+  dose categories.
 
 indicators:
   cumulative:
@@ -57,12 +58,30 @@ variables:
 
   sp_doses:
     dhs_name: "m49a_1"
-    description: "Number of SP/Fansidar doses during pregnancy"
+    description: "SP/Fansidar during pregnancy (interpretation varies by approach)"
     values:
       0: "None"
       1-7: "Number of doses"
       90+: "Don't know / Other"
-    note: "_1 suffix indicates most recent pregnancy"
+    note: >
+      _1 suffix indicates most recent pregnancy. The MBG approach uses m49a_1
+      as a numeric dose count directly. The DHS survey-weighted approach treats
+      m49a_1 as binary (SP taken at all: yes/no) and uses ml1_1 for the
+      actual dose count.
+
+  sp_dose_count:
+    dhs_name: "ml1_1"
+    description: "Number of SP/Fansidar doses (used by DHS survey-weighted approach)"
+    note: >
+      Used in the DHS survey-weighted implementation for counting doses.
+      The MBG approach uses m49a_1 directly instead.
+
+  child_age_months:
+    dhs_name: "b19_01"
+    description: "Age of most recent child in months (used for birth window filtering)"
+    note: >
+      Alternative to computing birth window from v008 - b3_01. Some DHS
+      implementations use b19_01 directly for the recency filter.
 
   gps_cluster:
     dhs_name: "DHSCLUST"
@@ -92,6 +111,11 @@ methodology:
     received at least N doses. Exclusive indicators count women who
     received exactly N doses.
 
+  birth_window: >
+    Default birth window: 36 months for MBG, 24 months for DHS survey-weighted
+    estimation. The wider MBG window maximizes spatial data availability; the
+    narrower DHS window focuses on more recent pregnancies.
+
 output_format:
   columns:
     cluster_id: "Cluster identifier"
@@ -99,6 +123,11 @@ output_format:
     samplesize: "Total eligible women"
     x: "Longitude"
     y: "Latitude"
+
+  wmr_note: >
+    IPTp is NOT included in the WMR DHS analysis debug scripts (2a_functions).
+    IPTp is typically analyzed separately from the fever/treatment cascade.
+    Uses m49a_1 from the IR file, which is standard DHS methodology.
 
 references:
   - "WHO. Updated WHO policy recommendation: IPTp-SP. 2012."

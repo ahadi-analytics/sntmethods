@@ -1,0 +1,193 @@
+title: "Care-Seeking Behavior DHS Indicator Methodology"
+version: "1.1.0"
+description: >
+  Methodology for estimating care-seeking behavior indicators from DHS data.
+  Measures where/whether care was sought for febrile children under 5.
+  Aligned with WHO World Malaria Report care-seeking cascade methodology.
+
+indicators:
+  csb_any:
+    name: "Sought any care"
+    numerator: "Febrile children who sought care anywhere"
+    denominator: "Children under 5 with fever in last 2 weeks"
+    description: >
+      Proportion of U5 children with fever who sought care from any source.
+      Equivalent to WMR CSB_ANY_TREATMENT.
+
+  csb_public:
+    name: "Sought public sector care"
+    numerator: "Febrile children who sought care at public facility or CHW"
+    denominator: "Children under 5 with fever in last 2 weeks"
+    description: >
+      Proportion who sought care at public health facilities or from
+      community health workers. WMR also computes csb_public_nochw
+      (public excluding CHW) as a separate subcategory.
+
+  csb_private:
+    name: "Sought private sector care"
+    numerator: "Febrile children who sought care at private facility"
+    denominator: "Children under 5 with fever in last 2 weeks"
+    description: >
+      Proportion who sought care from private sector (formal, informal,
+      or pharmacy).
+
+  csb_private_formal:
+    name: "Sought care at private formal facility"
+    numerator: "Febrile children who sought care at private hospital/clinic"
+    denominator: "Children under 5 with fever in last 2 weeks"
+    description: >
+      Proportion who sought care from private hospitals, clinics, or doctors.
+      Excludes pharmacies and informal providers.
+    note: "Available in DHS survey-weighted output. For MBG, aggregated into csb_private."
+
+  csb_pharmacy:
+    name: "Sought care at pharmacy"
+    numerator: "Febrile children who sought care at pharmacy/drug shop"
+    denominator: "Children under 5 with fever in last 2 weeks"
+    description: >
+      Proportion who sought care from pharmacies or drug shops.
+    note: "Available in DHS survey-weighted output. For MBG, aggregated into csb_private."
+
+  csb_private_formal_pha:
+    name: "Sought care at private formal or pharmacy"
+    numerator: "Febrile children who sought care at private formal facility or pharmacy"
+    denominator: "Children under 5 with fever in last 2 weeks"
+    description: >
+      Union of private formal and pharmacy. Used by WMR as a combined category.
+    note: "Available in DHS survey-weighted output. For MBG, aggregated into csb_private."
+
+  csb_private_informal:
+    name: "Sought care from informal private source"
+    numerator: "Febrile children who sought care from traditional/informal provider"
+    denominator: "Children under 5 with fever in last 2 weeks"
+    description: >
+      Proportion who sought care from traditional practitioners, shops,
+      markets, or other informal sources.
+    note: "Available in DHS survey-weighted output. For MBG, aggregated into csb_private."
+
+  csb_chw:
+    name: "Sought care from community health worker"
+    numerator: "Febrile children who sought care from CHW/NGO"
+    denominator: "Children under 5 with fever in last 2 weeks"
+    description: >
+      Proportion who sought care from community health workers or NGO
+      sector providers.
+    note: "Available in DHS survey-weighted output. For MBG, aggregated into csb_public."
+
+  csb_trained:
+    name: "Sought care from trained provider"
+    numerator: "Febrile children who sought care from trained provider"
+    denominator: "Children under 5 with fever in last 2 weeks"
+    description: >
+      Proportion who sought care from public, CHW, private formal, or pharmacy
+      (excludes informal providers). Equivalent to WMR CSB_TRAINED_PROVIDER.
+
+  csb_none:
+    name: "No care sought"
+    numerator: "Febrile children who did not seek care"
+    denominator: "Children under 5 with fever in last 2 weeks"
+    description: >
+      Proportion who did not seek any care for fever. This is the complement
+      of csb_any (csb_any + csb_none = 1). Equivalent to WMR CSB_NOTREATMENT.
+
+data_sources:
+  primary: "KR (Children's Recode)"
+  gps: "GE (Geographic)"
+
+variables:
+  cluster_id:
+    dhs_name: "v001"
+    description: "Cluster/enumeration area identifier"
+
+  age:
+    dhs_name: "hw1"
+    description: "Child's age in months"
+
+  fever:
+    dhs_name: "h22"
+    description: "Child had fever in last 2 weeks"
+    values:
+      0: "No"
+      1: "Yes"
+
+  treatment_sources:
+    prefix: "h32"
+    description: >
+      Series of variables (h32a through h32x) indicating where treatment
+      was sought. Value of 1 means source was visited.
+
+csb_classification:
+  public:
+    description: "Government health facilities"
+    variables: ["h32a", "h32b", "h32c", "h32d", "h32e", "h32f", "h32g", "h32h", "h32i"]
+
+  chw:
+    description: "Community health workers / NGO sector"
+    variables: ["h32na", "h32nb", "h32nc", "h32nd", "h32ne"]
+
+  private_formal:
+    description: "Private hospitals, clinics, doctors"
+    variables: ["h32j", "h32k", "h32l", "h32m"]
+
+  private_informal:
+    description: "Traditional practitioners, other informal"
+    variables: ["h32s", "h32t", "h32u"]
+
+  pharmacy:
+    description: "Pharmacies and drug shops"
+    variables: ["h32n", "h32o", "h32p", "h32q", "h32r"]
+
+eligibility:
+  - "Child age 0-59 months"
+  - "Child had fever in last 2 weeks (h22 == 1)"
+  - "Cluster has valid GPS coordinates"
+
+methodology:
+  overlapping_indicators: >
+    IMPORTANT: Care-seeking indicators (except none) are NOT mutually exclusive.
+    A child can be counted in both public AND private if they visited both
+    sectors. Only csb_any and csb_none are mutually exclusive.
+
+  derived_indicators:
+    csb_public: "public OR chw"
+    csb_public_nochw: "public only (excluding CHW) — WMR subcategory"
+    csb_chw: "CHW/NGO providers only"
+    csb_private: "private_formal OR private_informal OR pharmacy"
+    csb_private_formal: "private hospitals, clinics, doctors only"
+    csb_pharmacy: "pharmacies and drug shops only"
+    csb_private_formal_pha: "private_formal OR pharmacy"
+    csb_private_informal: "traditional/informal providers only"
+    csb_trained: "public OR chw OR private_formal OR pharmacy"
+    csb_any: "visited ANY source (any h32 == 1)"
+    csb_none: "NOT(csb_any)"
+
+  wmr_cascade_context: >
+    Care-seeking is step 1 of the WMR care-seeking cascade:
+    Fever (h22) -> Sought care (CSB, h32 series) -> Diagnosed (MALARIA_DX, h47) ->
+    Treated (ANTIMALARIAL, ml13 series) -> Received ACT (ml13e).
+    ACT indicators are now in a separate file (act_dhs.yml).
+
+  wmr_stratification: >
+    WMR computes CSB at multiple levels: (1) overall among febrile children,
+    (2) by residence (urban/rural), (3) csb_any by sociodemographic factors
+    (wealth, sex, education), (4) subcategories among those who sought ANY
+    treatment (conditional on csb_any == 1).
+
+  survey_design: >
+    WMR uses svydesign(id=~cluster, weights=~weight, strata=~strata, nest=TRUE)
+    with svyciprop for proportions. options(survey.lonely.psu = "adjust").
+    Note: sntmethods R functions use survey::svymean() for all DHS estimates,
+    while WMR reference code uses survey::svyciprop() for binary indicators.
+    Both produce valid point estimates; CIs differ slightly.
+
+output_format:
+  columns:
+    cluster_id: "Cluster identifier"
+    indicator: "Numerator count"
+    samplesize: "Denominator count"
+    x: "Longitude"
+    y: "Latitude"
+
+references:
+  - "WHO World Malaria Report - Care seeking methodology"
+  - "DHS Guide to Statistics - Treatment seeking"

@@ -1,0 +1,116 @@
+title: "ACT Treatment DHS Indicator Methodology"
+version: "1.0.0"
+description: >
+  Methodology for estimating ACT (artemisinin-based combination therapy)
+  treatment indicators from DHS data. Extracted from care-seeking behavior
+  as a separate indicator category aligned with the WMR care-seeking cascade.
+
+indicators:
+  act:
+    name: "Received ACT among febrile children"
+    numerator: "Febrile children who received ACT"
+    denominator: "Children under 5 with fever and non-missing ACT response"
+    description: >
+      Proportion of U5 children with fever in last 2 weeks who received ACT.
+      WMR also computes this stratified by CSB category (e.g., ACT among
+      those who sought public care) and by sociodemographic factors.
+
+  act_tested:
+    name: "Received ACT among test-positive children"
+    numerator: "Test-positive febrile children who received ACT"
+    denominator: >
+      Children under 5 with fever where ml13a == 1. NOTE: ml13a is chloroquine
+      in standard DHS recode. This usage assumes ml13a has been recoded or
+      repurposed as a test-positive indicator in the specific survey being analyzed.
+      WMR uses h47 (malaria_dx) for the diagnosed denominator.
+    description: >
+      Proportion receiving ACT among children filtered by ml13a == 1.
+      More restrictive denominator than act.
+
+data_sources:
+  primary: "KR (Children's Recode)"
+  gps: "GE (Geographic)"
+
+variables:
+  cluster_id:
+    dhs_name: "v001"
+    description: "Cluster/enumeration area identifier"
+
+  age:
+    dhs_name: "hw1"
+    description: "Child's age in months"
+
+  fever:
+    dhs_name: "h22"
+    description: "Child had fever in last 2 weeks"
+    values:
+      0: "No"
+      1: "Yes"
+
+  act_treatment:
+    dhs_name: "ml13e"
+    description: "Child received ACT (artemisinin-based combination therapy)"
+    values:
+      0: "No"
+      1: "Yes"
+
+  malaria_test:
+    dhs_name: "ml13a"
+    description: >
+      Chloroquine (standard DHS ml13a). NOTE: In the sntmethods implementation,
+      this variable is repurposed as a proxy filter for the act_tested denominator.
+      In standard DHS recode, ml13a is chloroquine — verify actual meaning per survey.
+      The correct variable for "blood taken for malaria testing" is h47.
+    values:
+      0: "No"
+      1: "Yes"
+    note: "Used as denominator filter for act_tested indicator"
+
+eligibility:
+  - "Child age 0-59 months"
+  - "Child had fever in last 2 weeks (h22 == 1)"
+  - "Non-missing ACT response for act indicator"
+  - "ml13a == 1 for act_tested indicator (NOTE: ml13a is chloroquine in standard DHS)"
+  - "Cluster has valid GPS coordinates"
+
+methodology:
+  wmr_cascade_context: >
+    ACT is step 4 (final step) of the WMR care-seeking cascade:
+    Fever (h22) -> Sought care (CSB, h32 series) -> Diagnosed (MALARIA_DX, h47) ->
+    Treated (ANTIMALARIAL, ml13 series) -> Received ACT (ml13e).
+
+  wmr_act_levels: >
+    WMR computes ACT receipt at multiple levels:
+    (1) among all febrile children (denominator: fever==yes),
+    (2) among those who sought any treatment (denominator: csb_any==1),
+    (3) among those who received any antimalarial (denominator: receive_antimalarial==1),
+    (4) among those diagnosed with malaria (denominator: csb_any==1 & malaria_dx==yes).
+    This package implements level (1) as the act indicator and a variant of (4)
+    using ml13a as the act_tested indicator.
+
+  antimalarial_variables: >
+    WMR defines "received any antimalarial" as ANY of: ml13e (ACT), ml13a
+    (chloroquine), ml13b (quinine), ml13c (amodiaquine), ml13d (artesunate),
+    ml13aa (SP/Fansidar), primaquine, mefloquine, and drugs_antimalarial
+    (a catch-all "other antimalarial" variable whose DHS name varies by survey).
+    The act indicator uses only ml13e.
+
+  survey_design: >
+    WMR uses svydesign(id=~cluster, weights=~weight, strata=~strata, nest=TRUE)
+    with svyciprop for proportions. options(survey.lonely.psu = "adjust").
+    For MBG spatial modeling, unweighted cluster counts are used instead.
+    Note: sntmethods R functions use survey::svymean() for all DHS estimates,
+    while WMR reference code uses survey::svyciprop() for binary indicators.
+    Both produce valid point estimates; CIs differ slightly.
+
+output_format:
+  columns:
+    cluster_id: "Cluster identifier"
+    indicator: "Numerator count"
+    samplesize: "Denominator count"
+    x: "Longitude"
+    y: "Latitude"
+
+references:
+  - "WHO World Malaria Report - ACT treatment indicators"
+  - "DHS Guide to Statistics - Antimalarial treatment"

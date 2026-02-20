@@ -1,9 +1,8 @@
-title: "ITN MBG Indicator Preparation"
-version: "1.0.0"
+title: "ITN DHS Indicator Methodology"
+version: "1.1.0"
 description: >
-  Prepares cluster-level ITN (Insecticide-Treated Net) data for MBG analysis.
+  Methodology for estimating ITN (Insecticide-Treated Net) indicators from DHS data.
   Supports ownership, access, and use indicators across multiple age groups.
-  Aggregates to cluster counts without survey weights.
 
 indicators:
   itn_ownership:
@@ -23,7 +22,7 @@ indicators:
     description: >
       Proportion of de facto household members with access to an ITN.
       Access is calculated as min(ITNs * 2, household_size) / household_size.
-      For MBG, probabilistic assignment converts this to binary (0/1).
+      For spatial modeling, probabilistic assignment converts this to binary (0/1).
 
   itn_use_all:
     name: "Population ITN use (all ages)"
@@ -44,18 +43,18 @@ indicators:
       Proportion of children under 5 years of age who slept under
       an ITN the night before the survey.
 
-  itn_use_5_9:
-    name: "ITN use among children 5-9 years"
-    numerator: "Number of children 5-9 who slept under ITN"
-    denominator: "Total children 5-9"
-    age_range_years: [5, 9]
+  itn_use_5_10:
+    name: "ITN use among children 5-10 years"
+    numerator: "Number of children 5-10 who slept under ITN"
+    denominator: "Total children 5-10"
+    age_range_years: [5, 10]
     level: "individual"
 
-  itn_use_10_19:
-    name: "ITN use among adolescents 10-19 years"
+  itn_use_10_20:
+    name: "ITN use among adolescents 10-20 years"
     numerator: "Number of adolescents who slept under ITN"
-    denominator: "Total adolescents 10-19"
-    age_range_years: [10, 19]
+    denominator: "Total adolescents 10-20"
+    age_range_years: [10, 20]
     level: "individual"
 
   itn_use_20plus:
@@ -64,6 +63,24 @@ indicators:
     denominator: "Total adults 20+"
     age_range_years: [20, null]
     level: "individual"
+
+  itn_use_if_access:
+    name: "ITN use among those with access"
+    numerator: "Number of individuals with access who slept under ITN"
+    denominator: "Number of individuals with ITN access"
+    level: "individual"
+    description: >
+      Proportion of individuals with ITN access who actually used an ITN.
+      Measures behavioral gap between access and use.
+
+  itn_sufficient:
+    name: "Household has sufficient ITNs"
+    numerator: "Number of households with >= 1 ITN per 2 people"
+    denominator: "Total number of households"
+    level: "household"
+    description: >
+      Proportion of households with enough ITNs (at least 1 per 2 members).
+      WMR calls this enough_itn.
 
   itn_use_pregnant:
     name: "ITN use among pregnant women"
@@ -159,6 +176,23 @@ methodology:
     Age is in completed years (hv105). Age groups are defined by boundaries.
     Each person is counted in exactly one age group.
 
+  wmr_comparison: >
+    WMR computes with_itn (household has >=1 ITN), enough_itn (>=1 ITN per
+    2 people), and access (population-level continuous 0-1). Key distinction:
+    WMR uses svymean for access (continuous variable) but svyciprop for all
+    other ITN indicators (binary). ITN access is the ONLY indicator in the
+    WMR suite that uses svymean instead of svyciprop. WMR also computes use
+    indicators: use (all population), chu5y_use (U5 children), preg_use
+    (pregnant women), stratified by wealth and residence.
+
+  survey_design: >
+    svydesign(id=~cluster, weights=~weight, strata=~strata, nest=TRUE).
+    svyciprop for binary indicators, svymean for access.
+    options(survey.lonely.psu = "adjust").
+    Note: sntmethods R functions use survey::svymean() for all DHS estimates,
+    while WMR reference code uses survey::svyciprop() for binary indicators.
+    Both produce valid point estimates; CIs differ slightly.
+
 output_format:
   columns:
     cluster_id: "Cluster identifier"
@@ -168,7 +202,7 @@ output_format:
     y: "Latitude"
   note: >
     One row per cluster with valid GPS coordinates. This format is
-    ready for direct input to mbg::MbgModelRunner.
+    ready for direct input to MBG spatial modeling.
 
 validation:
   - "Household size must be positive"

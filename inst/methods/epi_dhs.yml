@@ -1,7 +1,7 @@
-title: "EPI (Vaccination) MBG Indicator Preparation"
-version: "1.0.0"
+title: "EPI (Vaccination) DHS Indicator Methodology"
+version: "1.1.0"
 description: >
-  Prepares cluster-level vaccination coverage data for MBG analysis.
+  Methodology for estimating vaccination coverage from DHS data.
   Supports standard EPI vaccines plus malaria vaccine.
 
 indicators:

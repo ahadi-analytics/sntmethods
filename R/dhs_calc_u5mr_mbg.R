@@ -4,6 +4,9 @@
 #' Splits birth histories into age-specific cohorts for separate modeling,
 #' then combines into composite U5MR.
 #'
+#' @details
+#' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/u5mr_dhs.yml}
+#'
 #' @param dhs_br DHS Birth Recode dataset.
 #' @param gps_data DHS GPS dataset with cluster coordinates.
 #' @param age_groups Named list of age group boundaries in months. Default:

@@ -1,0 +1,73 @@
+title: "Malaria Diagnosis — WMR Methodology Reference"
+version: "1.0.0"
+description: >
+  Documents the WMR approach to malaria diagnostic testing among
+  febrile children. Measures whether blood was taken for malaria testing.
+  Distinct from PfPR which measures test results.
+
+indicators:
+  malaria_dx:
+    name: "Had blood taken for malaria test"
+    numerator: "Febrile children who had blood taken"
+    denominator: "Children under 5 with fever"
+    description: >
+      Proportion of febrile U5 children who had blood taken from finger
+      or heel for malaria testing. WMR computes this overall and
+      stratified by CSB category.
+
+data_sources:
+  primary: "KR (Children's Recode)"
+
+variables:
+  malaria_dx:
+    dhs_name: "h47"
+    description: "Blood taken from child for malaria testing"
+    values:
+      0: "No"
+      1: "Yes"
+
+  fever:
+    dhs_name: "h22"
+    description: "Child had fever in last 2 weeks"
+
+eligibility:
+  - "Child age 0-59 months"
+  - "Child had fever in last 2 weeks (h22 == 1)"
+
+methodology:
+  wmr_approach: >
+    WMR computes MALARIA_DX stratified by CSB category (overall, any
+    treatment, trained provider, public, CHW, private, pharmacy, etc.)
+    and by sociodemographic factors (wealth, sex, residence, education).
+    Also computed among those receiving antimalarials to assess whether
+    treatment was guided by diagnostic testing.
+
+  wmr_denominators: >
+    WMR computes malaria_dx with three types of denominators:
+    (1) all febrile children, (2) febrile children who sought treatment
+    from specific provider types, (3) febrile children who received
+    antimalarials from specific provider types.
+
+  cascade_position: >
+    Diagnosis is step 2 of the care-seeking cascade:
+    Fever (h22) -> Sought care (CSB, h32 series) -> Diagnosed (MALARIA_DX, h47) ->
+    Treated (ANTIMALARIAL, ml13 series) -> Received ACT (ml13e).
+
+  distinction_from_pfpr: >
+    MALARIA_DX (h47) measures whether a diagnostic TEST was performed.
+    PfPR (hml35/hml32) measures the RESULT of parasitological testing.
+    These are different indicators from different DHS modules. h47 is
+    in KR (Children's Recode), hml35/hml32 are in PR (Person Recode).
+
+  survey_design: >
+    svydesign(id=~cluster, weights=~weight, strata=~strata, nest=TRUE).
+    svyciprop for proportions. options(survey.lonely.psu = "adjust").
+
+status: "reference_only"
+note: >
+  Documented for WMR methodology reference. Not yet implemented
+  as a standalone function in sntmethods.
+
+references:
+  - "WHO World Malaria Report - Diagnostic testing indicators"
+  - "DHS Guide to Statistics"

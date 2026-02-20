@@ -1,11 +1,10 @@
-title: "Under-5 Mortality Rate (U5MR) MBG Model Framework"
-version: "1.0.0"
+title: "Under-5 Mortality Rate (U5MR) DHS Indicator Methodology"
+version: "1.1.0"
 description: >
- Defines the methodology for estimating spatially-smoothed Under-5 Mortality Rate
- (U5MR) using Model-Based Geostatistics (MBG) applied to DHS birth history data.
- U5MR is modeled as a composite of age-specific mortality risks, with separate
- MBG models fitted for each age group and combined using survival probability
- multiplication.
+ Methodology for estimating Under-5 Mortality Rate (U5MR) from DHS birth
+ history data. U5MR is modeled as a composite of age-specific mortality risks.
+ For spatial smoothing, separate MBG models are fitted for each age group
+ and combined using survival probability multiplication.
 
 indicator:
  name: "Under-5 Mortality Rate (U5MR)"

@@ -1,8 +1,8 @@
-title: "SMC MBG Indicator Preparation"
-version: "1.0.0"
+title: "SMC DHS Indicator Methodology"
+version: "1.1.0"
 description: >
-  Prepares cluster-level Seasonal Malaria Chemoprevention (SMC) receipt data
-  for MBG analysis. Measures proportion of U5 children who received SMC.
+  Methodology for estimating Seasonal Malaria Chemoprevention (SMC) receipt
+  from DHS data. Measures proportion of U5 children who received SMC.
 
 indicators:
   smc_receipt:
