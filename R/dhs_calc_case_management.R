@@ -314,10 +314,55 @@ calc_case_management_dhs <- function(
     "Case management cascade complete: {length(cascade_rows)} of {length(steps)} steps computed"
   )
 
+  # Combine labels from all cascade steps
+  cascade_labels <- tibble::tribble(
+    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~dhs_recode, ~indicator_category, ~wmr_cascade_step, ~age_group, ~units, ~notes,
+    "dhs_fever", "Fever prevalence in children under 5", "Prevalence de la fievre chez les enfants de moins de 5 ans", "h22", "Children with fever", "Alive children 0-59 months", "h22", "b5, hw1", "KR", "Malaria", 0L, "0-59 months", "proportion (0-1)", "Step 0 of WMR cascade",
+    "dhs_fever_low", "Fever - lower 95% CI", "Fievre - IC 95% inferieur", "h22", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 0L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_fever_upp", "Fever - upper 95% CI", "Fievre - IC 95% superieur", "h22", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 0L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_n_children", "Number of children under 5 (denominator)", "Nombre d'enfants de moins de 5 ans (denominateur)", "b5, hw1", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 0L, "0-59 months", "count", "Unweighted count",
+    "dhs_n_fever", "Number with fever (numerator)", "Nombre avec fievre (numerateur)", "h22", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 0L, "0-59 months", "count", "Unweighted count",
+    "dhs_csb_any", "Any care-seeking", "Recherche de soins (tout type)", "h32 series", "Febrile children seeking care at any", "Febrile children under 5", "h32 series", "h22", "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Step 1 of WMR cascade",
+    "dhs_csb_any_low", "Any care-seeking - lower 95% CI", "Recherche de soins - IC 95% inferieur", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_csb_any_upp", "Any care-seeking - upper 95% CI", "Recherche de soins - IC 95% superieur", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_csb_public", "Public sector care-seeking", "Recherche de soins au secteur public", "h32a-i", "Febrile children seeking care at public", "Febrile children under 5", "h32 series", "h22", "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Step 1 of WMR cascade; includes CHW",
+    "dhs_csb_public_low", "Public CSB - lower 95% CI", "CSB public - IC 95% inferieur", "h32a-i", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_csb_public_upp", "Public CSB - upper 95% CI", "CSB public - IC 95% superieur", "h32a-i", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_csb_private", "Private sector care-seeking", "Recherche de soins au secteur prive", "h32j-u", "Febrile children seeking care at private", "Febrile children under 5", "h32 series", "h22", "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Step 1 of WMR cascade",
+    "dhs_csb_private_low", "Private CSB - lower 95% CI", "CSB prive - IC 95% inferieur", "h32j-u", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_csb_private_upp", "Private CSB - upper 95% CI", "CSB prive - IC 95% superieur", "h32j-u", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_csb_trained", "Trained provider care-seeking", "Recherche de soins aupres d'un prestataire forme", "h32 series", "Febrile children seeking care at trained", "Febrile children under 5", "h32 series", "h22", "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Step 1 of WMR cascade",
+    "dhs_csb_trained_low", "Trained provider CSB - lower 95% CI", "CSB prestataire forme - IC 95% inferieur", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_csb_trained_upp", "Trained provider CSB - upper 95% CI", "CSB prestataire forme - IC 95% superieur", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_csb_none", "No care-seeking", "Pas de recherche de soins", "h32 series", "Febrile children seeking care at none", "Febrile children under 5", "h32 series", "h22", "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Step 1 of WMR cascade; complement of dhs_csb_any",
+    "dhs_csb_none_low", "No care-seeking - lower 95% CI", "Pas de soins - IC 95% inferieur", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_csb_none_upp", "No care-seeking - upper 95% CI", "Pas de soins - IC 95% superieur", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_malaria_dx", "Malaria diagnostic testing prevalence", "Prevalence du diagnostic du paludisme", "h47 (or ml1)", "Febrile children with blood taken", "Febrile children under 5", "h47/ml1", "h22", "KR", "Malaria", 2L, "0-59 months", "proportion (0-1)", "Step 2 of WMR cascade; h47 preferred, ml1 fallback",
+    "dhs_malaria_dx_low", "Malaria Dx - lower 95% CI", "Diagnostic paludisme - IC 95% inferieur", "h47 (or ml1)", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 2L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_malaria_dx_upp", "Malaria Dx - upper 95% CI", "Diagnostic paludisme - IC 95% superieur", "h47 (or ml1)", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 2L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_n_febrile", "Number of febrile children (denominator)", "Nombre d'enfants febriles (denominateur)", "h22", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", NA_integer_, "0-59 months", "count", "Unweighted count",
+    "dhs_n_tested", "Number tested for malaria", "Nombre testes pour le paludisme", "h47 (or ml1)", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 2L, "0-59 months", "count", "Unweighted count",
+    "dhs_antimalarial", "Any antimalarial treatment", "Traitement antipaludique (tout type)", "ml13a-ml13h", "Febrile children with antimalarial", "Febrile children under 5", "ml13a-ml13h", "h22", "KR", "Malaria", 3L, "0-59 months", "proportion (0-1)", "Step 3 of WMR cascade",
+    "dhs_antimalarial_low", "Antimalarial - lower 95% CI", "Antipaludique - IC 95% inferieur", "ml13a-ml13h", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 3L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_antimalarial_upp", "Antimalarial - upper 95% CI", "Antipaludique - IC 95% superieur", "ml13a-ml13h", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 3L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_n_antimalarial", "Number receiving antimalarial", "Nombre recevant un antipaludique", "ml13a-h", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 3L, "0-59 months", "count", "Unweighted count",
+    "dhs_act", "ACT treatment coverage", "Couverture de traitement par CTA", "ml13e", "Febrile children with ACT", "Febrile children under 5", "ml13e", "h22", "KR", "Malaria", 4L, "0-59 months", "proportion (0-1)", "Step 4 of WMR cascade; ACT-specific treatment",
+    "dhs_act_low", "ACT - lower 95% CI", "CTA - IC 95% inferieur", "ml13e", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 4L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_act_upp", "ACT - upper 95% CI", "CTA - IC 95% superieur", "ml13e", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 4L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_n_act", "Number receiving ACT", "Nombre recevant un CTA", "ml13e", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 4L, "0-59 months", "count", "Unweighted count",
+    "dhs_act_tested", "ACT among test-positive", "CTA parmi les testes positifs", "ml13e", "Test-positive children with ACT", "Test-positive febrile children", "ml13e", "h47/ml1", "KR", "Malaria", 4L, "0-59 months", "proportion (0-1)", "Step 4 secondary; denominator is test-positive subset",
+    "dhs_act_tested_low", "ACT tested - lower 95% CI", "CTA testes - IC 95% inferieur", "ml13e", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 4L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_act_tested_upp", "ACT tested - upper 95% CI", "CTA testes - IC 95% superieur", "ml13e", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 4L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_n_tested_act", "Number test-positive receiving ACT", "Nombre de positifs recevant un CTA", "ml13e", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 4L, "0-59 months", "count", "Unweighted count"
+  )
+
+  dict <- sntutils::build_dictionary(wide_data)
+  dict <- .enrich_dhs_dictionary(dict, cascade_labels)
+
   list(
     cascade = tibble::as_tibble(cascade),
     data = wide_data,
-    dict = sntutils::build_dictionary(wide_data),
+    dict = dict,
     metadata = metadata
   )
 }

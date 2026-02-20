@@ -94,14 +94,6 @@ calc_malaria_dx_dhs_core <- function(
     ))
   }
 
-  # Check malaria_dx variable
-  if (!survey_vars$malaria_dx %in% names(dhs_kr)) {
-    cli::cli_abort(c(
-      "Malaria diagnosis variable {.var {survey_vars$malaria_dx}} not found in data",
-      "i" = "Check your survey_vars mapping"
-    ))
-  }
-
   # Validate region_var if provided
   if (!is.null(region_var)) {
     if (!is.character(region_var) || length(region_var) != 1) {
@@ -412,9 +404,21 @@ calc_malaria_dx_dhs <- function(
     join_nearest = join_nearest
   )
 
+  labels <- tibble::tribble(
+    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~notes,
+    "dhs_malaria_dx", "Malaria diagnostic testing prevalence", "Prevalence du diagnostic du paludisme", "h47 (or ml1)", "Febrile children tested", "Febrile children under 5", "h47/ml1", "h22", "Step 2 of WMR cascade; h47 preferred, ml1 fallback for older surveys",
+    "dhs_malaria_dx_low", "Malaria Dx - lower 95% CI", "Diagnostic paludisme - IC 95% inferieur", "h47 (or ml1)", NA_character_, NA_character_, NA_character_, NA_character_, "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_malaria_dx_upp", "Malaria Dx - upper 95% CI", "Diagnostic paludisme - IC 95% superieur", "h47 (or ml1)", NA_character_, NA_character_, NA_character_, NA_character_, "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_n_febrile", "Number of febrile children (denominator)", "Nombre d'enfants febriles (denominateur)", "h22", NA_character_, NA_character_, NA_character_, NA_character_, "Unweighted count",
+    "dhs_n_tested", "Number tested for malaria (numerator)", "Nombre testes pour le paludisme (numerateur)", "h47 (or ml1)", NA_character_, NA_character_, NA_character_, NA_character_, "Unweighted count"
+  )
+
+  dict <- sntutils::build_dictionary(dx_data)
+  dict <- .enrich_dhs_dictionary(dict, labels)
+
   list(
     data = dx_data,
-    dict = sntutils::build_dictionary(dx_data),
+    dict = dict,
     metadata = metadata
   )
 }

@@ -530,9 +530,11 @@ calc_severe_anemia_dhs <- function(
   )
 
   if (is.null(shapefile)) {
+    dict <- sntutils::build_dictionary(cluster_results)
+    dict <- .enrich_dhs_dictionary(dict, .severe_anemia_labels())
     return(list(
       data = cluster_results,
-      dict = sntutils::build_dictionary(cluster_results),
+      dict = dict,
       metadata = metadata
     ))
   }
@@ -611,9 +613,11 @@ calc_severe_anemia_dhs <- function(
   }
 
   if (length(admin_level) == 0) {
+    dict <- sntutils::build_dictionary(joined)
+    dict <- .enrich_dhs_dictionary(dict, .severe_anemia_labels())
     return(list(
       data = joined,
-      dict = sntutils::build_dictionary(joined),
+      dict = dict,
       metadata = metadata
     ))
   }
@@ -672,10 +676,26 @@ calc_severe_anemia_dhs <- function(
     dplyr::select(-n_clusters) |>
     sf::st_drop_geometry()
 
+  dict <- sntutils::build_dictionary(result_with_geometry)
+  dict <- .enrich_dhs_dictionary(dict, .severe_anemia_labels())
+
   list(
     data = dplyr::distinct(result_with_geometry),
-    dict = sntutils::build_dictionary(result_with_geometry),
+    dict = dict,
     metadata = metadata
+  )
+}
+
+#' Severe anemia label definitions
+#' @noRd
+.severe_anemia_labels <- function() {
+  tibble::tribble(
+    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~dhs_recode, ~indicator_category, ~wmr_cascade_step, ~age_group, ~units, ~notes,
+    "dhs_severe_anemia", "Severe anemia prevalence", "Prevalence de l'anemie severe", "hw53 (or hc56)", "Children with Hb < 8.0 g/dL", "Children 6-59 months tested for Hb", "hw53/hc56", "hw53/hc56", "PR", "Nutrition", NA_integer_, "6-59 months", "proportion (0-1)", "PR module; Hb < 8.0 g/dL; altitude-adjusted (hw53) preferred over raw (hc56)",
+    "dhs_severe_anemia_low", "Severe anemia - lower 95% CI", "Anemie severe - IC 95% inferieur", "hw53 (or hc56)", NA_character_, NA_character_, NA_character_, NA_character_, "PR", "Nutrition", NA_integer_, "6-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_severe_anemia_upp", "Severe anemia - upper 95% CI", "Anemie severe - IC 95% superieur", "hw53 (or hc56)", NA_character_, NA_character_, NA_character_, NA_character_, "PR", "Nutrition", NA_integer_, "6-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_n_tested_hb", "Number tested for hemoglobin (denominator)", "Nombre testes pour l'hemoglobine (denominateur)", "hw53 (or hc56)", NA_character_, NA_character_, NA_character_, NA_character_, "PR", "Nutrition", NA_integer_, "6-59 months", "count", "Unweighted count",
+    "dhs_n_severe_anemia", "Number with severe anemia (numerator)", "Nombre avec anemie severe (numerateur)", "hw53 (or hc56)", NA_character_, NA_character_, NA_character_, NA_character_, "PR", "Nutrition", NA_integer_, "6-59 months", "count", "Unweighted count"
   )
 }
 

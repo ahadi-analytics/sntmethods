@@ -409,9 +409,21 @@ calc_fever_dhs <- function(
     join_nearest = join_nearest
   )
 
+  labels <- tibble::tribble(
+    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~dhs_recode, ~indicator_category, ~wmr_cascade_step, ~age_group, ~units, ~notes,
+    "dhs_fever", "Fever prevalence in children under 5", "Prevalence de la fievre chez les enfants de moins de 5 ans", "h22", "Children with fever", "Alive children 0-59 months", "h22", "b5, hw1", "KR", "Malaria", 0L, "0-59 months", "proportion (0-1)", "Step 0 of WMR cascade; fever in 2 weeks preceding interview",
+    "dhs_fever_low", "Fever - lower 95% CI", "Fievre - IC 95% inferieur", "h22", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 0L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_fever_upp", "Fever - upper 95% CI", "Fievre - IC 95% superieur", "h22", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 0L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_n_children", "Number of children under 5 (denominator)", "Nombre d'enfants de moins de 5 ans (denominateur)", "b5, hw1", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", NA_integer_, "0-59 months", "count", "Unweighted count; alive children 0-59 months",
+    "dhs_n_fever", "Number with fever (numerator)", "Nombre avec fievre (numerateur)", "h22", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", NA_integer_, "0-59 months", "count", "Unweighted count"
+  )
+
+  dict <- sntutils::build_dictionary(fever_data)
+  dict <- .enrich_dhs_dictionary(dict, labels)
+
   list(
     data = fever_data,
-    dict = sntutils::build_dictionary(fever_data),
+    dict = dict,
     metadata = metadata
   )
 }

@@ -38,11 +38,22 @@
     ))
   }
 
-  has_dx_var <- survey_vars$malaria_dx %in% names(dhs_kr)
-  if (!has_dx_var) {
-    cli::cli_abort(
-      "Malaria diagnosis variable {.var {survey_vars$malaria_dx}} not found in data"
-    )
+  dx_var <- survey_vars$malaria_dx
+  if (!dx_var %in% names(dhs_kr)) {
+    alternatives <- c("ml1", "h47")
+    alternatives <- setdiff(alternatives, dx_var)
+    found <- intersect(alternatives, names(dhs_kr))
+    if (length(found) > 0) {
+      dx_var <- found[1]
+      cli::cli_alert_info(
+        "Variable {.var {survey_vars$malaria_dx}} not found; using {.var {dx_var}} instead"
+      )
+      survey_vars$malaria_dx <- dx_var
+    } else {
+      cli::cli_abort(
+        "Malaria diagnosis variable {.var {survey_vars$malaria_dx}} not found in data (also tried: {.var {alternatives}})"
+      )
+    }
   }
 
   # Zap labels

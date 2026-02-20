@@ -11,7 +11,7 @@
 #' @param gps_data DHS GPS dataset with cluster coordinates.
 #' @param indicators Character vector of indicators to calculate:
 #'   \itemize{
-#'     \item "act": Received ACT among all febrile children
+#'     \item "act": Received ACT among febrile children under 5
 #'     \item "act_tested": Received ACT among children who tested positive
 #'       (RDT or microscopy)
 #'   }

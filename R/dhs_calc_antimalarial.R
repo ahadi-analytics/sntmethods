@@ -412,9 +412,21 @@ calc_antimalarial_dhs <- function(
     join_nearest = join_nearest
   )
 
+  labels <- tibble::tribble(
+    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~notes,
+    "dhs_antimalarial", "Any antimalarial treatment", "Traitement antipaludique (tout type)", "ml13a-ml13h", "Febrile children receiving antimalarial", "Febrile children under 5", "ml13a-h", "h22", "Step 3 of WMR cascade; any antimalarial drug (auto-detected ml13 series)",
+    "dhs_antimalarial_low", "Antimalarial - lower 95% CI", "Antipaludique - IC 95% inferieur", "ml13a-ml13h", NA_character_, NA_character_, NA_character_, NA_character_, "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_antimalarial_upp", "Antimalarial - upper 95% CI", "Antipaludique - IC 95% superieur", "ml13a-ml13h", NA_character_, NA_character_, NA_character_, NA_character_, "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_n_febrile", "Number of febrile children (denominator)", "Nombre d'enfants febriles (denominateur)", "h22", NA_character_, NA_character_, NA_character_, NA_character_, "Unweighted count",
+    "dhs_n_antimalarial", "Number receiving antimalarial (numerator)", "Nombre recevant un antipaludique (numerateur)", "ml13a-h", NA_character_, NA_character_, NA_character_, NA_character_, "Unweighted count"
+  )
+
+  dict <- sntutils::build_dictionary(am_data)
+  dict <- .enrich_dhs_dictionary(dict, labels)
+
   list(
     data = am_data,
-    dict = sntutils::build_dictionary(am_data),
+    dict = dict,
     metadata = metadata
   )
 }

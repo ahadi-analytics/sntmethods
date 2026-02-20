@@ -240,7 +240,14 @@ run_mbg_indicator_pipeline <- function(
   # ---- Input Validation ----
 
   # Validate indicator names
-  valid_indicators <- c("pfpr", "itn", "irs", "anc", "csb", "act", "anemia", "iptp", "epi", "u5mr", "smc", "fever", "malaria_dx", "antimalarial")
+  valid_indicators <- c(
+    "pfpr", "itn", "irs", "anc", "csb", "act", "anemia", "iptp", "epi",
+    "u5mr", "smc", "fever", "malaria_dx", "antimalarial",
+    # ITN sub-indicators (selectable individually for faster pipelines)
+    "itn_ownership", "itn_access", "itn_use_all", "itn_use_u5",
+    "itn_use_pregnant", "itn_use_if_access",
+    # (antimalarial, act, act_tested already filter to febrile U5 via KR helper)
+  )
   invalid_indicators <- setdiff(indicators, valid_indicators)
   if (length(invalid_indicators) > 0) {
     cli::cli_abort(c(
@@ -651,7 +658,7 @@ run_mbg_indicator_pipeline <- function(
             "Skipped {.field {ind_category}}: {ind_results$skipped}"
           )
         } else if (length(ind_results$cluster_data) > 0) {
-          processed_indicators <- c(processed_indicators, ind_category)
+          processed_indicators <- c(processed_indicators, names(ind_results$cluster_data))
           cli::cli_alert_success("Processed {.field {ind_category}}")
         }
 
@@ -753,11 +760,17 @@ run_mbg_indicator_pipeline <- function(
     # Coerce to plain character to avoid glue class issues
     output_basename <- as.character(output_basename)
 
-    # Build data dictionary
+    # Build data dictionary with MBG-specific labels
     year_data_dict <- sntutils::build_dictionary(
       data = year_dataset,
       language = "fr"
     )
+    mbg_labels <- dplyr::bind_rows(
+      .mbg_id_labels(),
+      .build_mbg_labels(processed_indicators)
+    ) |>
+      dplyr::filter(.data$variable %in% names(year_dataset))
+    year_data_dict <- .enrich_dhs_dictionary(year_data_dict, mbg_labels)
 
     # Write with data dictionary as second tab (versioned with date)
     sntutils::write_snt_data(
@@ -821,10 +834,21 @@ run_mbg_indicator_pipeline <- function(
       # Coerce to plain character to avoid glue class issues
       combined_basename <- as.character(combined_basename)
 
-      # Build data dictionary for combined dataset
+      # Build data dictionary for combined dataset with MBG-specific labels
       combined_data_dict <- sntutils::build_dictionary(
         data = results$final_dataset,
         language = "fr"
+      )
+      all_indicators <- unique(unlist(lapply(
+        all_survey_results, function(x) x$processed_indicators
+      )))
+      combined_mbg_labels <- dplyr::bind_rows(
+        .mbg_id_labels(),
+        .build_mbg_labels(all_indicators)
+      ) |>
+        dplyr::filter(.data$variable %in% names(results$final_dataset))
+      combined_data_dict <- .enrich_dhs_dictionary(
+        combined_data_dict, combined_mbg_labels
       )
 
       # Write with data dictionary as second tab (versioned with date)
@@ -989,11 +1013,38 @@ run_mbg_indicator_pipeline <- function(
             "access",
             "use_all",
             "use_u5",
+            "use_pregnant",
             "use_5_10",
             "use_10_20",
             "use_20plus",
             "use_if_access"
           )
+        )
+      }, error = function(e) {
+        results$skipped <<- glue::glue("Calculation error: {e$message}")
+        list()
+      })
+    },
+
+    itn_ownership = ,
+    itn_access = ,
+    itn_use_all = ,
+    itn_use_u5 = ,
+    itn_use_pregnant = ,
+    itn_use_if_access = {
+      missing_ft <- setdiff(c("HR", "PR"), names(survey_data))
+      if (length(missing_ft) > 0) {
+        return(skip_indicator(
+          glue::glue("Missing {paste(missing_ft, collapse = ', ')} data")
+        ))
+      }
+      sub_ind <- sub("^itn_", "", category)
+      tryCatch({
+        calc_itn_mbg(
+          dhs_hr = survey_data$HR,
+          dhs_pr = survey_data$PR,
+          gps_data = gps_data,
+          indicators = sub_ind
         )
       }, error = function(e) {
         results$skipped <<- glue::glue("Calculation error: {e$message}")

@@ -207,9 +207,26 @@ calc_anc_dhs <- function(
     join_nearest = join_nearest
   )
 
+  labels <- tibble::tribble(
+    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~dhs_recode, ~indicator_category, ~wmr_cascade_step, ~age_group, ~units, ~notes,
+    "dhs_anc_1plus", "ANC 1+ visit coverage", "Couverture CPN 1+ visite", "m14_1", "Women with 1+ ANC visits", "Women with recent birth", "m14_1", "v208", "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "IR module; ANC visit count for most recent birth",
+    "dhs_anc_1plus_low", "ANC 1+ - lower 95% CI", "CPN 1+ - IC 95% inferieur", "m14_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_anc_1plus_upp", "ANC 1+ - upper 95% CI", "CPN 1+ - IC 95% superieur", "m14_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_anc_4plus", "ANC 4+ visit coverage", "Couverture CPN 4+ visites", "m14_1", "Women with 4+ ANC visits", "Women with recent birth", "m14_1", "v208", "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "IR module; ANC visit count for most recent birth",
+    "dhs_anc_4plus_low", "ANC 4+ - lower 95% CI", "CPN 4+ - IC 95% inferieur", "m14_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_anc_4plus_upp", "ANC 4+ - upper 95% CI", "CPN 4+ - IC 95% superieur", "m14_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_anc_8plus", "ANC 8+ visit coverage", "Couverture CPN 8+ visites", "m14_1", "Women with 8+ ANC visits", "Women with recent birth", "m14_1", "v208", "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "IR module; ANC visit count for most recent birth",
+    "dhs_anc_8plus_low", "ANC 8+ - lower 95% CI", "CPN 8+ - IC 95% inferieur", "m14_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_anc_8plus_upp", "ANC 8+ - upper 95% CI", "CPN 8+ - IC 95% superieur", "m14_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_n_recent_births", "Number of recent births (denominator)", "Nombre de naissances recentes (denominateur)", "v208", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "count", "Unweighted count"
+  )
+
+  dict <- sntutils::build_dictionary(anc_data)
+  dict <- .enrich_dhs_dictionary(dict, labels)
+
   list(
     data = anc_data,
-    dict = sntutils::build_dictionary(anc_data),
+    dict = dict,
     metadata = list(
       analysis_type = "ANC (Antenatal Care)",
       file_type = "IR",

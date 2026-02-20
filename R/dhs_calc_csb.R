@@ -1062,10 +1062,37 @@ calc_csb_dhs <- function(
     join_nearest = join_nearest
   )
 
+  labels <- tibble::tribble(
+    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~dhs_recode, ~indicator_category, ~wmr_cascade_step, ~age_group, ~units, ~notes,
+    "dhs_csb_any", "Any care-seeking", "Recherche de soins (tout type)", "h32 series", "Febrile children who sought care", "Febrile children under 5", "h32*", "h22", "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Step 1 of WMR cascade; any + none = 1",
+    "dhs_csb_any_low", "Any care-seeking - lower 95% CI", "Recherche de soins - IC 95% inferieur", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_csb_any_upp", "Any care-seeking - upper 95% CI", "Recherche de soins - IC 95% superieur", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_csb_public", "Public sector care-seeking", "Recherche de soins au secteur public", "h32a-i, h32na-ne", "Febrile children seeking public care", "Febrile children under 5", "h32a-i", "h22", "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Step 1 of WMR cascade; includes CHW; overlapping with private",
+    "dhs_csb_public_low", "Public CSB - lower 95% CI", "CSB public - IC 95% inferieur", "h32a-i", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_csb_public_upp", "Public CSB - upper 95% CI", "CSB public - IC 95% superieur", "h32a-i", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_csb_private", "Private sector care-seeking", "Recherche de soins au secteur prive", "h32j-u", "Febrile children seeking private care", "Febrile children under 5", "h32j-u", "h22", "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Step 1 of WMR cascade; formal + informal + pharmacy; overlapping with public",
+    "dhs_csb_private_low", "Private CSB - lower 95% CI", "CSB prive - IC 95% inferieur", "h32j-u", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_csb_private_upp", "Private CSB - upper 95% CI", "CSB prive - IC 95% superieur", "h32j-u", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_csb_trained", "Trained provider care-seeking", "Recherche de soins aupres d'un prestataire forme", "h32 series", "Febrile children seeking trained provider", "Febrile children under 5", "h32*", "h22", "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Step 1 of WMR cascade; public + private formal + pharmacy",
+    "dhs_csb_trained_low", "Trained provider CSB - lower 95% CI", "CSB prestataire forme - IC 95% inferieur", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_csb_trained_upp", "Trained provider CSB - upper 95% CI", "CSB prestataire forme - IC 95% superieur", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_csb_none", "No care-seeking", "Pas de recherche de soins", "h32 series", "Febrile children who did not seek care", "Febrile children under 5", "1-any(h32*)", "h22", "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Step 1 of WMR cascade; complement of dhs_csb_any",
+    "dhs_csb_none_low", "No care-seeking - lower 95% CI", "Pas de soins - IC 95% inferieur", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_csb_none_upp", "No care-seeking - upper 95% CI", "Pas de soins - IC 95% superieur", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_n_fever", "Number of febrile children (denominator)", "Nombre d'enfants febriles (denominateur)", "h22", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", NA_integer_, "0-59 months", "count", "Unweighted count",
+    "dhs_n_public", "Number seeking public care", "Nombre recherchant des soins publics", "h32a-i", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", NA_integer_, "0-59 months", "count", "Unweighted count",
+    "dhs_n_private", "Number seeking private care", "Nombre recherchant des soins prives", "h32j-u", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", NA_integer_, "0-59 months", "count", "Unweighted count",
+    "dhs_n_trained", "Number seeking trained provider", "Nombre consultant un prestataire forme", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", NA_integer_, "0-59 months", "count", "Unweighted count",
+    "dhs_n_none", "Number not seeking care", "Nombre ne recherchant pas de soins", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", NA_integer_, "0-59 months", "count", "Unweighted count"
+  )
+
+  dict <- sntutils::build_dictionary(csb_data)
+  dict <- .enrich_dhs_dictionary(dict, labels)
+
   # Return list with data, dictionary, and metadata
   list(
     data = csb_data,
-    dict = sntutils::build_dictionary(csb_data),
+    dict = dict,
     metadata = metadata
   )
 }

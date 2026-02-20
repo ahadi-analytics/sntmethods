@@ -218,9 +218,39 @@ calc_epi_dhs <- function(
     join_nearest = join_nearest
   )
 
+  labels <- tibble::tribble(
+    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~dhs_recode, ~indicator_category, ~wmr_cascade_step, ~age_group, ~units, ~notes,
+    "dhs_n_epi_eligible", "Number of EPI-eligible children (denominator)", "Nombre d'enfants eligibles au PEV (denominateur)", "h2-h9", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Immunization", NA_integer_, "12-23 months", "count", "Unweighted count; children 12-23 months"
+  )
+
+  # Add dynamic labels for each vaccine indicator
+  vaccine_labels_list <- list(
+    bcg = list(en = "BCG vaccination coverage", fr = "Couverture vaccinale BCG", dhs_var = "h2", name = "BCG"),
+    dpt1 = list(en = "DPT1 vaccination coverage", fr = "Couverture vaccinale DTC1", dhs_var = "h3", name = "DPT1"),
+    dpt2 = list(en = "DPT2 vaccination coverage", fr = "Couverture vaccinale DTC2", dhs_var = "h5", name = "DPT2"),
+    dpt3 = list(en = "DPT3 vaccination coverage", fr = "Couverture vaccinale DTC3", dhs_var = "h7", name = "DPT3"),
+    measles1 = list(en = "Measles 1 vaccination coverage", fr = "Couverture vaccinale rougeole 1", dhs_var = "h9", name = "Measles 1"),
+    fully_vaccinated = list(en = "Fully vaccinated", fr = "Completement vaccine", dhs_var = "h2-h9", name = "all vaccines")
+  )
+  for (vax in names(vaccine_labels_list)) {
+    info <- vaccine_labels_list[[vax]]
+    vax_var <- paste0("dhs_epi_", vax)
+    if (vax_var %in% names(epi_data)) {
+      labels <- dplyr::bind_rows(labels, tibble::tribble(
+        ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~dhs_recode, ~indicator_category, ~wmr_cascade_step, ~age_group, ~units, ~notes,
+        vax_var, info$en, info$fr, info$dhs_var, paste0("Children 12-23m with ", info$name), "Children 12-23 months", info$dhs_var, "hw1", "KR", "Immunization", NA_integer_, "12-23 months", "proportion (0-1)", "KR module; children 12-23 months; card + recall",
+        paste0(vax_var, "_low"), paste0(info$en, " - lower 95% CI"), paste0(info$fr, " - IC 95% inferieur"), info$dhs_var, NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Immunization", NA_integer_, "12-23 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+        paste0(vax_var, "_upp"), paste0(info$en, " - upper 95% CI"), paste0(info$fr, " - IC 95% superieur"), info$dhs_var, NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Immunization", NA_integer_, "12-23 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]"
+      ))
+    }
+  }
+
+  dict <- sntutils::build_dictionary(epi_data)
+  dict <- .enrich_dhs_dictionary(dict, labels)
+
   list(
     data = epi_data,
-    dict = sntutils::build_dictionary(epi_data),
+    dict = dict,
     metadata = list(
       analysis_type = "EPI (Expanded Programme on Immunization)",
       file_type = "KR",

@@ -653,10 +653,11 @@ calc_pfpr_dhs <- function(
   )
 
   if (is.null(shapefile)) {
-    # Return list with data, dictionary, and metadata for cluster results
+    dict <- sntutils::build_dictionary(cluster_results)
+    dict <- .enrich_dhs_dictionary(dict, .pfpr_labels())
     return(list(
       data = cluster_results,
-      dict = sntutils::build_dictionary(cluster_results),
+      dict = dict,
       metadata = metadata
     ))
   }
@@ -736,10 +737,11 @@ calc_pfpr_dhs <- function(
   }
 
   if (length(admin_level) == 0) {
-    # Return list with data, dictionary, and metadata even for edge case
+    dict <- sntutils::build_dictionary(joined)
+    dict <- .enrich_dhs_dictionary(dict, .pfpr_labels())
     return(list(
       data = joined,
-      dict = sntutils::build_dictionary(joined),
+      dict = dict,
       metadata = metadata
     ))
   }
@@ -826,11 +828,31 @@ calc_pfpr_dhs <- function(
     dplyr::select(-n_clusters) |>
     sf::st_drop_geometry()
 
-  # Return list with data, dictionary, and metadata
+  dict <- sntutils::build_dictionary(result_with_geometry)
+  dict <- .enrich_dhs_dictionary(dict, .pfpr_labels())
+
   list(
     data = dplyr::distinct(result_with_geometry),
-    dict = sntutils::build_dictionary(result_with_geometry),
+    dict = dict,
     metadata = metadata
+  )
+}
+
+#' PfPR label definitions
+#' @noRd
+.pfpr_labels <- function() {
+  tibble::tribble(
+    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~dhs_recode, ~indicator_category, ~wmr_cascade_step, ~age_group, ~units, ~notes,
+    "dhs_pfpr_rdt", "PfPR by RDT", "TIP par TDR", "hml35", "RDT-positive children", "Children 6-59 months tested by RDT", "hml35", "hml35", "PR", "Malaria", NA_integer_, "6-59 months", "proportion (0-1)", "PR module; children 6-59 months; measures test RESULT not test performed",
+    "dhs_pfpr_rdt_low", "PfPR RDT - lower 95% CI", "TIP TDR - IC 95% inferieur", "hml35", NA_character_, NA_character_, NA_character_, NA_character_, "PR", "Malaria", NA_integer_, "6-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_pfpr_rdt_upp", "PfPR RDT - upper 95% CI", "TIP TDR - IC 95% superieur", "hml35", NA_character_, NA_character_, NA_character_, NA_character_, "PR", "Malaria", NA_integer_, "6-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_pfpr_mic", "PfPR by microscopy", "TIP par microscopie", "hml32", "Microscopy-positive children", "Children 6-59 months tested by microscopy", "hml32", "hml32", "PR", "Malaria", NA_integer_, "6-59 months", "proportion (0-1)", "PR module; children 6-59 months; measures test RESULT not test performed",
+    "dhs_pfpr_mic_low", "PfPR microscopy - lower 95% CI", "TIP microscopie - IC 95% inferieur", "hml32", NA_character_, NA_character_, NA_character_, NA_character_, "PR", "Malaria", NA_integer_, "6-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_pfpr_mic_upp", "PfPR microscopy - upper 95% CI", "TIP microscopie - IC 95% superieur", "hml32", NA_character_, NA_character_, NA_character_, NA_character_, "PR", "Malaria", NA_integer_, "6-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_n_tested_rdt", "Number tested by RDT (denominator)", "Nombre testes par TDR (denominateur)", "hml35", NA_character_, NA_character_, NA_character_, NA_character_, "PR", "Malaria", NA_integer_, "6-59 months", "count", "Unweighted count",
+    "dhs_n_pos_rdt", "Number RDT-positive (numerator)", "Nombre positifs au TDR (numerateur)", "hml35", NA_character_, NA_character_, NA_character_, NA_character_, "PR", "Malaria", NA_integer_, "6-59 months", "count", "Unweighted count",
+    "dhs_n_tested_mic", "Number tested by microscopy (denominator)", "Nombre testes par microscopie (denominateur)", "hml32", NA_character_, NA_character_, NA_character_, NA_character_, "PR", "Malaria", NA_integer_, "6-59 months", "count", "Unweighted count",
+    "dhs_n_pos_mic", "Number microscopy-positive (numerator)", "Nombre positifs a la microscopie (numerateur)", "hml32", NA_character_, NA_character_, NA_character_, NA_character_, "PR", "Malaria", NA_integer_, "6-59 months", "count", "Unweighted count"
   )
 }
 

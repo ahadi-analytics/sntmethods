@@ -868,9 +868,29 @@ calc_iptp_dhs <- function(
     metadata$aggregation_level <- "national or existing admin"
   }
 
+  labels <- tibble::tribble(
+    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~dhs_recode, ~indicator_category, ~wmr_cascade_step, ~age_group, ~units, ~notes,
+    "dhs_iptp_1", "IPTp 1+ dose coverage", "Couverture TPI 1+ dose", "m49a_1, ml1_1", "Women receiving 1+ SP dose", "Women with recent birth", "m49a_1", "v208", "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "IR module; women with recent birth (last 24 months)",
+    "dhs_iptp_1_low", "IPTp 1+ - lower 95% CI", "TPI 1+ - IC 95% inferieur", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_iptp_1_upp", "IPTp 1+ - upper 95% CI", "TPI 1+ - IC 95% superieur", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_iptp_2", "IPTp 2+ dose coverage", "Couverture TPI 2+ doses", "m49a_1, ml1_1", "Women receiving 2+ SP doses", "Women with recent birth", "m49a_1", "v208", "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "IR module; women with recent birth (last 24 months)",
+    "dhs_iptp_2_low", "IPTp 2+ - lower 95% CI", "TPI 2+ - IC 95% inferieur", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_iptp_2_upp", "IPTp 2+ - upper 95% CI", "TPI 2+ - IC 95% superieur", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_iptp_3", "IPTp 3+ dose coverage", "Couverture TPI 3+ doses", "m49a_1, ml1_1", "Women receiving 3+ SP doses", "Women with recent birth", "m49a_1", "v208", "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "IR module; women with recent birth (last 24 months)",
+    "dhs_iptp_3_low", "IPTp 3+ - lower 95% CI", "TPI 3+ - IC 95% inferieur", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_iptp_3_upp", "IPTp 3+ - upper 95% CI", "TPI 3+ - IC 95% superieur", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_n_women", "Number of eligible women (denominator)", "Nombre de femmes eligibles (denominateur)", "v208", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "count", "Unweighted count",
+    "dhs_n_iptp_1plus", "Number with 1+ SP doses", "Nombre avec 1+ doses de SP", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "count", "Unweighted count",
+    "dhs_n_iptp_2plus", "Number with 2+ SP doses", "Nombre avec 2+ doses de SP", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "count", "Unweighted count",
+    "dhs_n_iptp_3plus", "Number with 3+ SP doses", "Nombre avec 3+ doses de SP", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "count", "Unweighted count"
+  )
+
+  dict <- sntutils::build_dictionary(iptp_results)
+  dict <- .enrich_dhs_dictionary(dict, labels)
+
   list(
     data = iptp_results,
-    dict = sntutils::build_dictionary(iptp_results),
+    dict = dict,
     metadata = metadata
   )
 }

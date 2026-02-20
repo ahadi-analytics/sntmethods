@@ -676,9 +676,21 @@ calc_u5mr_dhs <- function(
     join_nearest = join_nearest
   )
 
+  labels <- tibble::tribble(
+    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~dhs_recode, ~indicator_category, ~wmr_cascade_step, ~age_group, ~units, ~notes,
+    "dhs_u5mr", "Under-5 mortality rate", "Taux de mortalite des moins de 5 ans", "b5, b7, b3", "Deaths under age 5", "Live births", "b5, b7", "b3", "KR", "Mortality", NA_integer_, "0-59 months", "per 1000 live births", "Per 1,000 live births; synthetic cohort life table method; 5-year reference period",
+    "dhs_u5mr_low", "U5MR - lower 95% CI", "TMM5 - IC 95% inferieur", "b5, b7, b3", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Mortality", NA_integer_, "0-59 months", "per 1000 live births", "Survey-weighted 95% CI",
+    "dhs_u5mr_upp", "U5MR - upper 95% CI", "TMM5 - IC 95% superieur", "b5, b7, b3", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Mortality", NA_integer_, "0-59 months", "per 1000 live births", "Survey-weighted 95% CI",
+    "dhs_n_births", "Number of live births (denominator)", "Nombre de naissances vivantes (denominateur)", "b3", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Mortality", NA_integer_, "0-59 months", "count", "Unweighted count",
+    "dhs_n_deaths", "Number of under-5 deaths (numerator)", "Nombre de deces de moins de 5 ans (numerateur)", "b5, b7", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Mortality", NA_integer_, "0-59 months", "count", "Unweighted count; deaths before age 60 months"
+  )
+
+  dict <- sntutils::build_dictionary(u5mr_data)
+  dict <- .enrich_dhs_dictionary(dict, labels)
+
   list(
     data = dplyr::distinct(u5mr_data),
-    dict = sntutils::build_dictionary(u5mr_data),
+    dict = dict,
     metadata = metadata
   )
 }

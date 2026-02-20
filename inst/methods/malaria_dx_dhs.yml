@@ -21,7 +21,12 @@ data_sources:
 variables:
   malaria_dx:
     dhs_name: "h47"
+    alternatives: ["ml1"]
     description: "Blood taken from child for malaria testing"
+    note: >
+      h47 is preferred but missing from older surveys (e.g., Burundi DHS 2010,
+      MIS 2012, DHS 2016). When h47 is absent, ml1 is used as a fallback.
+      Both capture the same concept: blood taken for malaria testing.
     values:
       0: "No"
       1: "Yes"

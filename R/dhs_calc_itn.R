@@ -1787,11 +1787,53 @@ calc_itn_dhs <- function(
     metadata$aggregation_level <- "national or existing admin"
   }
 
+  dict <- sntutils::build_dictionary(itn_results)
+  dict <- .enrich_dhs_dictionary(dict, .itn_labels())
+
   list(
     data = itn_results,
-    dict = sntutils::build_dictionary(itn_results),
+    dict = dict,
     metadata = metadata
   )
+}
+
+#' ITN label definitions
+#' @noRd
+.itn_labels <- function() {
+  base <- tibble::tribble(
+    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~dhs_recode, ~indicator_category, ~wmr_cascade_step, ~age_group, ~units, ~notes,
+    "dhs_itn_ownership", "ITN household ownership", "Possession de MII par menage", "hml10_*", "Households with at least 1 ITN", "All households", "hml10_*", "hv001", "HR/PR", "ITN", NA_integer_, "all ages", "proportion (0-1)", "HR/PR module; at least one ITN in household",
+    "dhs_itn_ownership_low", "ITN ownership - lower 95% CI", "Possession MII - IC 95% inferieur", "hml10_*", NA_character_, NA_character_, NA_character_, NA_character_, "HR/PR", "ITN", NA_integer_, "all ages", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_itn_ownership_upp", "ITN ownership - upper 95% CI", "Possession MII - IC 95% superieur", "hml10_*", NA_character_, NA_character_, NA_character_, NA_character_, "HR/PR", "ITN", NA_integer_, "all ages", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_itn_sufficient", "ITN sufficient coverage", "Couverture suffisante en MII", "hml10_*, hv013", "HH with >=1 ITN per 2 members", "All households", "hml10_*, hv013", "hv001", "HR/PR", "ITN", NA_integer_, "all ages", "proportion (0-1)", "1+ ITN per 2 household members",
+    "dhs_itn_sufficient_low", "ITN sufficient - lower 95% CI", "MII suffisante - IC 95% inferieur", "hml10_*, hv013", NA_character_, NA_character_, NA_character_, NA_character_, "HR/PR", "ITN", NA_integer_, "all ages", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_itn_sufficient_upp", "ITN sufficient - upper 95% CI", "MII suffisante - IC 95% superieur", "hml10_*, hv013", NA_character_, NA_character_, NA_character_, NA_character_, "HR/PR", "ITN", NA_integer_, "all ages", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_itn_access", "ITN population access", "Acces de la population aux MII", "hml18", "People with access to ITN", "De facto HH population", "hml18", "hv013", "HR/PR", "ITN", NA_integer_, "all ages", "proportion (0-1)", "Proportion with access to ITN within household",
+    "dhs_itn_access_low", "ITN access - lower 95% CI", "Acces MII - IC 95% inferieur", "hml18", NA_character_, NA_character_, NA_character_, NA_character_, "HR/PR", "ITN", NA_integer_, "all ages", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_itn_access_upp", "ITN access - upper 95% CI", "Acces MII - IC 95% superieur", "hml18", NA_character_, NA_character_, NA_character_, NA_character_, "HR/PR", "ITN", NA_integer_, "all ages", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_itn_use", "ITN population use", "Utilisation des MII par la population", "hml12", "People sleeping under ITN", "De facto HH population", "hml12", "hv013", "HR/PR", "ITN", NA_integer_, "all ages", "proportion (0-1)", "Slept under ITN last night; individual-level",
+    "dhs_itn_use_low", "ITN use - lower 95% CI", "Utilisation MII - IC 95% inferieur", "hml12", NA_character_, NA_character_, NA_character_, NA_character_, "HR/PR", "ITN", NA_integer_, "all ages", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_itn_use_upp", "ITN use - upper 95% CI", "Utilisation MII - IC 95% superieur", "hml12", NA_character_, NA_character_, NA_character_, NA_character_, "HR/PR", "ITN", NA_integer_, "all ages", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_itn_use_if_access", "ITN use among those with access", "Utilisation MII parmi ceux ayant acces", "hml12, hml18", "People with access using ITN", "People with access to ITN", "hml12", "hml18", "HR/PR", "ITN", NA_integer_, "all ages", "proportion (0-1)", "Behavioral indicator: use conditional on access",
+    "dhs_itn_use_if_access_low", "ITN use|access - lower 95% CI", "Utilisation MII|acces - IC 95% inferieur", "hml12, hml18", NA_character_, NA_character_, NA_character_, NA_character_, "HR/PR", "ITN", NA_integer_, "all ages", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_itn_use_if_access_upp", "ITN use|access - upper 95% CI", "Utilisation MII|acces - IC 95% superieur", "hml12, hml18", NA_character_, NA_character_, NA_character_, NA_character_, "HR/PR", "ITN", NA_integer_, "all ages", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_itn_use_u5", "ITN use in children under 5", "Utilisation MII chez les enfants de moins de 5 ans", "hml12", "Children U5 sleeping under ITN", "Children U5 in HH", "hml12", "hv013", "HR/PR", "ITN", NA_integer_, "0-59 months", "proportion (0-1)", "Children 0-59 months who slept under ITN",
+    "dhs_itn_use_u5_low", "ITN use U5 - lower 95% CI", "Utilisation MII U5 - IC 95% inferieur", "hml12", NA_character_, NA_character_, NA_character_, NA_character_, "HR/PR", "ITN", NA_integer_, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_itn_use_u5_upp", "ITN use U5 - upper 95% CI", "Utilisation MII U5 - IC 95% superieur", "hml12", NA_character_, NA_character_, NA_character_, NA_character_, "HR/PR", "ITN", NA_integer_, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_itn_use_preg", "ITN use in pregnant women", "Utilisation MII chez les femmes enceintes", "hml12", "Pregnant women sleeping under ITN", "Pregnant women in HH", "hml12", "hv013", "HR/PR", "ITN", NA_integer_, "women 15-49", "proportion (0-1)", "Pregnant women who slept under ITN",
+    "dhs_itn_use_preg_low", "ITN use pregnant - lower 95% CI", "Utilisation MII enceintes - IC 95% inferieur", "hml12", NA_character_, NA_character_, NA_character_, NA_character_, "HR/PR", "ITN", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_itn_use_preg_upp", "ITN use pregnant - upper 95% CI", "Utilisation MII enceintes - IC 95% superieur", "hml12", NA_character_, NA_character_, NA_character_, NA_character_, "HR/PR", "ITN", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_n_households", "Number of households", "Nombre de menages", NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, "HR/PR", "ITN", NA_integer_, NA_character_, "count", "Unweighted count",
+    "dhs_n_individuals", "Number of individuals", "Nombre d'individus", NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, "HR/PR", "ITN", NA_integer_, "all ages", "count", "Unweighted count",
+    "dhs_n_under5", "Number of children under 5", "Nombre d'enfants de moins de 5 ans", NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, "HR/PR", "ITN", NA_integer_, "0-59 months", "count", "Unweighted count",
+    "dhs_n_pregnant", "Number of pregnant women", "Nombre de femmes enceintes", NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, "HR/PR", "ITN", NA_integer_, "women 15-49", "count", "Unweighted count",
+    "dhs_n_hh_with_itn", "Households with at least one ITN", "Menages avec au moins une MII", "hml10_*", NA_character_, NA_character_, NA_character_, NA_character_, "HR/PR", "ITN", NA_integer_, NA_character_, "count", "Unweighted count",
+    "dhs_n_hh_sufficient", "Households with sufficient ITNs", "Menages avec suffisamment de MII", "hml10_*, hv013", NA_character_, NA_character_, NA_character_, NA_character_, "HR/PR", "ITN", NA_integer_, NA_character_, "count", "Unweighted count",
+    "dhs_n_with_access", "Individuals with ITN access", "Individus ayant acces aux MII", "hml18", NA_character_, NA_character_, NA_character_, NA_character_, "HR/PR", "ITN", NA_integer_, "all ages", "count", "Unweighted count",
+    "dhs_n_used_itn", "Individuals who used ITN", "Individus ayant utilise une MII", "hml12", NA_character_, NA_character_, NA_character_, NA_character_, "HR/PR", "ITN", NA_integer_, "all ages", "count", "Unweighted count",
+    "dhs_n_used_among_access", "ITN users among those with access", "Utilisateurs MII parmi ceux ayant acces", "hml12, hml18", NA_character_, NA_character_, NA_character_, NA_character_, "HR/PR", "ITN", NA_integer_, "all ages", "count", "Unweighted count"
+  )
+  base
 }
 
 #' Aggregate ITN indicators to administrative levels

@@ -821,9 +821,28 @@ calc_wealth_dhs <- function(
     metadata$aggregation_level <- "national or existing admin"
   }
 
+  labels <- tibble::tribble(
+    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~dhs_recode, ~indicator_category, ~wmr_cascade_step, ~age_group, ~units, ~notes,
+    "dhs_prop_poorest", "Proportion in poorest quintile", "Proportion dans le quintile le plus pauvre", "hv270", "Households in poorest", "All households", "hv270", "hv001", "HR", "Wealth", NA_integer_, NA_character_, "proportion (0-1)", "HR module; DHS-defined wealth quintiles",
+    "dhs_prop_poorer", "Proportion in poorer quintile", "Proportion dans le quintile pauvre", "hv270", "Households in poorer", "All households", "hv270", "hv001", "HR", "Wealth", NA_integer_, NA_character_, "proportion (0-1)", "HR module; DHS-defined wealth quintiles",
+    "dhs_prop_middle", "Proportion in middle quintile", "Proportion dans le quintile moyen", "hv270", "Households in middle", "All households", "hv270", "hv001", "HR", "Wealth", NA_integer_, NA_character_, "proportion (0-1)", "HR module; DHS-defined wealth quintiles",
+    "dhs_prop_richer", "Proportion in richer quintile", "Proportion dans le quintile riche", "hv270", "Households in richer", "All households", "hv270", "hv001", "HR", "Wealth", NA_integer_, NA_character_, "proportion (0-1)", "HR module; DHS-defined wealth quintiles",
+    "dhs_prop_richest", "Proportion in richest quintile", "Proportion dans le quintile le plus riche", "hv270", "Households in richest", "All households", "hv270", "hv001", "HR", "Wealth", NA_integer_, NA_character_, "proportion (0-1)", "HR module; DHS-defined wealth quintiles",
+    "dhs_dominant_quintile", "Dominant wealth quintile", "Quintile de richesse dominant", "hv270", NA_character_, NA_character_, NA_character_, NA_character_, "HR", "Wealth", NA_integer_, NA_character_, "categorical", "Most common quintile in the area",
+    "dhs_dominant_prop", "Proportion in dominant quintile", "Proportion dans le quintile dominant", "hv270", "Households in dominant quintile", "All households", "hv270", "hv001", "HR", "Wealth", NA_integer_, NA_character_, "proportion (0-1)", "Proportion of households in the dominant quintile",
+    "dhs_gini", "Gini coefficient", "Coefficient de Gini", "hv271", NA_character_, NA_character_, NA_character_, NA_character_, "HR", "Wealth", NA_integer_, NA_character_, "coefficient (0-1)", "Computed from hv271 wealth factor scores",
+    "dhs_n_households", "Number of households", "Nombre de menages", NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, "HR", "Wealth", NA_integer_, NA_character_, "count", "Unweighted count",
+    "dhs_weighted_households", "Weighted number of households", "Nombre pondere de menages", NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, "HR", "Wealth", NA_integer_, NA_character_, "count", "Survey-weighted count",
+    "dhs_gini_sample_size", "Sample size for Gini", "Taille d'echantillon pour Gini", NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, "HR", "Wealth", NA_integer_, NA_character_, "count", "Number of households used for Gini calculation",
+    "dhs_gini_reliable", "Gini reliability flag", "Indicateur de fiabilite du Gini", NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, "HR", "Wealth", NA_integer_, NA_character_, "boolean", "TRUE if sample size >= 25"
+  )
+
+  dict <- sntutils::build_dictionary(wealth_results)
+  dict <- .enrich_dhs_dictionary(dict, labels)
+
   list(
     data = wealth_results,
-    dict = sntutils::build_dictionary(wealth_results),
+    dict = dict,
     metadata = metadata
   )
 }

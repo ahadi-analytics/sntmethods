@@ -183,9 +183,21 @@ calc_irs_dhs <- function(
     join_nearest = join_nearest
   )
 
+  labels <- tibble::tribble(
+    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~notes,
+    "dhs_irs", "IRS coverage", "Couverture de la PID", "hv253", "Households sprayed in last 12 months", "All households", "hv253", NA_character_, "HR module; household-level IRS in last 12 months",
+    "dhs_irs_low", "IRS - lower 95% CI", "PID - IC 95% inferieur", "hv253", NA_character_, NA_character_, NA_character_, NA_character_, "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_irs_upp", "IRS - upper 95% CI", "PID - IC 95% superieur", "hv253", NA_character_, NA_character_, NA_character_, NA_character_, "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_n_households_irs", "Number of households (denominator)", "Nombre de menages (denominateur)", NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, "Unweighted count",
+    "dhs_n_sprayed", "Number of households sprayed (numerator)", "Nombre de menages pulverises (numerateur)", "hv253", NA_character_, NA_character_, NA_character_, NA_character_, "Unweighted count"
+  )
+
+  dict <- sntutils::build_dictionary(irs_data)
+  dict <- .enrich_dhs_dictionary(dict, labels)
+
   list(
     data = irs_data,
-    dict = sntutils::build_dictionary(irs_data),
+    dict = dict,
     metadata = list(
       analysis_type = "IRS (Indoor Residual Spraying)",
       file_type = "HR",

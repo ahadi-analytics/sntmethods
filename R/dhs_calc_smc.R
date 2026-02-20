@@ -177,9 +177,21 @@ calc_smc_dhs <- function(
     join_nearest = join_nearest
   )
 
+  labels <- tibble::tribble(
+    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~notes,
+    "dhs_smc", "SMC coverage", "Couverture CPS", "hml43 (or ml13g)", "Children receiving SMC", "SMC-eligible children", "hml43/ml13g", NA_character_, "Variable availability varies by survey; hml43 preferred",
+    "dhs_smc_low", "SMC - lower 95% CI", "CPS - IC 95% inferieur", "hml43 (or ml13g)", NA_character_, NA_character_, NA_character_, NA_character_, "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_smc_upp", "SMC - upper 95% CI", "CPS - IC 95% superieur", "hml43 (or ml13g)", NA_character_, NA_character_, NA_character_, NA_character_, "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_n_smc_eligible", "Number of SMC-eligible children (denominator)", "Nombre d'enfants eligibles a la CPS (denominateur)", NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, "Unweighted count",
+    "dhs_n_smc_received", "Number receiving SMC (numerator)", "Nombre recevant la CPS (numerateur)", "hml43 (or ml13g)", NA_character_, NA_character_, NA_character_, NA_character_, "Unweighted count"
+  )
+
+  dict <- sntutils::build_dictionary(smc_data)
+  dict <- .enrich_dhs_dictionary(dict, labels)
+
   list(
     data = smc_data,
-    dict = sntutils::build_dictionary(smc_data),
+    dict = dict,
     metadata = list(
       analysis_type = "SMC (Seasonal Malaria Chemoprevention)",
       file_type = "KR",
