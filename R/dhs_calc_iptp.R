@@ -6,6 +6,9 @@
 #' women with a recent birth. When GPS data is provided, produces cluster-level
 #' results. Otherwise uses existing administrative variables in the data.
 #'
+#' @details
+#' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/iptp_dhs.yml}
+#'
 #' @param dhs_ir DHS Individual Recode dataset (IR) in tidy format
 #'   (data.frame or tibble).
 #' @param survey_vars Named list mapping DHS variable names. Required keys:
@@ -102,75 +105,34 @@ calc_iptp_dhs_core <- function(
     )
   }
 
-  # ---- 2. calculate birth age ------------------------------------------------
+  # ---- 2. Prepare base dataset -----------------------------------------------
 
-  # Check if b19_01 (age in months) is available, otherwise calculate from CMC
-  birth_age_var <- survey_vars$birth_age_months
-  birth_cmc_var <- survey_vars$birth_cmc
-  interview_cmc_var <- survey_vars$interview_cmc
+  ir_eligible <- .prepare_iptp_data(
+    dhs_ir = dhs_ir,
+    survey_vars = survey_vars,
+    birth_window_months = birth_window_months,
+    include_survey_vars = TRUE
+  )
 
-  has_birth_age <- birth_age_var %in% names(dhs_ir) &&
-    !all(is.na(dhs_ir[[birth_age_var]]))
-
-  has_birth_cmc <- birth_cmc_var %in% names(dhs_ir) &&
-    !all(is.na(dhs_ir[[birth_cmc_var]]))
-
-  if (!has_birth_age && !has_birth_cmc) {
-    cli::cli_abort(
-      c(
-        "Cannot determine birth age.",
-        "i" = paste0(
-          "Need either {.var {birth_age_var}} or {.var {birth_cmc_var}}"
-        )
-      )
-    )
-  }
-
-  # Create core dataset
-  ir_core <- dhs_ir |>
+  # Rename helper indicators to match downstream column names
+  ir_eligible <- ir_eligible |>
     dplyr::mutate(
-      cluster_id = .data[[survey_vars$cluster]],
-      survey_weight = .data[[survey_vars$weight]] / 1e6,
-      stratum_id = .data[[survey_vars$stratum]],
-      sp_taken = .data[[survey_vars$sp_taken]],
-      sp_doses = .data[[survey_vars$sp_doses]]
+      iptp_1plus = as.integer(has_1plus),
+      iptp_2plus = as.integer(has_2plus),
+      iptp_3plus = as.integer(has_3plus)
     )
 
-  # Calculate birth age using b19_01 if available, else v008 - b3_01
-  if (has_birth_age) {
-    ir_core <- ir_core |>
-      dplyr::mutate(birth_age = .data[[birth_age_var]])
-    cli::cli_alert_info(
-      "Using {.var {birth_age_var}} for birth age"
-    )
-  } else {
-    ir_core <- ir_core |>
-      dplyr::mutate(
-        birth_age = .data[[interview_cmc_var]] - .data[[birth_cmc_var]]
-      )
-    cli::cli_alert_info(
-      "Calculating birth age from {.var {interview_cmc_var}} - {.var {birth_cmc_var}}"
-    )
-  }
-
-  # add admin variables if available
-  if (
-    !is.null(survey_vars$adm1) &&
-      survey_vars$adm1 %in% names(dhs_ir)
-  ) {
-    ir_core <- ir_core |>
-      dplyr::mutate(
-        adm1 = haven::as_factor(.data[[survey_vars$adm1]]) |>
-          base::as.character() |>
-          toupper()
-      )
-  }
-
+  # Add adm2 if available and not already present
   if (
     !is.null(survey_vars$adm2) &&
-      survey_vars$adm2 %in% names(dhs_ir)
+      survey_vars$adm2 %in% names(dhs_ir) &&
+      !"adm2" %in% names(ir_eligible)
   ) {
-    ir_core <- ir_core |>
+    # Zap labels and add adm2 from original data
+    adm2_vals <- haven::zap_labels(dhs_ir[[survey_vars$adm2]])
+    # The helper already filtered rows, so we need to match by row
+    # Instead, re-derive from the original data columns preserved by helper
+    ir_eligible <- ir_eligible |>
       dplyr::mutate(
         adm2 = haven::as_factor(.data[[survey_vars$adm2]]) |>
           base::as.character() |>
@@ -178,67 +140,7 @@ calc_iptp_dhs_core <- function(
       )
   }
 
-  # ---- 3. filter to eligible population --------------------------------------
-
-  n_total <- nrow(ir_core)
-
-  ir_eligible <- ir_core |>
-    dplyr::filter(
-      !is.na(birth_age),
-      birth_age >= 0,
-      birth_age < birth_window_months
-    )
-
   n_eligible <- nrow(ir_eligible)
-
-  cli::cli_alert_info(
-    paste0(
-      "Filtered to ", format(n_eligible, big.mark = ","),
-      " women with birth < ", birth_window_months,
-      " months (from ", format(n_total, big.mark = ","), " total)"
-    )
-  )
-
-  if (n_eligible == 0) {
-    cli::cli_abort(
-      c(
-        "No eligible women found with births < {birth_window_months} months.",
-        "i" = "Check your birth_window_months parameter or data"
-      )
-    )
-  }
-
-  # ---- 4. create iptp indicators (DHS methodology) ---------------------------
-
-  # IPTp indicators following official DHS code:
-  # - IPTp 1+: m49a_1 == 1 (took any SP)
-
-  # - IPTp 2+: m49a_1 == 1 AND ml1_1 >= 2 AND ml1_1 <= 97
-  # - IPTp 3+: m49a_1 == 1 AND ml1_1 >= 3 AND ml1_1 <= 97
-  # Note: values > 97 are typically "don't know" (98) or missing
-
-  ir_eligible <- ir_eligible |>
-    dplyr::mutate(
-      # IPTp 1+: took any SP/Fansidar
-      iptp_1plus = dplyr::case_when(
-        sp_taken == 1 ~ 1L,
-        sp_taken != 1 ~ 0L,
-        TRUE ~ NA_integer_
-      ),
-      # IPTp 2+: took SP AND doses >= 2 (valid range)
-      iptp_2plus = dplyr::case_when(
-        sp_taken == 1 & sp_doses >= 2 & sp_doses <= 97 ~ 1L,
-        !(sp_taken == 1 & sp_doses >= 2 & sp_doses <= 97) ~ 0L,
-        TRUE ~ NA_integer_
-      ),
-      # IPTp 3+: took SP AND doses >= 3 (valid range)
-      iptp_3plus = dplyr::case_when(
-        sp_taken == 1 & sp_doses >= 3 & sp_doses <= 97 ~ 1L,
-        !(sp_taken == 1 & sp_doses >= 3 & sp_doses <= 97) ~ 0L,
-        TRUE ~ NA_integer_
-      )
-    )
-
   n_iptp1 <- sum(ir_eligible$iptp_1plus == 1, na.rm = TRUE)
   cli::cli_alert_info(
     paste0(

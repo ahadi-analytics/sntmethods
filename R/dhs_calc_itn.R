@@ -6,6 +6,9 @@
 #' data is provided, produces cluster-level results. Otherwise uses existing
 #' administrative variables in the data.
 #'
+#' @details
+#' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/itn_dhs.yml}
+#'
 #' @param dhs_hr DHS Household Records dataset (HR) in tidy format
 #'   (data.frame or tibble).
 #' @param dhs_pr DHS Person Records dataset (PR) in tidy format
@@ -183,23 +186,20 @@ calc_itn_dhs_core <- function(
 
   # ---- 2. process hr data (household level) ---------------------------------
 
-  # create core household dataset with survey fields and itn counts
-  household_core_data <- dhs_hr |>
+  household_core_data <- .prepare_itn_household_data(
+    dhs_hr = dhs_hr,
+    survey_vars = survey_vars,
+    include_survey_vars = TRUE
+  )
+
+  # Rename helper columns to match downstream expectations
+  household_core_data <- household_core_data |>
+    dplyr::rename(
+      num_itns = n_itns,
+      hh_has_itn = has_itn
+    ) |>
     dplyr::mutate(
-      cluster_id = .data[[survey_vars$cluster]],
-      survey_weight = .data[[survey_vars$weight]] / 1e6,
-      stratum_id = .data[[survey_vars$stratum]],
-      hhid = .data[[survey_vars$hhid]],
-      hh_size = .data[[survey_vars$hhsize]],
-      num_itns = dhs_hr |>
-        dplyr::select(dplyr::all_of(itn_variable_names)) |>
-        dplyr::mutate(
-          dplyr::across(
-            dplyr::everything(),
-            ~ ifelse(. == 1, 1, 0)
-          )
-        ) |>
-        base::rowSums(na.rm = TRUE)
+      hh_sufficient_nets = base::as.integer(num_itns >= (hh_size / 2))
     )
 
   # add admin variables if available
@@ -209,7 +209,7 @@ calc_itn_dhs_core <- function(
   ) {
     household_core_data <- household_core_data |>
       dplyr::mutate(
-        adm1 = haven::as_factor(.data[[survey_vars$adm1]]) |>
+        adm1 = haven::as_factor(dhs_hr[[survey_vars$adm1]]) |>
           base::as.character() |>
           toupper()
       )
@@ -221,19 +221,11 @@ calc_itn_dhs_core <- function(
   ) {
     household_core_data <- household_core_data |>
       dplyr::mutate(
-        adm2 = haven::as_factor(.data[[survey_vars$adm2]]) |>
+        adm2 = haven::as_factor(dhs_hr[[survey_vars$adm2]]) |>
           base::as.character() |>
           toupper()
       )
   }
-
-  # household-level itn indicators
-  household_core_data <- household_core_data |>
-    dplyr::mutate(
-      hh_has_itn = base::as.integer(num_itns > 0),
-      hh_sufficient_nets = base::as.integer(num_itns >= (hh_size / 2)),
-      potential_users = base::pmin(num_itns * 2, hh_size)
-    )
 
   n_households <- nrow(household_core_data)
   n_with_itn <- sum(household_core_data$hh_has_itn)
@@ -247,45 +239,21 @@ calc_itn_dhs_core <- function(
 
   # ---- 3. process pr data (individual level) --------------------------------
 
-  # core person-level dataset with survey fields and itn use
-  person_core_data <- dhs_pr |>
-    dplyr::mutate(
-      cluster_id = .data[[survey_vars$cluster]],
-      survey_weight = .data[[survey_vars$weight]] / 1e6,
-      stratum_id = .data[[survey_vars$stratum]],
-      hhid = .data[[survey_vars$hhid]],
-      age = .data[[survey_vars$age]],
-      sex = .data[[survey_vars$sex]],
-      itn_used = dplyr::if_else(
-        .data[[survey_vars$itn_use]] %in% c(1, 2),
-        1,
-        0,
-        missing = 0
-      )
-    )
+  person_merged_data <- .prepare_itn_person_data(
+    dhs_pr = dhs_pr,
+    hr_data = household_core_data |>
+      dplyr::select(cluster_id, hhid, hh_size, n_itns = num_itns, potential_users),
+    survey_vars = survey_vars,
+    include_survey_vars = TRUE
+  )
 
-  # pregnancy status where available
-  if (
-    !is.null(survey_vars$pregnant) &&
-      survey_vars$pregnant %in% names(dhs_pr)
-  ) {
-    person_core_data <- person_core_data |>
-      dplyr::mutate(
-        is_pregnant = dplyr::if_else(
-          .data[[survey_vars$pregnant]] == 1,
-          1,
-          0,
-          missing = 0
-        )
-      )
-  } else {
-    person_core_data <- person_core_data |>
-      dplyr::mutate(is_pregnant = 0)
-  }
-
-  # age groups and special flags
-  person_core_data <- person_core_data |>
+  # Rename helper columns and add derived columns for downstream
+  person_merged_data <- person_merged_data |>
+    dplyr::rename(
+      itn_access = has_access
+    ) |>
     dplyr::mutate(
+      # Age groups and special flags
       age_group = dplyr::case_when(
         age < 5 ~ "Under 5",
         age >= 5 & age < 15 ~ "5-14 years",
@@ -295,79 +263,25 @@ calc_itn_dhs_core <- function(
       is_under5 = base::as.integer(age < 5),
       is_pregnant_woman = base::as.integer(
         sex == 2 & is_pregnant == 1
-      )
-    )
-
-  # ---- 4. merge household and person data -----------------------------------
-
-  # household itn info for each person
-  household_itn_info <- household_core_data |>
-    dplyr::select(
-      hhid,
-      hh_size,
-      num_itns,
-      hh_has_itn,
-      hh_sufficient_nets,
-      potential_users
-    )
-
-  person_merged_data <- person_core_data |>
-    dplyr::left_join(household_itn_info, by = "hhid")
-
-  # check join success
-  join_success <- sum(!is.na(person_merged_data$hh_size))
-  join_rate <- round(join_success / nrow(person_merged_data) * 100, 1)
-
-  if (join_rate < 100) {
-    cli::cli_alert_warning(
-      paste0(
-        "Household join: ", join_rate,
-        "% of persons matched to households"
-      )
-    )
-  }
-
-  # ---- Calculate ITN access using deterministic assignment ----
-  # Standard DHS methodology:
-  # 1. Sort individuals by ITN use (users first) within each household
-  # 2. Assign access to the first N individuals where N = potential_users
-  # This guarantees use <= access at all levels
-  #
-  # IMPORTANT: hhid is only unique WITHIN a cluster, not globally.
-  # Must group by (cluster_id, hhid) to avoid mixing households across clusters.
-
-  person_merged_data <- person_merged_data |>
-    # Sort by cluster + household, then by ITN use (users first)
-    dplyr::arrange(cluster_id, hhid, dplyr::desc(itn_used)) |>
-    dplyr::group_by(cluster_id, hhid) |>
-    dplyr::mutate(
-      # Rank individuals within household (users get lower ranks)
-      person_index = dplyr::row_number(),
-      # Calculate access ratio for the household
+      ),
+      # Household ITN indicators for person-level analysis
+      hh_has_itn = base::as.integer(n_itns >= 1),
+      hh_sufficient_nets = base::as.integer(n_itns >= (hh_size / 2)),
+      num_itns = n_itns,
+      # Access ratio and use-if-access
       itn_access_ratio = dplyr::if_else(
         !is.na(potential_users) & !is.na(hh_size) & hh_size > 0,
         pmin(potential_users / hh_size, 1),
         NA_real_,
         missing = NA_real_
       ),
-      # Deterministic access: first N individuals get access
-      # Cap by both potential_users and hh_size defensively
-      itn_access = dplyr::if_else(
-        !is.na(potential_users) & !is.na(hh_size) &
-          person_index <= pmin(potential_users, hh_size),
-        1L,
-        0L,
-        missing = 0L
-      ),
-      # Used ITN among those with access
       itn_use_if_access = dplyr::if_else(
         itn_access == 1L & itn_used == 1L,
         1L,
         0L,
         missing = 0L
       )
-    ) |>
-    dplyr::ungroup()
+    )
 
   # add admin variables if not present
   if (

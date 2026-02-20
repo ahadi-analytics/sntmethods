@@ -4,6 +4,9 @@
 #' onto Person Records (PR) data. All individuals within the same cluster will
 #' receive the same coordinates.
 #'
+#' @details
+#' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/pfpr_dhs.yml}
+#'
 #' @param pr_data DHS Person Records dataset (data.frame or tibble). Can be
 #'   raw PR data or a processed subset that already includes `cluster_id`.
 #' @param gps_data DHS GPS dataset (data.frame or tibble) containing cluster
@@ -264,153 +267,15 @@ calc_pfpr_dhs_core <- function(
 
   # ---- prepare base dataset -----------------------------------
 
-  pr <- dhs_pr |>
-    dplyr::mutate(
-      dplyr::across(
-        dplyr::everything(),
-        haven::zap_labels
-      )
-    ) |>
-    dplyr::mutate(
-      dplyr::across(
-        dplyr::everything(),
-        ~ as.vector(.x)
-      )
-    ) |>
-    dplyr::mutate(
-      adm1 = if (has_adm1) {
-        haven::as_factor(.data[[survey_vars$adm1]]) |>
-          as.character() |>
-          toupper()
-      } else {
-        NA_character_
-      },
-      adm2 = if (has_adm2) {
-        haven::as_factor(.data[[survey_vars$adm2]]) |>
-          as.character() |>
-          toupper()
-      } else {
-        NA_character_
-      }
-    ) |>
-    dplyr::mutate(
-      dplyr::across(
-        dplyr::everything(),
-        haven::zap_labels
-      )
-    ) |>
-    dplyr::mutate(
-      cluster_id = .data[[survey_vars$cluster]],
-      survey_weight = .data[[survey_vars$weight]] / 1e6,
-      age = .data[[survey_vars$age]],
-      present = .data[[survey_vars$present]],
-      mother = .data[[survey_vars$mother]],
-      rdt_res = .data[[survey_vars$rdt]],
-      mic_res = .data[[survey_vars$mic]]
-    ) |>
-    dplyr::mutate(
-      dplyr::across(
-        .cols = dplyr::where(is.factor),
-        .fns = as.character
-      )
-    )
-
-  if (!has_adm2) {
-    pr <- pr |>
-      dplyr::select(-adm2)
-  }
-
-  # ---- construct strata ---------------------------------------
-
-  strata_fields <- character(0)
-
-  if (
-    !is.null(survey_vars$stratum) &&
-      survey_vars$stratum %in% names(dhs_pr)
-  ) {
-    # use explicit stratum mapping if provided
-    strata_fields <- survey_vars$stratum
-  } else {
-    if (has_adm1) {
-      strata_fields <- c(strata_fields, survey_vars$adm1)
-    }
-
-    if ("hv025" %in% names(dhs_pr)) {
-      strata_fields <- c(strata_fields, "hv025")
-    }
-
-    if (length(strata_fields) == 0 && "hv022" %in% names(dhs_pr)) {
-      strata_fields <- "hv022"
-    }
-  }
-
-  pr <- pr |>
-    dplyr::mutate(
-      stratum_id = interaction(
-        !!!rlang::syms(strata_fields),
-        drop = TRUE
-      )
-    )
+  pr <- .prepare_pfpr_data(
+    dhs_pr = dhs_pr,
+    survey_vars = survey_vars,
+    age_min = 6,
+    age_max = 59,
+    include_survey_vars = TRUE
+  )
 
   use_strata <- dplyr::n_distinct(pr$stratum_id) > 1
-
-  # ---- malaria test flags -------------------------------------
-
-  pr <- pr |>
-    dplyr::mutate(
-      tested_rdt = dplyr::if_else(
-        present == 1 &
-          mother == 1 &
-          age >= 6 &
-          age <= 59 &
-          rdt_res %in% c(0, 1),
-        1,
-        0,
-        missing = NA_real_
-      ),
-      tested_mic = dplyr::if_else(
-        present == 1 &
-          mother == 1 &
-          age >= 6 &
-          age <= 59 &
-          mic_res %in% c(0, 1, 6),
-        1,
-        0,
-        missing = NA_real_
-      ),
-      rdt_pos = dplyr::case_when(
-        present == 1 &
-          mother == 1 &
-          age >= 6 &
-          age <= 59 &
-          rdt_res == 1 ~ 1,
-        present == 1 &
-          mother == 1 &
-          age >= 6 &
-          age <= 59 &
-          rdt_res == 0 ~ 0,
-        TRUE ~ NA_real_
-      ),
-      mic_pos = dplyr::case_when(
-        present == 1 &
-          mother == 1 &
-          age >= 6 &
-          age <= 59 &
-          mic_res == 1 ~ 1,
-        present == 1 &
-          mother == 1 &
-          age >= 6 &
-          age <= 59 &
-          mic_res %in% c(0, 6) ~ 0,
-        TRUE ~ NA_real_
-      )
-    ) |>
-    dplyr::mutate(
-      tested_rdt = as.numeric(tested_rdt),
-      tested_mic = as.numeric(tested_mic),
-      rdt_pos = as.numeric(rdt_pos),
-      mic_pos = as.numeric(mic_pos)
-    )
 
   pr_rdt <- pr |>
     dplyr::filter(tested_rdt == 1)

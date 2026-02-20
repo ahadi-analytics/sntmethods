@@ -8,6 +8,9 @@
 #' provides additional spatial aggregation capabilities and data dictionary
 #' support.
 #'
+#' @details
+#' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/anemia_dhs.yml}
+#'
 #' @param dhs_pr DHS Person Records dataset in tidy format (data.frame or
 #'   tibble).
 #' @param survey_vars Named list mapping DHS variable names. Required keys:
@@ -19,7 +22,7 @@
 #'     \item `adm2`: Second administrative level (default: NULL)
 #'     \item `age`: Child's age in months (default: "hc1")
 #'     \item `hemoglobin`: Raw hemoglobin in tenths of g/dL (default: "hc56")
-#'     \item `hemoglobin_adj`: Altitude-adjusted hemoglobin (default: "hw57")
+#'     \item `hemoglobin_adj`: Altitude-adjusted hemoglobin (default: "hw53")
 #'     \item `present`: Present in household (1=yes, default: "hv103")
 #'     \item `mother`: Mother listed in household (1=yes, default: "hv042")
 #'   }
@@ -27,7 +30,7 @@
 #'   (default: 8.0). Children with Hb < threshold are classified as severely
 #'   anemic.
 #' @param altitude_adjusted Logical. If TRUE (default), uses altitude-adjusted
-#'   hemoglobin variable (hw57). If FALSE, uses raw hemoglobin (hc56).
+#'   hemoglobin variable (hw53). If FALSE, uses raw hemoglobin (hc56).
 #'   WHO recommends altitude adjustment for surveys in regions above 1000m.
 #' @param gps_data Optional DHS GPS dataset. If provided, results are
 #'   cluster-level.
@@ -53,7 +56,7 @@
 #' The WHO recommends adjusting hemoglobin values for altitude to account
 #' for physiological adaptation to lower oxygen at higher elevations. When
 #' `altitude_adjusted = TRUE`, the function uses the pre-computed altitude-
-#' adjusted variable (hw57) from DHS. This is particularly important for
+#' adjusted variable (hw53) from DHS. This is particularly important for
 #' surveys in highland areas.
 #'
 #' @examples
@@ -80,7 +83,7 @@ calc_severe_anemia_dhs_core <- function(
     adm2 = NULL,
     age = "hc1",
     hemoglobin = "hc56",
-    hemoglobin_adj = "hw57",
+    hemoglobin_adj = "hw53",
     present = "hv103",
     mother = "hv042"
   ),
@@ -134,7 +137,7 @@ calc_severe_anemia_dhs_core <- function(
   # ---- 1b. Select hemoglobin variable based on altitude_adjusted -----------
 
   if (altitude_adjusted) {
-    hb_var <- survey_vars$hemoglobin_adj %||% "hw57"
+    hb_var <- survey_vars$hemoglobin_adj %||% "hw53"
     if (!hb_var %in% names(dhs_pr)) {
       cli::cli_abort(
         c(
@@ -167,144 +170,33 @@ calc_severe_anemia_dhs_core <- function(
 
   # ---- 2. Prepare base dataset --------------------------------------------
 
-  pr <- dhs_pr |>
-    dplyr::mutate(
-      dplyr::across(
-        dplyr::everything(),
-        haven::zap_labels
-      )
-    ) |>
-    dplyr::mutate(
-      dplyr::across(
-        dplyr::everything(),
-        ~ as.vector(.x)
-      )
-    ) |>
-    dplyr::mutate(
-      adm1 = if (has_adm1) {
-        haven::as_factor(.data[[survey_vars$adm1]]) |>
-          as.character() |>
-          toupper()
-      } else {
-        NA_character_
-      },
-      adm2 = if (has_adm2) {
-        haven::as_factor(.data[[survey_vars$adm2]]) |>
-          as.character() |>
-          toupper()
-      } else {
-        NA_character_
-      }
-    ) |>
-    dplyr::mutate(
-      dplyr::across(
-        dplyr::everything(),
-        haven::zap_labels
-      )
-    ) |>
-    dplyr::mutate(
-      cluster_id = .data[[survey_vars$cluster]],
-      survey_weight = .data[[survey_vars$weight]] / 1e6,
-      age = .data[[survey_vars$age]],
-      hemoglobin = .data[[hb_var]],  # Uses altitude-adjusted or raw based on parameter
-      present = .data[[survey_vars$present]],
-      mother = .data[[survey_vars$mother]]
-    ) |>
-    dplyr::mutate(
-      dplyr::across(
-        .cols = dplyr::where(is.factor),
-        .fns = as.character
-      )
-    )
+  # Override hemoglobin variable based on altitude_adjusted setting
+  helper_survey_vars <- survey_vars
+  helper_survey_vars$hemoglobin <- hb_var
 
-  if (!has_adm2) {
-    pr <- pr |>
-      dplyr::select(-adm2)
-  }
-
-  # ---- 3. Construct strata ------------------------------------------------
-
-  strata_fields <- character(0)
-
-  if (
-    !is.null(survey_vars$stratum) &&
-      survey_vars$stratum %in% names(dhs_pr)
-  ) {
-    strata_fields <- survey_vars$stratum
-  } else {
-    if (has_adm1) {
-      strata_fields <- c(strata_fields, survey_vars$adm1)
-    }
-
-    if ("hv025" %in% names(dhs_pr)) {
-      strata_fields <- c(strata_fields, "hv025")
-    }
-
-    if (length(strata_fields) == 0 && "hv022" %in% names(dhs_pr)) {
-      strata_fields <- "hv022"
-    }
-  }
-
-  pr <- pr |>
-    dplyr::mutate(
-      stratum_id = interaction(
-        !!!rlang::syms(strata_fields),
-        drop = TRUE
-      )
-    )
+  pr <- .prepare_anemia_data(
+    dhs_pr = dhs_pr,
+    survey_vars = helper_survey_vars,
+    age_min = 6,
+    age_max = 59,
+    include_survey_vars = TRUE
+  )
 
   use_strata <- dplyr::n_distinct(pr$stratum_id) > 1
 
-  # ---- 4. Create anemia indicator -----------------------------------------
-  # Eligible: children 6-59 months, present, with valid hemoglobin measurement
+  # ---- 3. Create severe anemia indicators ---------------------------------
+  # The helper already filtered to eligible children with valid Hb and created
+
+  # hemoglobin in g/dL. Now create tested_hb and severe_anemia for survey design.
 
   pr <- pr |>
     dplyr::mutate(
-      # Tested = eligible child with valid hemoglobin measurement
-      tested_hb = dplyr::if_else(
-        present == 1 &
-          mother == 1 &
-          age >= 6 &
-          age <= 59 &
-          !is.na(hemoglobin) &
-          hemoglobin > 0 &
-          hemoglobin < 250,  # Valid range check (0-25 g/dL)
-        1,
-        0,
-        missing = NA_real_
-      ),
-      # Severe anemia = Hb < threshold
-      severe_anemia = dplyr::case_when(
-        present == 1 &
-          mother == 1 &
-          age >= 6 &
-          age <= 59 &
-          !is.na(hemoglobin) &
-          hemoglobin > 0 &
-          hemoglobin < hb_threshold_tenths ~ 1,
-        present == 1 &
-          mother == 1 &
-          age >= 6 &
-          age <= 59 &
-          !is.na(hemoglobin) &
-          hemoglobin >= hb_threshold_tenths ~ 0,
-        TRUE ~ NA_real_
-      )
-    ) |>
-    dplyr::mutate(
-      tested_hb = as.numeric(tested_hb),
-      severe_anemia = as.numeric(severe_anemia)
+      tested_hb = 1,  # All rows from helper are eligible with valid Hb
+      severe_anemia = as.numeric(hemoglobin < hb_threshold)
     )
 
-  # Filter to tested children
-  pr_tested <- pr |>
-    dplyr::filter(tested_hb == 1)
-
-  if (nrow(pr_tested) == 0) {
-    cli::cli_abort(
-      "No eligible children (6-59 months) with valid hemoglobin measurements found."
-    )
-  }
+  # Filter to tested children (all from helper are already tested)
+  pr_tested <- pr
 
   n_severe <- sum(pr_tested$severe_anemia == 1, na.rm = TRUE)
   cli::cli_alert_info(
@@ -508,7 +400,7 @@ extract_dhs_metadata_anemia <- function(
   if (!is.null(hb_var)) {
     metadata$hemoglobin_variable <- hb_var
   } else if (altitude_adjusted) {
-    metadata$hemoglobin_variable <- survey_vars$hemoglobin_adj %||% "hw57"
+    metadata$hemoglobin_variable <- survey_vars$hemoglobin_adj %||% "hw53"
   } else {
     metadata$hemoglobin_variable <- survey_vars$hemoglobin %||% "hc56"
   }
@@ -539,7 +431,7 @@ extract_dhs_metadata_anemia <- function(
 #'     \item `adm2`: Second administrative level (default: NULL)
 #'     \item `age`: Child's age in months (default: "hc1")
 #'     \item `hemoglobin`: Raw hemoglobin in tenths of g/dL (default: "hc56")
-#'     \item `hemoglobin_adj`: Altitude-adjusted hemoglobin (default: "hw57")
+#'     \item `hemoglobin_adj`: Altitude-adjusted hemoglobin (default: "hw53")
 #'     \item `present`: Present in household (1=yes, default: "hv103")
 #'     \item `mother`: Mother listed in household (1=yes, default: "hv042")
 #'   }
@@ -547,7 +439,7 @@ extract_dhs_metadata_anemia <- function(
 #'   (default: 8.0). Children with Hb < threshold are classified as severely
 #'   anemic.
 #' @param altitude_adjusted Logical. If TRUE (default), uses altitude-adjusted
-#'   hemoglobin variable (hw57). If FALSE, uses raw hemoglobin (hc56).
+#'   hemoglobin variable (hw53). If FALSE, uses raw hemoglobin (hc56).
 #'   WHO recommends altitude adjustment for surveys in regions above 1000m.
 #' @param gps_data Optional DHS GPS dataset with cluster coordinates.
 #' @param gps_vars Named list for GPS variables (cluster, lat, lon).
@@ -605,7 +497,7 @@ calc_severe_anemia_dhs <- function(
     adm2 = NULL,
     age = "hc1",
     hemoglobin = "hc56",
-    hemoglobin_adj = "hw57",
+    hemoglobin_adj = "hw53",
     present = "hv103",
     mother = "hv042"
   ),

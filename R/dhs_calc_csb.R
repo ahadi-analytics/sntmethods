@@ -3,6 +3,9 @@
 #' Estimates care-seeking behavior for febrile children under 5 using
 #' the WHO World Malaria Report (WMR) methodology with overlapping indicators.
 #'
+#' @details
+#' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/csb_dhs.yml}
+#'
 #' @param dhs_kr DHS children's recode (KR) dataset in tidy format
 #'   (data.frame or tibble).
 #' @param survey_vars Named list mapping DHS variable names. Required keys:
@@ -260,144 +263,14 @@ calc_csb_dhs_core <- function(
     )
   }
 
-  # ---- 3. Prepare base dataset ----------------------------------------------
+  # ---- 3. Prepare base dataset and create indicators -------------------------
 
-  # Check if alive variable exists
-  has_alive <- !is.null(survey_vars$alive) &&
-    survey_vars$alive %in% names(dhs_kr)
-
-  kr <- dhs_kr |>
-    dplyr::mutate(
-      cluster_id = .data[[survey_vars$cluster]],
-      survey_weight = .data[[survey_vars$weight]] / 1e6,
-      stratum_id = .data[[survey_vars$stratum]],
-      age_months = .data[[survey_vars$age]],
-      had_fever = .data[[survey_vars$fever]],
-      child_alive = if (has_alive) .data[[survey_vars$alive]] else NA_real_
-    )
-
-  # Filter to children under 5 with valid fever data
-  kr_eligible <- kr |>
-    dplyr::filter(
-      age_months >= 0,
-      age_months <= 59,
-      had_fever %in% c(0, 1)
-    )
-
-  if (nrow(kr_eligible) == 0) {
-    cli::cli_abort(
-      "No eligible children (0-59 months) with valid fever data found."
-    )
-  }
-
-  # Filter to children who had fever
-  kr_fever <- kr_eligible |>
-    dplyr::filter(had_fever == 1)
-
-  if (nrow(kr_fever) == 0) {
-    cli::cli_abort(
-      "No children with fever in the last 2 weeks found in the dataset."
-    )
-  }
-
-  cli::cli_alert_info(
-    paste0(
-      "Found {format(nrow(kr_fever), big.mark = ',')} children with fever ",
-      "out of {format(nrow(kr_eligible), big.mark = ',')} eligible children"
-    )
+  kr_fever <- .prepare_csb_data(
+    dhs_kr = dhs_kr,
+    survey_vars = survey_vars,
+    csb_classification = csb_classification,
+    include_survey_vars = TRUE
   )
-
-  # ---- 4. Create care-seeking indicators (WMR methodology) -----------------
-  # This implements the WHO World Malaria Report methodology:
-  # 1. Reshape h32 variables to long format
-
-  # 2. Join to classification table
-  # 3. Aggregate to 5 base categories per child
-  # 4. Create derived overlapping indicators
-
-  # Add row ID for joining back after reshape
-  kr_fever <- kr_fever |>
-    dplyr::mutate(.row_id = dplyr::row_number())
-
-  # Get h32 columns that are in our classification
-  h32_cols <- intersect(csb_classification$variable, names(kr_fever))
-
-  # Reshape h32 to long format and join to classification
-  kr_long <- kr_fever |>
-    dplyr::select(.row_id, dplyr::all_of(h32_cols)) |>
-    tidyr::pivot_longer(
-      cols = dplyr::all_of(h32_cols),
-      names_to = "variable",
-      values_to = "visited"
-    ) |>
-    dplyr::left_join(
-      csb_classification |> dplyr::select(variable, csb),
-      by = "variable"
-    ) |>
-    dplyr::filter(visited == 1)  # Keep only sources that were visited
-
-  # Aggregate to base categories per child
-  if (nrow(kr_long) > 0) {
-    base_cats <- kr_long |>
-      dplyr::group_by(.row_id, csb) |>
-      dplyr::summarise(visited = 1L, .groups = "drop") |>
-      tidyr::pivot_wider(
-        names_from = csb,
-        values_from = visited,
-        values_fill = 0L,
-        names_prefix = "has_"
-      )
-
-    # Join back to main data
-    kr_fever <- kr_fever |>
-      dplyr::left_join(base_cats, by = ".row_id")
-  }
-
-  # Ensure all 5 base categories exist (even if no children visited them)
-  base_category_cols <- c(
-    "has_public", "has_chw", "has_private_formal",
-    "has_private_informal", "has_pharmacy"
-  )
-
-  for (col in base_category_cols) {
-    if (!col %in% names(kr_fever)) {
-      kr_fever[[col]] <- 0L
-    }
-    # Replace NA with 0 (children who had fever but visited no sources)
-    kr_fever[[col]] <- tidyr::replace_na(kr_fever[[col]], 0L)
-  }
-
-  # Create derived indicators (WMR methodology)
-  kr_fever <- kr_fever |>
-    dplyr::mutate(
-      # csb_public = public OR chw
-      csb_public = as.numeric(has_public == 1 | has_chw == 1),
-
-      # csb_private = private_formal OR private_informal OR pharmacy
-      csb_private = as.numeric(
-        has_private_formal == 1 |
-        has_private_informal == 1 |
-        has_pharmacy == 1
-      ),
-
-      # csb_private_formal_pha = private_formal OR pharmacy
-      csb_private_formal_pha = as.numeric(
-        has_private_formal == 1 |
-        has_pharmacy == 1
-      ),
-
-      # csb_any_treatment = csb_public OR csb_private
-      csb_any_treatment = as.numeric(csb_public == 1 | csb_private == 1),
-
-      # csb_no_treatment = NOT(csb_any_treatment)
-      csb_no_treatment = as.numeric(csb_any_treatment == 0),
-
-      # csb_trained_provider = csb_public OR csb_private_formal_pha
-      csb_trained_provider = as.numeric(
-        csb_public == 1 |
-        csb_private_formal_pha == 1
-      )
-    )
 
   # Verify mathematical invariant: any + none must equal 1
   stopifnot(

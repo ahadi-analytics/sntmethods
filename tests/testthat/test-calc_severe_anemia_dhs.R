@@ -261,7 +261,7 @@ test_that("calc_severe_anemia_dhs_core produces consistent results", {
 test_that("calc_severe_anemia_dhs_core uses altitude-adjusted Hb by default", {
   skip_if_not_installed("survey")
 
-  # Data with both raw (hc56) and altitude-adjusted (hw57) hemoglobin
+  # Data with both raw (hc56) and altitude-adjusted (hw53) hemoglobin
   # Values are different to verify correct variable selection
   pr_data <- data.frame(
     hv001 = 1:10,
@@ -272,12 +272,12 @@ test_that("calc_severe_anemia_dhs_core uses altitude-adjusted Hb by default", {
     # Raw hemoglobin: 2 with severe anemia (Hb < 80)
     hc56 = c(60, 70, 85, 90, 95, 100, 110, 120, 130, 140),
     # Altitude-adjusted: 4 with severe anemia (Hb < 80)
-    hw57 = c(60, 65, 70, 75, 90, 95, 100, 110, 120, 130),
+    hw53 = c(60, 65, 70, 75, 90, 95, 100, 110, 120, 130),
     hv103 = rep(1, 10),
     hv042 = rep(1, 10)
   )
 
-  # Default (altitude_adjusted = TRUE) should use hw57
+  # Default (altitude_adjusted = TRUE) should use hw53
   result_default <- calc_severe_anemia_dhs_core(pr_data)
   expect_equal(result_default$dhs_n_severe_anemia, 4)
 
@@ -289,7 +289,7 @@ test_that("calc_severe_anemia_dhs_core uses altitude-adjusted Hb by default", {
 test_that("calc_severe_anemia_dhs_core errors when altitude-adjusted var missing", {
   skip_if_not_installed("survey")
 
-  # Data without hw57 (altitude-adjusted variable)
+  # Data without hw53 (altitude-adjusted variable)
   pr_data <- data.frame(
     hv001 = 1:10,
     hv005 = rep(1000000, 10),
@@ -301,7 +301,7 @@ test_that("calc_severe_anemia_dhs_core errors when altitude-adjusted var missing
     hv042 = rep(1, 10)
   )
 
-  # Default (altitude_adjusted = TRUE) should error because hw57 is missing
+  # Default (altitude_adjusted = TRUE) should error because hw53 is missing
   expect_error(
     calc_severe_anemia_dhs_core(pr_data),
     "Altitude-adjusted hemoglobin variable"
@@ -328,7 +328,7 @@ test_that("calc_severe_anemia_dhs metadata includes altitude adjustment info", {
     hv024 = rep("CENTRE", n_children),
     hc1 = sample(6:59, n_children, replace = TRUE),
     hc56 = sample(50:150, n_children, replace = TRUE),
-    hw57 = sample(50:150, n_children, replace = TRUE),
+    hw53 = sample(50:150, n_children, replace = TRUE),
     hv103 = rep(1, n_children),
     hv042 = rep(1, n_children)
   )
@@ -336,7 +336,7 @@ test_that("calc_severe_anemia_dhs metadata includes altitude adjustment info", {
   # Test with altitude_adjusted = TRUE (default)
   result_adj <- calc_severe_anemia_dhs(pr_data, altitude_adjusted = TRUE)
   expect_true(result_adj$metadata$altitude_adjusted)
-  expect_equal(result_adj$metadata$hemoglobin_variable, "hw57")
+  expect_equal(result_adj$metadata$hemoglobin_variable, "hw53")
 
   # Test with altitude_adjusted = FALSE
   result_raw <- calc_severe_anemia_dhs(pr_data, altitude_adjusted = FALSE)
