@@ -168,25 +168,25 @@
     antimalarial = list(
       en = "Received any antimalarial",
       fr = "A recu un antipaludique",
-      dhs_var = "ml13a-h",
+      dhs_var = "ml13a-h (or h37a-h)",
       num = "Febrile children receiving any antimalarial",
       den = "Febrile children under 5",
-      dhs_num = "ml13a-h", dhs_den = "h22"
+      dhs_num = "ml13a-h (or h37a-h)", dhs_den = "h22"
     ),
     act = list(
       en = "Received ACT", fr = "A recu un CTA",
-      dhs_var = "ml13e",
+      dhs_var = "ml13e (or h37e)",
       num = "Febrile children receiving ACT",
       den = "Febrile children under 5",
-      dhs_num = "ml13e", dhs_den = "h22"
+      dhs_num = "ml13e (or h37e)", dhs_den = "h22"
     ),
     act_tested = list(
       en = "Received ACT (test-positive)",
       fr = "A recu un CTA (testes positifs)",
-      dhs_var = "ml13e",
+      dhs_var = "ml13e (or h37e)",
       num = "Test-positive children receiving ACT",
       den = "Test-positive febrile children",
-      dhs_num = "ml13e", dhs_den = "h47/ml1"
+      dhs_num = "ml13e (or h37e)", dhs_den = "h47/ml1"
     ),
     # PfPR
     pfpr_rdt = list(

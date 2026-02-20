@@ -37,9 +37,20 @@
     ))
   }
 
-  has_act_var <- survey_vars$act %in% names(dhs_kr)
-  if (!has_act_var) {
-    cli::cli_abort("ACT variable {.var {survey_vars$act}} not found in data")
+  # Detect ACT variable: prefer ml13e (newer surveys), fall back to h37e (older surveys).
+  # h37e = "Combination with artemisinin taken for fever/cough" in older DHS surveys.
+  act_var <- survey_vars$act
+  if (!act_var %in% names(dhs_kr)) {
+    if ("h37e" %in% names(dhs_kr)) {
+      cli::cli_alert_info(
+        "ACT variable {.var {act_var}} not found; using {.var h37e} (artemisinin combination for fever/cough)"
+      )
+      act_var <- "h37e"
+    } else {
+      cli::cli_abort(
+        "ACT variable {.var {act_var}} not found in data (also tried {.var h37e})"
+      )
+    }
   }
   has_test_var <- survey_vars$test %in% names(dhs_kr)
 
@@ -54,7 +65,7 @@
       cluster_id = .data[[survey_vars$cluster]],
       age_months = .data[[survey_vars$age]],
       had_fever = .data[[survey_vars$fever]],
-      received_act = .data[[survey_vars$act]]
+      received_act = .data[[act_var]]
     )
 
   if (has_test_var) {
@@ -84,7 +95,7 @@
   }
 
   if (all(is.na(kr_fever$received_act))) {
-    cli::cli_abort("ACT variable {.var {survey_vars$act}} is all NA for febrile children")
+    cli::cli_abort("ACT variable {.var {act_var}} is all NA for febrile children")
   }
 
   # Create binary ACT indicator

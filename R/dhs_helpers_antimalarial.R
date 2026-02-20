@@ -37,18 +37,35 @@
     ))
   }
 
-  # Auto-detect available ml13* variables
+  # Auto-detect available antimalarial variables.
+  # Prefer ml13* series (drug-specific, newer surveys);
+  # fall back to h37* series (older DHS surveys use h37a-h for drug-specific treatment).
+  # NOTE: ml1 is NOT a safe fallback — in some surveys (e.g. BFA 2021) ml1 = "Times took
+  #       Fansidar during pregnancy" (IPTp), not child fever treatment.
   ml13_vars <- grep("^ml13[a-z]*$", names(dhs_kr), value = TRUE)
-  if (length(ml13_vars) == 0) {
-    cli::cli_abort(c(
-      "No ml13 antimalarial variables found in data.",
-      "i" = "Expected variables like ml13a, ml13b, ml13c, ml13d, ml13e, etc."
-    ))
-  }
+  h37_vars <- character(0)
+  use_h37_fallback <- FALSE
 
-  cli::cli_alert_info(
-    "Detected {length(ml13_vars)} ml13 antimalarial variables: {paste(ml13_vars, collapse = ', ')}"
-  )
+  if (length(ml13_vars) == 0) {
+    # h37a-h = drug-specific treatment for child fever/cough in older DHS surveys
+    h37_vars <- grep("^h37[a-h]$", names(dhs_kr), value = TRUE)
+    if (length(h37_vars) > 0) {
+      cli::cli_alert_info(
+        "No ml13* variables found; using h37* series as fallback: {paste(h37_vars, collapse = ', ')}"
+      )
+      use_h37_fallback <- TRUE
+    } else {
+      cli::cli_abort(c(
+        "No antimalarial treatment variables found in data.",
+        "i" = "Checked for ml13a/ml13b/... (newer surveys) and h37a-h (older surveys).",
+        "i" = "Verify that this survey includes malaria treatment questions."
+      ))
+    }
+  } else {
+    cli::cli_alert_info(
+      "Detected {length(ml13_vars)} ml13 antimalarial variables: {paste(ml13_vars, collapse = ', ')}"
+    )
+  }
 
   # Zap labels
   kr <- dhs_kr |>
@@ -83,16 +100,30 @@
     cli::cli_abort("No children with fever in the last 2 weeks found.")
   }
 
-  # Create binary antimalarial indicator: 1 if ANY ml13 variable == 1
-  ml13_matrix <- as.matrix(kr_fever[, ml13_vars, drop = FALSE])
-  kr_fever$received_antimalarial <- apply(ml13_matrix, 1, function(row) {
-    if (all(is.na(row))) return(NA_real_)
-    if (any(row == 1, na.rm = TRUE)) return(1)
-    return(0)
-  })
+  # Create binary antimalarial indicator
+  if (use_h37_fallback) {
+    # h37* series: 1 if ANY drug variable == 1
+    # Each h37x records whether a specific drug was taken for fever/cough
+    h37_matrix <- as.matrix(kr_fever[, h37_vars, drop = FALSE])
+    kr_fever$received_antimalarial <- apply(h37_matrix, 1, function(row) {
+      if (all(is.na(row))) return(NA_real_)
+      if (any(row == 1, na.rm = TRUE)) return(1)
+      return(0)
+    })
+    attr(kr_fever, "ml13_vars_found") <- h37_vars
+  } else {
+    # ml13* series: 1 if ANY drug variable == 1
+    ml13_matrix <- as.matrix(kr_fever[, ml13_vars, drop = FALSE])
+    kr_fever$received_antimalarial <- apply(ml13_matrix, 1, function(row) {
+      if (all(is.na(row))) return(NA_real_)
+      if (any(row == 1, na.rm = TRUE)) return(1)
+      return(0)
+    })
+    attr(kr_fever, "ml13_vars_found") <- ml13_vars
+  }
 
   if (all(is.na(kr_fever$received_antimalarial))) {
-    cli::cli_abort("All ml13 antimalarial variables are NA for febrile children")
+    cli::cli_abort("All antimalarial variables are NA for febrile children")
   }
 
   # Create binary indicator for survey estimation
@@ -102,9 +133,6 @@
         received_antimalarial == 1, 1, 0, missing = NA_real_
       )
     )
-
-  # Also flag which ml13 vars were found (for metadata)
-  attr(kr_fever, "ml13_vars_found") <- ml13_vars
 
   cli::cli_alert_info(
     "Found {format(nrow(kr_fever), big.mark = ',')} febrile children under 5"

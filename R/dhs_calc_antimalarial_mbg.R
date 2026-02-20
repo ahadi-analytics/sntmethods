@@ -91,7 +91,7 @@ calc_antimalarial_mbg <- function(
   if (is.null(kr_fever)) return(list())
 
   if (all(is.na(kr_fever$has_antimalarial))) {
-    cli::cli_alert_warning("All ml13 antimalarial variables are NA")
+    cli::cli_alert_warning("All antimalarial variables are NA")
     return(list())
   }
 
