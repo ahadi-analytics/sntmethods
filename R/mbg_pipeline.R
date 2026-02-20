@@ -240,13 +240,13 @@ run_mbg_indicator_pipeline <- function(
   # ---- Input Validation ----
 
   # Validate indicator names
+  # antimalarial/act/act_tested already filter to febrile U5 via KR helper
   valid_indicators <- c(
     "pfpr", "itn", "irs", "anc", "csb", "act", "anemia", "iptp", "epi",
     "u5mr", "smc", "fever", "malaria_dx", "antimalarial",
     # ITN sub-indicators (selectable individually for faster pipelines)
     "itn_ownership", "itn_access", "itn_use_all", "itn_use_u5",
-    "itn_use_pregnant", "itn_use_if_access",
-    # (antimalarial, act, act_tested already filter to febrile U5 via KR helper)
+    "itn_use_pregnant", "itn_use_if_access"
   )
   invalid_indicators <- setdiff(indicators, valid_indicators)
   if (length(invalid_indicators) > 0) {
