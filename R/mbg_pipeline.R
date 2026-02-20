@@ -1576,6 +1576,12 @@ run_mbg_indicator_pipeline <- function(
   }
 
   primary_vect <- terra::vect(primary_sf)
+  # Use a unique integer row index as the polygon ID to avoid failures when
+  # admin names are duplicated across provinces (e.g. two "Central" districts).
+  # adm estimates are extracted via terra::extract() directly on primary_sf so
+  # this does not affect output column names or values.
+  primary_vect$poly_id <- seq_len(nrow(primary_vect))
+  polygon_id_field <- "poly_id"
 
   # ---- Cache ID raster ----
   id_raster_file <- fs::path(
