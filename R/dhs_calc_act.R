@@ -105,15 +105,21 @@ calc_act_dhs <- function(
     ))
   }
 
-  # Check ACT variable
+  # Check ACT variable (ml13e preferred; fall back to h37e for older surveys)
   has_act_var <- survey_vars$act %in% names(dhs_kr)
   has_test_var <- survey_vars$test %in% names(dhs_kr)
 
   if (!has_act_var) {
-    cli::cli_abort(c(
-      "ACT variable {.var {survey_vars$act}} not found in data",
-      "i" = "Check your survey_vars mapping"
-    ))
+    if ("h37e" %in% names(dhs_kr)) {
+      cli::cli_alert_info(
+        "ACT variable {.var {survey_vars$act}} not found; will use {.var h37e} (artemisinin combination for fever/cough)"
+      )
+    } else {
+      cli::cli_abort(c(
+        "ACT variable {.var {survey_vars$act}} not found in data (also tried {.var h37e})",
+        "i" = "Check your survey_vars mapping"
+      ))
+    }
   }
 
   # Validate region_var if provided

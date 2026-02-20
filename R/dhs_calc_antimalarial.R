@@ -36,9 +36,10 @@
 #'   }
 #'
 #' @details
-#' This function auto-detects all available ml13* variables (ml13a through
-#' ml13g, ml13aa, etc.) and creates a composite indicator: received_antimalarial
-#' = 1 if ANY ml13 variable equals 1. ACT (ml13e) is a subset of this indicator.
+#' Auto-detects the available drug series at runtime: ml13* variables (ml13a
+#' through ml13g, ml13aa, etc.) are preferred. If absent, falls back to the
+#' h37a-h series used in older DHS surveys (e.g. BFA 2021). received_antimalarial
+#' = 1 if ANY detected drug variable equals 1. ACT (ml13e / h37e) is a subset.
 #'
 #' @examples
 #' \dontrun{
@@ -92,12 +93,14 @@ calc_antimalarial_dhs_core <- function(
     ))
   }
 
-  # Check for ml13 variables
+  # Check for antimalarial variables (ml13* preferred, h37a-h fallback for older surveys)
   ml13_vars <- grep("^ml13[a-z]*$", names(dhs_kr), value = TRUE)
-  if (length(ml13_vars) == 0) {
+  h37_vars  <- grep("^h37[a-h]$", names(dhs_kr), value = TRUE)
+  if (length(ml13_vars) == 0 && length(h37_vars) == 0) {
     cli::cli_abort(c(
-      "No ml13 antimalarial variables found in data.",
-      "i" = "Expected variables like ml13a, ml13b, ml13c, ml13d, ml13e, etc."
+      "No antimalarial treatment variables found in data.",
+      "i" = "Checked for ml13a/ml13b/... (newer surveys) and h37a-h (older surveys).",
+      "i" = "Verify that this survey includes malaria treatment questions."
     ))
   }
 
@@ -414,11 +417,11 @@ calc_antimalarial_dhs <- function(
 
   labels <- tibble::tribble(
     ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~notes,
-    "dhs_antimalarial", "Any antimalarial treatment", "Traitement antipaludique (tout type)", "ml13a-ml13h", "Febrile children receiving antimalarial", "Febrile children under 5", "ml13a-h", "h22", "Step 3 of WMR cascade; any antimalarial drug (auto-detected ml13 series)",
-    "dhs_antimalarial_low", "Antimalarial - lower 95% CI", "Antipaludique - IC 95% inferieur", "ml13a-ml13h", NA_character_, NA_character_, NA_character_, NA_character_, "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_antimalarial_upp", "Antimalarial - upper 95% CI", "Antipaludique - IC 95% superieur", "ml13a-ml13h", NA_character_, NA_character_, NA_character_, NA_character_, "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_antimalarial", "Any antimalarial treatment", "Traitement antipaludique (tout type)", "ml13a-h (or h37a-h)", "Febrile children receiving antimalarial", "Febrile children under 5", "ml13a-h (or h37a-h)", "h22", "Step 3 of WMR cascade; ml13* used when present, h37a-h fallback for older surveys (e.g. BFA 2021)",
+    "dhs_antimalarial_low", "Antimalarial - lower 95% CI", "Antipaludique - IC 95% inferieur", "ml13a-h (or h37a-h)", NA_character_, NA_character_, NA_character_, NA_character_, "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_antimalarial_upp", "Antimalarial - upper 95% CI", "Antipaludique - IC 95% superieur", "ml13a-h (or h37a-h)", NA_character_, NA_character_, NA_character_, NA_character_, "Survey-weighted 95% CI, clamped to [0,1]",
     "dhs_n_febrile", "Number of febrile children (denominator)", "Nombre d'enfants febriles (denominateur)", "h22", NA_character_, NA_character_, NA_character_, NA_character_, "Unweighted count",
-    "dhs_n_antimalarial", "Number receiving antimalarial (numerator)", "Nombre recevant un antipaludique (numerateur)", "ml13a-h", NA_character_, NA_character_, NA_character_, NA_character_, "Unweighted count"
+    "dhs_n_antimalarial", "Number receiving antimalarial (numerator)", "Nombre recevant un antipaludique (numerateur)", "ml13a-h (or h37a-h)", NA_character_, NA_character_, NA_character_, NA_character_, "Unweighted count"
   )
 
   dict <- sntutils::build_dictionary(am_data)
@@ -464,10 +467,17 @@ calc_antimalarial_dhs <- function(
   metadata$cascade_step <- 3L
   metadata$processed_date <- Sys.Date()
 
-  # Detect ml13 variables
+  # Detect antimalarial variables (ml13* preferred, h37a-h fallback)
   ml13_vars <- grep("^ml13[a-z]*$", names(dhs_kr), value = TRUE)
-  metadata$ml13_vars_detected <- ml13_vars
-  metadata$n_ml13_vars <- length(ml13_vars)
+  h37_vars  <- grep("^h37[a-h]$", names(dhs_kr), value = TRUE)
+  if (length(ml13_vars) > 0) {
+    metadata$antimalarial_vars_detected <- ml13_vars
+    metadata$antimalarial_series <- "ml13"
+  } else {
+    metadata$antimalarial_vars_detected <- h37_vars
+    metadata$antimalarial_series <- if (length(h37_vars) > 0) "h37" else "none"
+  }
+  metadata$n_antimalarial_vars <- length(metadata$antimalarial_vars_detected)
 
   metadata
 }
