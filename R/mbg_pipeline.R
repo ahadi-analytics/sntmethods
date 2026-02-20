@@ -1359,22 +1359,20 @@ run_mbg_indicator_pipeline <- function(
     dt <- cluster_data[[ind_name]]
     if (is.null(dt) || nrow(dt) == 0) next
 
-    # Copy to avoid modifying original
-    dt <- data.table::copy(dt)
+    # Convert to tibble to avoid data.table namespace issues
+    df <- tibble::as_tibble(dt)
 
     # Combined tables already have final column names — save directly
     if (!grepl("^pfpr_combined_", ind_name)) {
-      # Get meaningful column labels for this indicator
       labels <- .get_indicator_labels(ind_name)
 
-      # Add context-appropriate alias columns
-      data.table::set(dt, j = labels$numerator, value = dt$indicator)
-      data.table::set(dt, j = labels$denominator, value = dt$samplesize)
-      data.table::set(dt, j = "prop_raw", value = dt$indicator / dt$samplesize)
-
-      # Drop raw 'indicator' and 'samplesize' columns (redundant with named aliases)
-      data.table::set(dt, j = "indicator", value = NULL)
-      data.table::set(dt, j = "samplesize", value = NULL)
+      df <- df |>
+        dplyr::mutate(
+          !!labels$numerator := .data$indicator,
+          !!labels$denominator := .data$samplesize,
+          prop_raw = .data$indicator / .data$samplesize
+        ) |>
+        dplyr::select(-"indicator", -"samplesize")
     }
 
     # Versioned save: {country}_{indicator}_cluster_points_{type}_{year}_v{date}.qs2
