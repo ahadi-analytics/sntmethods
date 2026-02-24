@@ -7,16 +7,21 @@
 #' @param survey_vars Named list mapping DHS variable names. Must include
 #'   cluster and irs. Optionally: weight, stratum for DHS.
 #' @param include_survey_vars Logical. If TRUE, includes survey design columns.
+#' @param strict Logical. If TRUE (default), abort when the IRS variable and
+#'   hv253a-z fallbacks are all absent. If FALSE, emit a warning and return
+#'   NULL instead.
 #'
 #' @return A data frame of households with columns:
 #'   cluster_id, sprayed (binary 0/1).
 #'   If include_survey_vars = TRUE, also: survey_weight, stratum_id.
+#'   Returns NULL (when strict = FALSE) if IRS data is unavailable.
 #'
 #' @noRd
 .prepare_irs_data <- function(
   dhs_hr,
   survey_vars,
-  include_survey_vars = FALSE
+  include_survey_vars = FALSE,
+  strict = TRUE
 ) {
   if (!is.data.frame(dhs_hr)) {
     cli::cli_abort("`dhs_hr` must be a data.frame or tibble")
@@ -25,11 +30,36 @@
     cli::cli_abort("`dhs_hr` is empty.")
   }
 
-  if (!survey_vars$irs %in% names(dhs_hr)) {
-    cli::cli_abort(c(
-      "IRS variable {.var {survey_vars$irs}} not found in HR data",
-      "i" = "IRS coverage data may not be available for this survey"
-    ))
+  irs_col <- survey_vars$irs
+
+  if (!irs_col %in% names(dhs_hr)) {
+    sprayed_by_vars <- grep("^hv253[a-z]$", names(dhs_hr), value = TRUE)
+
+    if (length(sprayed_by_vars) > 0) {
+      cli::cli_alert_warning(
+        "{.var {irs_col}} not found; deriving IRS from {.val {sprayed_by_vars}}"
+      )
+      dhs_hr <- dhs_hr |>
+        dplyr::mutate(
+          irs_derived = dplyr::case_when(
+            dplyr::if_any(dplyr::all_of(sprayed_by_vars), ~ .x == 1L) ~ 1L,
+            dplyr::if_any(dplyr::all_of(sprayed_by_vars), ~ .x == 0L) ~ 0L,
+            TRUE ~ NA_integer_
+          )
+        )
+      irs_col <- "irs_derived"
+    } else if (strict) {
+      cli::cli_abort(c(
+        "IRS variable {.var {irs_col}} not found in HR data",
+        "i" = "IRS coverage data may not be available for this survey"
+      ))
+    } else {
+      cli::cli_warn(
+        "IRS variable {.var {irs_col}} not found and no {.val hv253a-z} columns present; ",
+        "IRS coverage not available for this survey"
+      )
+      return(NULL)
+    }
   }
 
   hr <- dhs_hr |>
@@ -37,7 +67,7 @@
     dplyr::mutate(dplyr::across(dplyr::everything(), as.vector)) |>
     dplyr::mutate(
       cluster_id = .data[[survey_vars$cluster]],
-      irs_sprayed = .data[[survey_vars$irs]]
+      irs_sprayed = .data[[irs_col]]
     )
 
   if (include_survey_vars) {

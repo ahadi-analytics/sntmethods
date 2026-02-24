@@ -59,15 +59,13 @@ calc_irs_mbg <- function(
 
   # ---- Prepare HR data ----
 
-  hr <- .prepare_irs_data(dhs_hr, survey_vars, include_survey_vars = FALSE)
+  hr <- .prepare_irs_data(dhs_hr, survey_vars, include_survey_vars = FALSE, strict = FALSE)
+  if (is.null(hr)) return(NULL)
 
   # ---- Aggregate to cluster level ----
 
   result <- .aggregate_to_mbg_clusters(hr, "sprayed", gps_clean, "irs_coverage")
-
-  if (is.null(result)) {
-    cli::cli_abort("No valid MBG data could be prepared for IRS coverage")
-  }
+  if (is.null(result)) return(NULL)
 
   result
 }

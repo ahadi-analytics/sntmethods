@@ -41,15 +41,17 @@ variables:
 
   irs_sprayed:
     dhs_name: "hv253"
+    fallback: "hv253a-z (any sprayed-by flag == 1)"
     description: "Household sprayed with residual insecticide in last 12 months"
     values:
       0: "No"
       1: "Yes"
     note: >
-      This is a household-level variable. Distinct from hv253a (walls of dwelling
-      sprayed), which is used in some surveys but is NOT used by this implementation.
-      hv253 may not be available in all DHS surveys; it is typically included in
-      Malaria Indicator Surveys (MIS) and DHS surveys in malaria-endemic countries.
+      Household-level variable. If hv253 is absent, the function derives IRS
+      coverage from hv253a-z ("dwelling sprayed by ...") columns: sprayed = 1
+      if any flag equals 1, sprayed = 0 if none equal 1 but some equal 0,
+      NA otherwise. If neither hv253 nor any hv253a-z column is present, IRS
+      is treated as not available for that survey and the indicator is skipped.
 
   gps_cluster:
     dhs_name: "DHSCLUST"
