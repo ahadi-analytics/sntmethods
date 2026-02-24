@@ -658,17 +658,17 @@
       paste0("N tested - ", info$en),
       paste0("N testes - ", info$fr),
       info$dhs_var,
-      na_chr, na_chr, na_chr, na_chr,
+      den, na_chr, dhs_den, na_chr,
       meta$recode, meta$category, meta$cascade, meta$age, "count",
-      "Unweighted cluster-level denominator aggregated to admin area",
+      "Unweighted cluster-level denominator count aggregated to admin area",
 
       paste0("n_pos_", ind),
       paste0("N positive - ", info$en),
       paste0("N positifs - ", info$fr),
       info$dhs_var,
-      na_chr, na_chr, na_chr, na_chr,
+      num, den, dhs_num, dhs_den,
       meta$recode, meta$category, meta$cascade, meta$age, "count",
-      "Unweighted cluster-level numerator aggregated to admin area",
+      "Unweighted cluster-level numerator count aggregated to admin area",
 
       paste0("n_clusters_", ind),
       paste0("N clusters - ", info$en),
@@ -682,7 +682,7 @@
       paste0(info$en, " - Raw"),
       paste0(info$fr, " - Brut"),
       info$dhs_var,
-      na_chr, na_chr, na_chr, na_chr,
+      num, den, dhs_num, dhs_den,
       meta$recode, meta$category, meta$cascade, meta$age, meta$base_unit,
       "Unweighted cluster proportion (n_pos / n_tested)"
     )
