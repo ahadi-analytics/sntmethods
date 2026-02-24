@@ -95,7 +95,7 @@ test_that("calc_csb_mbg computes public indicator", {
   expect_true("csb_public" %in% names(result))
 
   dt <- result[["csb_public"]]
-  expect_s3_class(dt, "data.table")
+  expect_s3_class(dt, "tbl_df")
   expect_true(all(c("cluster_id", "indicator", "samplesize", "x", "y") %in% names(dt)))
   expect_true(all(dt$indicator <= dt$samplesize))
 })
@@ -187,13 +187,13 @@ test_that("calc_csb_mbg excludes (0,0) GPS coordinates", {
 
 # ---- prep_csb_mbg ----
 
-test_that("prep_csb_mbg returns single data.table", {
+test_that("prep_csb_mbg returns single tibble", {
   kr <- .mock_kr_csb_mbg()
   gps <- .mock_gps_csb()
 
   dt <- prep_csb_mbg(kr, gps, indicator = "public")
 
-  expect_s3_class(dt, "data.table")
+  expect_s3_class(dt, "tbl_df")
   expect_true(all(c("cluster_id", "indicator", "samplesize", "x", "y") %in% names(dt)))
 })
 

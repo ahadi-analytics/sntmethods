@@ -32,7 +32,7 @@
 #'   }
 #' @param gps_vars Named list for GPS variable mapping.
 #'
-#' @return A list of data.tables (one per age group + test type combination),
+#' @return A list of tibbles (one per age group + test type combination),
 #'   each with columns:
 #'   \itemize{
 #'     \item cluster_id: Cluster identifier
@@ -42,7 +42,7 @@
 #'     \item y: Latitude
 #'   }
 #'   When \code{test_type = "both"}, additional \code{pfpr_combined_*} tables
-#'   are included with columns: cluster_id, latitude, longitude, n_tested,
+#'   are included with columns: cluster_id, x, y, n_tested,
 #'   n_positive_mic, prop_raw_mic, n_positive_rdt, prop_raw_rdt,
 #'   n_positive_either, prop_raw_either.
 #'   Use [save_mbg_cluster_data()] to save with additional columns (n_positive,
@@ -211,46 +211,43 @@ calc_pfpr_mbg <- function(
         combined_name <- paste0("pfpr_combined_", age_name)
 
         # Start from either result (correct n_tested denominator)
-        combined <- data.table::copy(results[[either_name]])
-        data.table::setnames(
-          combined,
-          c("indicator", "samplesize"),
-          c("n_positive_either", "n_tested")
-        )
-        combined[, prop_raw_either := n_positive_either / n_tested]
-
-        # Rename coordinates to readable names
-        data.table::setnames(combined, c("x", "y"), c("longitude", "latitude"))
+        combined <- results[[either_name]] |>
+          dplyr::rename(n_positive_either = indicator, n_tested = samplesize) |>
+          dplyr::mutate(prop_raw_either = n_positive_either / n_tested)
 
         # Left join RDT counts
         if (rdt_name %in% names(results)) {
-          rdt_dt <- results[[rdt_name]][
-            , .(cluster_id, n_positive_rdt = indicator)
-          ]
-          combined <- merge(combined, rdt_dt, by = "cluster_id", all.x = TRUE)
-          combined[is.na(n_positive_rdt), n_positive_rdt := 0L]
-          combined[, prop_raw_rdt := n_positive_rdt / n_tested]
+          rdt_df <- results[[rdt_name]] |>
+            dplyr::select(cluster_id, n_positive_rdt = indicator)
+          combined <- combined |>
+            dplyr::left_join(rdt_df, by = "cluster_id") |>
+            dplyr::mutate(
+              n_positive_rdt = dplyr::coalesce(n_positive_rdt, 0L),
+              prop_raw_rdt = n_positive_rdt / n_tested
+            )
         }
 
         # Left join microscopy counts
         if (mic_name %in% names(results)) {
-          mic_dt <- results[[mic_name]][
-            , .(cluster_id, n_positive_mic = indicator)
-          ]
-          combined <- merge(combined, mic_dt, by = "cluster_id", all.x = TRUE)
-          combined[is.na(n_positive_mic), n_positive_mic := 0L]
-          combined[, prop_raw_mic := n_positive_mic / n_tested]
+          mic_df <- results[[mic_name]] |>
+            dplyr::select(cluster_id, n_positive_mic = indicator)
+          combined <- combined |>
+            dplyr::left_join(mic_df, by = "cluster_id") |>
+            dplyr::mutate(
+              n_positive_mic = dplyr::coalesce(n_positive_mic, 0L),
+              prop_raw_mic = n_positive_mic / n_tested
+            )
         }
 
-        # Reorder columns
+        # Reorder columns (keep x, y consistent with all other cluster tables)
         col_order <- intersect(
-          c("cluster_id", "latitude", "longitude", "n_tested",
+          c("cluster_id", "x", "y", "n_tested",
             "n_positive_mic", "prop_raw_mic",
             "n_positive_rdt", "prop_raw_rdt",
             "n_positive_either", "prop_raw_either"),
           names(combined)
         )
-        data.table::setcolorder(combined, col_order)
+        combined <- dplyr::select(combined, dplyr::all_of(col_order))
 
         results[[combined_name]] <- combined
 
@@ -475,7 +472,7 @@ calc_pfpr_mbg <- function(
 #' @param age_min Minimum age in months (inclusive). Default: 6.
 #' @param age_max Maximum age in months (inclusive). Default: 59.
 #'
-#' @return A data.table with columns: cluster_id, indicator, samplesize, x, y
+#' @return A tibble with columns: cluster_id, indicator, samplesize, x, y
 #'
 #' @export
 prep_pfpr_mbg <- function(

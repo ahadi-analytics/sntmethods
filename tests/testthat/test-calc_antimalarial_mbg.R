@@ -64,7 +64,7 @@ test_that("calc_antimalarial_mbg computes antimalarial indicator with valid data
   expect_true("antimalarial" %in% names(result))
 
   dt <- result[["antimalarial"]]
-  expect_s3_class(dt, "data.table")
+  expect_s3_class(dt, "tbl_df")
   expect_true(all(c("cluster_id", "indicator", "samplesize", "x", "y") %in% names(dt)))
 
   # Numerator <= denominator
@@ -179,13 +179,13 @@ test_that("calc_antimalarial_mbg excludes (0,0) GPS coordinates", {
 
 # ---- prep_antimalarial_mbg ----
 
-test_that("prep_antimalarial_mbg returns single data.table", {
+test_that("prep_antimalarial_mbg returns single tibble", {
   kr <- .mock_kr_antimalarial()
   gps <- .mock_gps_antimalarial()
 
   dt <- prep_antimalarial_mbg(kr, gps, indicator = "antimalarial")
 
-  expect_s3_class(dt, "data.table")
+  expect_s3_class(dt, "tbl_df")
   expect_true(all(c("cluster_id", "indicator", "samplesize", "x", "y") %in% names(dt)))
 })
 

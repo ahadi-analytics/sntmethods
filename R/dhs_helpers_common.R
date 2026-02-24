@@ -79,5 +79,5 @@
 
   cli::cli_alert_success("{result_name}: {nrow(cluster_data)} clusters")
 
-  data.table::as.data.table(cluster_data)
+  cluster_data
 }

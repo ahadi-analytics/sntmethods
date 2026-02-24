@@ -58,7 +58,7 @@ test_that("calc_act_mbg computes act indicator with valid ml13e", {
   expect_true("act" %in% names(result))
 
   dt <- result[["act"]]
-  expect_s3_class(dt, "data.table")
+  expect_s3_class(dt, "tbl_df")
   expect_true(all(c("cluster_id", "indicator", "samplesize", "x", "y") %in% names(dt)))
 
   # Numerator <= denominator
@@ -104,7 +104,7 @@ test_that("calc_act_mbg computes act_tested with valid data", {
   # act_tested may or may not be present depending on data
   if ("act_tested" %in% names(result)) {
     dt <- result[["act_tested"]]
-    expect_s3_class(dt, "data.table")
+    expect_s3_class(dt, "tbl_df")
     expect_true(all(c("cluster_id", "indicator", "samplesize", "x", "y") %in% names(dt)))
     expect_true(all(dt$indicator <= dt$samplesize))
   }
@@ -175,13 +175,13 @@ test_that("calc_act_mbg excludes (0,0) GPS coordinates", {
 
 # ---- prep_act_mbg ----
 
-test_that("prep_act_mbg returns single data.table", {
+test_that("prep_act_mbg returns single tibble", {
   kr <- .mock_kr_act()
   gps <- .mock_gps()
 
   dt <- prep_act_mbg(kr, gps, indicator = "act")
 
-  expect_s3_class(dt, "data.table")
+  expect_s3_class(dt, "tbl_df")
   expect_true(all(c("cluster_id", "indicator", "samplesize", "x", "y") %in% names(dt)))
 })
 

@@ -57,7 +57,7 @@ test_that("calc_fever_mbg computes fever indicator with valid data", {
   expect_true("fever" %in% names(result))
 
   dt <- result[["fever"]]
-  expect_s3_class(dt, "data.table")
+  expect_s3_class(dt, "tbl_df")
   expect_true(all(c("cluster_id", "indicator", "samplesize", "x", "y") %in% names(dt)))
 
   # Numerator <= denominator
@@ -151,13 +151,13 @@ test_that("calc_fever_mbg excludes (0,0) GPS coordinates", {
 
 # ---- prep_fever_mbg ----
 
-test_that("prep_fever_mbg returns single data.table", {
+test_that("prep_fever_mbg returns single tibble", {
   kr <- .mock_kr_fever()
   gps <- .mock_gps_fever()
 
   dt <- prep_fever_mbg(kr, gps, indicator = "fever")
 
-  expect_s3_class(dt, "data.table")
+  expect_s3_class(dt, "tbl_df")
   expect_true(all(c("cluster_id", "indicator", "samplesize", "x", "y") %in% names(dt)))
 })
 
