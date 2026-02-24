@@ -14,6 +14,14 @@ indicators:
       Proportion of women who received at least one antenatal care visit
       during their most recent pregnancy.
 
+  anc_3plus:
+    name: "ANC 3+ visits"
+    numerator: "Women with at least 3 ANC visits"
+    denominator: "Women with births in analysis window"
+    description: >
+      Proportion of women who received at least three antenatal care visits.
+      Note: anc_3plus >= anc_4plus for all groups (cumulative indicator).
+
   anc_4plus:
     name: "ANC 4+ visits"
     numerator: "Women with at least 4 ANC visits"
@@ -112,12 +120,33 @@ methodology:
     m14_1 which both refer to the most recent birth.
 
 output_format:
-  columns:
+  mbg_cluster_output:
     cluster_id: "Cluster identifier"
     indicator: "Number of women meeting threshold"
     samplesize: "Total women with recent births"
     x: "Longitude"
     y: "Latitude"
+
+  dhs_survey_output:
+    grouping_note: >
+      Grouping column is the region variable (v024 by default, or the
+      region_var argument). When no region variable is available, a single
+      row with level = "National" is returned.
+    columns:
+      dhs_anc_1plus: "Proportion with 1+ ANC visits (survey-weighted)"
+      dhs_anc_1plus_low: "Lower 95% CI for ANC 1+ (clamped to 0)"
+      dhs_anc_1plus_upp: "Upper 95% CI for ANC 1+ (clamped to 1)"
+      dhs_anc_3plus: "Proportion with 3+ ANC visits (survey-weighted)"
+      dhs_anc_3plus_low: "Lower 95% CI for ANC 3+ (clamped to 0)"
+      dhs_anc_3plus_upp: "Upper 95% CI for ANC 3+ (clamped to 1)"
+      dhs_anc_4plus: "Proportion with 4+ ANC visits (survey-weighted)"
+      dhs_anc_4plus_low: "Lower 95% CI for ANC 4+ (clamped to 0)"
+      dhs_anc_4plus_upp: "Upper 95% CI for ANC 4+ (clamped to 1)"
+      dhs_anc_8plus: "Proportion with 8+ ANC visits (survey-weighted)"
+      dhs_anc_8plus_low: "Lower 95% CI for ANC 8+ (clamped to 0)"
+      dhs_anc_8plus_upp: "Upper 95% CI for ANC 8+ (clamped to 1)"
+      dhs_n_recent_births: "Unweighted count of eligible women (denominator)"
+    monotonicity: "dhs_anc_1plus >= dhs_anc_3plus >= dhs_anc_4plus >= dhs_anc_8plus"
 
 validation:
   - "Birth must be within analysis window"

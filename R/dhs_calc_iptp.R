@@ -119,7 +119,8 @@ calc_iptp_dhs_core <- function(
     dplyr::mutate(
       iptp_1plus = as.integer(has_1plus),
       iptp_2plus = as.integer(has_2plus),
-      iptp_3plus = as.integer(has_3plus)
+      iptp_3plus = as.integer(has_3plus),
+      iptp_4plus = as.integer(has_4plus)
     )
 
   # Add adm2 if available and not already present
@@ -486,6 +487,39 @@ calc_iptp_dhs_core <- function(
     )
   }
 
+  # 7d. IPTp 4+ coverage
+  if (!is.null(grouping_vars)) {
+    iptp4_results <- survey::svyby(
+      ~iptp_4plus,
+      by = grouping_formula,
+      design = design,
+      FUN = survey::svymean,
+      vartype = "ci",
+      keep.names = FALSE,
+      na.rm = TRUE
+    ) |>
+      tibble::as_tibble() |>
+      dplyr::rename(
+        ci_l.iptp_4plus = ci_l,
+        ci_u.iptp_4plus = ci_u
+      )
+  } else {
+    iptp4_mean <- survey::svymean(
+      ~iptp_4plus,
+      design = design,
+      na.rm = TRUE
+    )
+
+    iptp4_ci <- stats::confint(iptp4_mean)
+
+    iptp4_results <- tibble::tibble(
+      level = "National",
+      iptp_4plus = base::as.numeric(iptp4_mean),
+      ci_l.iptp_4plus = iptp4_ci[1, 1],
+      ci_u.iptp_4plus = iptp4_ci[1, 2]
+    )
+  }
+
   # ---- 8. calculate sample sizes ---------------------------------------------
 
   if (!is.null(grouping_vars)) {
@@ -507,6 +541,10 @@ calc_iptp_dhs_core <- function(
           iptp_3plus == 1,
           na.rm = TRUE
         ),
+        dhs_n_iptp_4plus = base::sum(
+          iptp_4plus == 1,
+          na.rm = TRUE
+        ),
         .groups = "drop"
       )
   } else {
@@ -523,6 +561,10 @@ calc_iptp_dhs_core <- function(
       ),
       dhs_n_iptp_3plus = base::sum(
         ir_eligible$iptp_3plus == 1,
+        na.rm = TRUE
+      ),
+      dhs_n_iptp_4plus = base::sum(
+        ir_eligible$iptp_4plus == 1,
         na.rm = TRUE
       )
     )
@@ -541,6 +583,10 @@ calc_iptp_dhs_core <- function(
         by = grouping_vars
       ) |>
       dplyr::left_join(
+        iptp4_results,
+        by = grouping_vars
+      ) |>
+      dplyr::left_join(
         sample_sizes,
         by = grouping_vars
       )
@@ -552,6 +598,10 @@ calc_iptp_dhs_core <- function(
       ) |>
       dplyr::bind_cols(
         iptp3_results |>
+          dplyr::select(-level)
+      ) |>
+      dplyr::bind_cols(
+        iptp4_results |>
           dplyr::select(-level)
       ) |>
       dplyr::bind_cols(
@@ -571,7 +621,10 @@ calc_iptp_dhs_core <- function(
     dhs_iptp_2_upp = "ci_u.iptp_2plus",
     dhs_iptp_3 = "iptp_3plus",
     dhs_iptp_3_low = "ci_l.iptp_3plus",
-    dhs_iptp_3_upp = "ci_u.iptp_3plus"
+    dhs_iptp_3_upp = "ci_u.iptp_3plus",
+    dhs_iptp_4 = "iptp_4plus",
+    dhs_iptp_4_low = "ci_l.iptp_4plus",
+    dhs_iptp_4_upp = "ci_u.iptp_4plus"
   )
 
   for (new_name in names(rename_map)) {
@@ -635,18 +688,22 @@ calc_iptp_dhs_core <- function(
     "dhs_iptp_1",
     "dhs_iptp_2",
     "dhs_iptp_3",
+    "dhs_iptp_4",
     # sample sizes
     "dhs_n_women",
     "dhs_n_iptp_1plus",
     "dhs_n_iptp_2plus",
     "dhs_n_iptp_3plus",
+    "dhs_n_iptp_4plus",
     # confidence intervals
     "dhs_iptp_1_low",
     "dhs_iptp_1_upp",
     "dhs_iptp_2_low",
     "dhs_iptp_2_upp",
     "dhs_iptp_3_low",
-    "dhs_iptp_3_upp"
+    "dhs_iptp_3_upp",
+    "dhs_iptp_4_low",
+    "dhs_iptp_4_upp"
   )
 
   column_order <- base::intersect(
@@ -740,7 +797,8 @@ extract_dhs_metadata_iptp <- function(
   metadata$indicators <- c(
     "IPTp 1+ (one or more doses)",
     "IPTp 2+ (two or more doses)",
-    "IPTp 3+ (three or more doses)"
+    "IPTp 3+ (three or more doses)",
+    "IPTp 4+ (four or more doses)"
   )
 
   metadata$variable_mapping <- survey_vars
@@ -876,13 +934,17 @@ calc_iptp_dhs <- function(
     "dhs_iptp_2", "IPTp 2+ dose coverage", "Couverture TPI 2+ doses", "m49a_1, ml1_1", "Women receiving 2+ SP doses", "Women with recent birth", "m49a_1", "v208", "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "IR module; women with recent birth (last 24 months)",
     "dhs_iptp_2_low", "IPTp 2+ - lower 95% CI", "TPI 2+ - IC 95% inferieur", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
     "dhs_iptp_2_upp", "IPTp 2+ - upper 95% CI", "TPI 2+ - IC 95% superieur", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_iptp_3", "IPTp 3+ dose coverage", "Couverture TPI 3+ doses", "m49a_1, ml1_1", "Women receiving 3+ SP doses", "Women with recent birth", "m49a_1", "v208", "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "IR module; women with recent birth (last 24 months)",
+    "dhs_iptp_3", "IPTp 3+ dose coverage", "Couverture TPI 3+ doses", "m49a_1, ml1_1", "Women receiving 3+ SP doses", "Women with recent birth", "m49a_1", "v208", "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "IR module; WHO-recommended minimum; women with recent birth (last 24 months)",
     "dhs_iptp_3_low", "IPTp 3+ - lower 95% CI", "TPI 3+ - IC 95% inferieur", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
     "dhs_iptp_3_upp", "IPTp 3+ - upper 95% CI", "TPI 3+ - IC 95% superieur", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_iptp_4", "IPTp 4+ dose coverage", "Couverture TPI 4+ doses", "ml1_1", "Women receiving 4+ SP doses", "Women with recent birth", "ml1_1", "v208", "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "IR module; requires ml1_1 (dose count); iptp_4plus <= iptp_3plus",
+    "dhs_iptp_4_low", "IPTp 4+ - lower 95% CI", "TPI 4+ - IC 95% inferieur", "ml1_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_iptp_4_upp", "IPTp 4+ - upper 95% CI", "TPI 4+ - IC 95% superieur", "ml1_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
     "dhs_n_women", "Number of eligible women (denominator)", "Nombre de femmes eligibles (denominateur)", "v208", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "count", "Unweighted count",
     "dhs_n_iptp_1plus", "Number with 1+ SP doses", "Nombre avec 1+ doses de SP", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "count", "Unweighted count",
     "dhs_n_iptp_2plus", "Number with 2+ SP doses", "Nombre avec 2+ doses de SP", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "count", "Unweighted count",
-    "dhs_n_iptp_3plus", "Number with 3+ SP doses", "Nombre avec 3+ doses de SP", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "count", "Unweighted count"
+    "dhs_n_iptp_3plus", "Number with 3+ SP doses", "Nombre avec 3+ doses de SP", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "count", "Unweighted count",
+    "dhs_n_iptp_4plus", "Number with 4+ SP doses", "Nombre avec 4+ doses de SP", "ml1_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "count", "Unweighted count"
   )
 
   dict <- sntutils::build_dictionary(iptp_results)

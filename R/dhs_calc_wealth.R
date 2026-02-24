@@ -694,7 +694,12 @@ calc_wealth_dhs_core <- function(
     "dhs_dominant_quintile",
     "dhs_dominant_prop",
     # inequality measure
-    "dhs_gini"
+    "dhs_gini",
+    # sample counts and reliability
+    "dhs_n_households",
+    "dhs_weighted_households",
+    "dhs_gini_sample_size",
+    "dhs_gini_reliable"
   )
 
   final_columns <- base::intersect(final_columns, names(wealth_dist))

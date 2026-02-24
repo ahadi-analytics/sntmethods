@@ -71,12 +71,30 @@
     }
   }
 
+  # Derive category column from indicator_category + variable name
+  if ("indicator_category" %in% names(enriched)) {
+    enriched$category <- dplyr::case_when(
+      enriched$indicator_category == "ITN" ~ "ITNs",
+      enriched$indicator_category == "Malaria" &
+        grepl("pfpr", enriched$variable, ignore.case = TRUE) ~ "Parasite rate",
+      enriched$indicator_category == "Malaria" ~ "Case management",
+      is.na(enriched$indicator_category) &
+        grepl(
+          "^adm[0-9]|^iso3_code$|^dhs_code$|^survey_year$|^survey_type$",
+          enriched$variable
+        ) ~ "Key info",
+      !is.na(enriched$indicator_category) ~ enriched$indicator_category,
+      TRUE ~ NA_character_
+    )
+  }
+
   # Validate labels against data
   .validate_dictionary_labels(enriched, labels)
 
   # Reorder columns: structural first, then DHS-specific, then stats
   desired_order <- c(
     "variable", "type", "label_en", "label_fr",
+    "category",
     "dhs_variable", "numerator", "denominator",
     "dhs_numerator_var", "dhs_denominator_var",
     "dhs_recode", "indicator_category", "wmr_cascade_step",
@@ -187,6 +205,22 @@
       num = "Test-positive children receiving ACT",
       den = "Test-positive febrile children",
       dhs_num = "ml13e (or h37e)", dhs_den = "h47/ml1"
+    ),
+    febrile_rdt_pos = list(
+      en = "RDT positivity rate (febrile U5)",
+      fr = "Taux de positivite TDR (enfants febriles < 5 ans)",
+      dhs_var = "hml35",
+      num = "Febrile children under 5 with positive RDT",
+      den = "Febrile children under 5 with valid RDT result",
+      dhs_num = "hml35", dhs_den = "hml35"
+    ),
+    febrile_rdt_pos_act = list(
+      en = "ACT coverage among febrile RDT+ children",
+      fr = "Couverture CTA chez les enfants febriles TDR+",
+      dhs_var = "ml13e (or h37e)",
+      num = "Febrile RDT-positive children receiving ACT",
+      den = "Febrile children under 5 with positive RDT",
+      dhs_num = "ml13e (or h37e)", dhs_den = "hml35"
     ),
     # PfPR
     pfpr_rdt = list(
@@ -388,6 +422,13 @@
       den = "Women with recent birth",
       dhs_num = "m14_1", dhs_den = "v201"
     ),
+    anc_3plus = list(
+      en = "At least 3 ANC visits", fr = "Au moins 3 visites CPN",
+      dhs_var = "m14_1",
+      num = "Women with >= 3 ANC visits",
+      den = "Women with recent birth",
+      dhs_num = "m14_1", dhs_den = "v201"
+    ),
     anc_4plus = list(
       en = "At least 4 ANC visits", fr = "Au moins 4 visites CPN",
       dhs_var = "m14_1",
@@ -423,6 +464,13 @@
       num = "Women receiving >= 3 SP doses",
       den = "Women with recent birth",
       dhs_num = "m49a_1/ml1_1", dhs_den = "v201"
+    ),
+    iptp_4plus = list(
+      en = "At least 4 doses IPTp-SP", fr = "Au moins 4 doses TPI-SP",
+      dhs_var = "ml1_1",
+      num = "Women receiving >= 4 SP doses",
+      den = "Women with recent birth",
+      dhs_num = "ml1_1", dhs_den = "v201"
     ),
     iptp_1only = list(
       en = "Exactly 1 dose IPTp-SP", fr = "Exactement 1 dose TPI-SP",
@@ -653,14 +701,14 @@
   na_int <- NA_integer_
   tibble::tribble(
     ~variable,     ~label_en,                                      ~label_fr,                                            ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~dhs_recode, ~indicator_category, ~wmr_cascade_step, ~age_group, ~units,    ~notes,
-    "iso3_code",   "ISO 3166-1 alpha-3 country code",              "Code pays ISO 3166-1 alpha-3",                       na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      na_chr,              na_int,            na_chr,     na_chr,    na_chr,
-    "dhs_code",    "DHS country code",                             "Code pays DHS",                                      na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      na_chr,              na_int,            na_chr,     na_chr,    na_chr,
-    "adm0",        "Administrative level 0 (country)",             "Niveau administratif 0 (pays)",                      na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      na_chr,              na_int,            na_chr,     na_chr,    na_chr,
-    "adm1",        "Administrative level 1 (province/region)",     "Niveau administratif 1 (province/region)",           na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      na_chr,              na_int,            na_chr,     na_chr,    na_chr,
-    "adm2",        "Administrative level 2 (district/zone)",       "Niveau administratif 2 (district/zone de sante)",    na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      na_chr,              na_int,            na_chr,     na_chr,    na_chr,
-    "adm3",        "Administrative level 3 (commune/subdistrict)", "Niveau administratif 3 (commune/sous-district)",     na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      na_chr,              na_int,            na_chr,     na_chr,    na_chr,
-    "survey_year", "Survey year",                                  "Annee de l'enquete",                                 na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      na_chr,              na_int,            na_chr,     na_chr,    na_chr,
-    "survey_type", "Survey type (DHS, MIS, etc.)",                 "Type d'enquete (EDS, EIP, etc.)",                    na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      na_chr,              na_int,            na_chr,     na_chr,    na_chr
+    "iso3_code",   "ISO 3166-1 alpha-3 country code",              "Code pays ISO 3166-1 alpha-3",                       na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      "Key info",          na_int,            na_chr,     na_chr,    na_chr,
+    "dhs_code",    "DHS country code",                             "Code pays DHS",                                      na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      "Key info",          na_int,            na_chr,     na_chr,    na_chr,
+    "adm0",        "Administrative level 0 (country)",             "Niveau administratif 0 (pays)",                      na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      "Key info",          na_int,            na_chr,     na_chr,    na_chr,
+    "adm1",        "Administrative level 1 (province/region)",     "Niveau administratif 1 (province/region)",           na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      "Key info",          na_int,            na_chr,     na_chr,    na_chr,
+    "adm2",        "Administrative level 2 (district/zone)",       "Niveau administratif 2 (district/zone de sante)",    na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      "Key info",          na_int,            na_chr,     na_chr,    na_chr,
+    "adm3",        "Administrative level 3 (commune/subdistrict)", "Niveau administratif 3 (commune/sous-district)",     na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      "Key info",          na_int,            na_chr,     na_chr,    na_chr,
+    "survey_year", "Survey year",                                  "Annee de l'enquete",                                 na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      "Key info",          na_int,            na_chr,     na_chr,    na_chr,
+    "survey_type", "Survey type (DHS, MIS, etc.)",                 "Type d'enquete (EDS, EIP, etc.)",                    na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      "Key info",          na_int,            na_chr,     na_chr,    na_chr
   )
 }
 
@@ -687,8 +735,10 @@
     csb_trained       = list(recode = "KR", category = "Malaria",       cascade = 1L, age = "0-59 months"),
     malaria_dx        = list(recode = "KR", category = "Malaria",       cascade = 2L, age = "0-59 months"),
     antimalarial      = list(recode = "KR", category = "Malaria",       cascade = 3L, age = "0-59 months"),
-    act               = list(recode = "KR", category = "Malaria",       cascade = 4L, age = "0-59 months"),
-    act_tested        = list(recode = "KR", category = "Malaria",       cascade = 4L, age = "0-59 months"),
+    act               = list(recode = "KR",    category = "Malaria", cascade = 4L,      age = "0-59 months"),
+    act_tested        = list(recode = "KR",    category = "Malaria", cascade = 4L,      age = "0-59 months"),
+    febrile_rdt_pos   = list(recode = "KR+PR", category = "Malaria", cascade = 2L,      age = "0-59 months"),
+    febrile_rdt_pos_act = list(recode = "KR+PR", category = "Malaria", cascade = 4L,    age = "0-59 months"),
     # PfPR — PR module
     pfpr_rdt          = list(recode = "PR", category = "Malaria",       cascade = na_int, age = "6-59 months"),
     pfpr_mic          = list(recode = "PR", category = "Malaria",       cascade = na_int, age = "6-59 months"),
@@ -718,12 +768,14 @@
     anemia_severe_only = list(recode = "PR", category = "Nutrition",    cascade = na_int, age = "6-59 months"),
     # ANC — IR module
     anc_1plus         = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49"),
+    anc_3plus         = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49"),
     anc_4plus         = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49"),
     anc_8plus         = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49"),
     # IPTp — IR module
     iptp_1plus        = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49"),
     iptp_2plus        = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49"),
     iptp_3plus        = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49"),
+    iptp_4plus        = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49"),
     iptp_1only        = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49"),
     iptp_2only        = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49"),
     iptp_3only        = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49"),

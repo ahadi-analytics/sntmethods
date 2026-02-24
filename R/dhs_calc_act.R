@@ -27,6 +27,11 @@
 #'   (e.g., c("adm1", "adm2")).
 #' @param join_nearest Logical; if TRUE, assigns clusters outside polygons
 #'   to nearest admin unit. Default: TRUE.
+#' @param dhs_pr Optional DHS Person Recode (PR) dataset. When provided,
+#'   two additional indicators are computed: `dhs_febrile_rdt_pos` (RDT
+#'   positivity rate among febrile children with a valid test result) and
+#'   `dhs_febrile_rdt_pos_act` (ACT coverage among febrile RDT-positive
+#'   children). Requires PR to contain hml35 and linkage via hv001/hv002/hvidx.
 #'
 #' @return Tibble with ACT estimates by grouping level, including:
 #'   \itemize{
@@ -82,7 +87,8 @@ calc_act_dhs <- function(
   ),
   shapefile = NULL,
   admin_level = NULL,
-  join_nearest = TRUE
+  join_nearest = TRUE,
+  dhs_pr = NULL
 ) {
   # ---- 1. Input validation ----
 
@@ -435,6 +441,163 @@ calc_act_dhs <- function(
     act_results$dhs_n_tested <- sum(kr_fever$test_positive == 1, na.rm = TRUE)
   }
 
+  # ---- 6.5. Febrile RDT indicators (if dhs_pr provided) ----
+
+  if (!is.null(dhs_pr)) {
+    kr_merged <- .merge_kr_pr_febrile(kr_fever = kr_fever, dhs_pr = dhs_pr)
+
+    if (!is.null(kr_merged)) {
+      use_strata_rdt <- dplyr::n_distinct(kr_merged$stratum_id) > 1
+      if (use_strata_rdt) {
+        des_rdt <- survey::svydesign(
+          ids = ~cluster_id, strata = ~stratum_id,
+          weights = ~survey_weight, data = kr_merged, nest = TRUE
+        )
+      } else {
+        des_rdt <- survey::svydesign(
+          ids = ~cluster_id, weights = ~survey_weight,
+          data = kr_merged, nest = TRUE
+        )
+      }
+
+      # febrile_rdt_pos: RDT positivity rate among febrile children with valid test
+      if (!is.null(class_var)) {
+        rdt_pos_results <- tryCatch({
+          survey::svyby(
+            ~has_rdt_pos, by = group_formula, design = des_rdt,
+            FUN = survey::svymean, vartype = "ci", na.rm = TRUE,
+            keep.names = FALSE
+          ) |> tibble::as_tibble()
+        }, error = function(e) {
+          cli::cli_alert_warning("Could not calculate febrile_rdt_pos by group: {e$message}")
+          NULL
+        })
+      } else {
+        rdt_mean <- survey::svymean(~has_rdt_pos, design = des_rdt, na.rm = TRUE)
+        rdt_ci   <- stats::confint(rdt_mean)
+        rdt_pos_results <- tibble::tibble(
+          level              = "National",
+          has_rdt_pos        = as.numeric(rdt_mean["has_rdt_pos"]),
+          `ci_l.has_rdt_pos` = rdt_ci["has_rdt_pos", 1],
+          `ci_u.has_rdt_pos` = rdt_ci["has_rdt_pos", 2]
+        )
+      }
+
+      if (!is.null(rdt_pos_results)) {
+        names(rdt_pos_results)[names(rdt_pos_results) == "ci_l"] <- "ci_l.has_rdt_pos"
+        names(rdt_pos_results)[names(rdt_pos_results) == "ci_u"] <- "ci_u.has_rdt_pos"
+
+        rdt_pos_results <- rdt_pos_results |>
+          dplyr::rename(
+            dhs_febrile_rdt_pos     = has_rdt_pos,
+            dhs_febrile_rdt_pos_low = `ci_l.has_rdt_pos`,
+            dhs_febrile_rdt_pos_upp = `ci_u.has_rdt_pos`
+          ) |>
+          dplyr::mutate(
+            dhs_febrile_rdt_pos     = round(dhs_febrile_rdt_pos, 2),
+            dhs_febrile_rdt_pos_low = pmax(0, round(dhs_febrile_rdt_pos_low, 2)),
+            dhs_febrile_rdt_pos_upp = pmin(1, round(dhs_febrile_rdt_pos_upp, 2))
+          )
+
+        join_by_rdt <- if (!is.null(class_var)) class_var else "level"
+        act_results <- act_results |>
+          dplyr::left_join(
+            rdt_pos_results |> dplyr::select(
+              dplyr::all_of(join_by_rdt),
+              dhs_febrile_rdt_pos, dhs_febrile_rdt_pos_low, dhs_febrile_rdt_pos_upp
+            ),
+            by = join_by_rdt
+          )
+      }
+
+      # febrile_rdt_pos_act: ACT coverage among febrile RDT-positive children
+      kr_rdt_pos <- kr_merged |>
+        dplyr::filter(has_rdt_pos == 1, !is.na(received_act))
+
+      if (nrow(kr_rdt_pos) > 0 && dplyr::n_distinct(kr_rdt_pos$cluster_id) > 1) {
+        use_strata_rpa <- dplyr::n_distinct(kr_rdt_pos$stratum_id) > 1
+        if (use_strata_rpa) {
+          des_rpa <- survey::svydesign(
+            ids = ~cluster_id, strata = ~stratum_id,
+            weights = ~survey_weight, data = kr_rdt_pos, nest = TRUE
+          )
+        } else {
+          des_rpa <- survey::svydesign(
+            ids = ~cluster_id, weights = ~survey_weight,
+            data = kr_rdt_pos, nest = TRUE
+          )
+        }
+
+        if (!is.null(class_var) && class_var %in% names(kr_rdt_pos)) {
+          rpa_results <- tryCatch({
+            survey::svyby(
+              ~has_act, by = group_formula, design = des_rpa,
+              FUN = survey::svymean, vartype = "ci", na.rm = TRUE,
+              keep.names = FALSE
+            ) |> tibble::as_tibble()
+          }, error = function(e) {
+            cli::cli_alert_warning("Could not calculate febrile_rdt_pos_act by group: {e$message}")
+            NULL
+          })
+        } else {
+          rpa_mean <- survey::svymean(~has_act, design = des_rpa, na.rm = TRUE)
+          rpa_ci   <- stats::confint(rpa_mean)
+          rpa_results <- tibble::tibble(
+            level          = "National",
+            has_act        = as.numeric(rpa_mean["has_act"]),
+            `ci_l.has_act` = rpa_ci["has_act", 1],
+            `ci_u.has_act` = rpa_ci["has_act", 2]
+          )
+        }
+
+        if (!is.null(rpa_results)) {
+          names(rpa_results)[names(rpa_results) == "ci_l"] <- "ci_l.has_act"
+          names(rpa_results)[names(rpa_results) == "ci_u"] <- "ci_u.has_act"
+
+          rpa_results <- rpa_results |>
+            dplyr::rename(
+              dhs_febrile_rdt_pos_act     = has_act,
+              dhs_febrile_rdt_pos_act_low = `ci_l.has_act`,
+              dhs_febrile_rdt_pos_act_upp = `ci_u.has_act`
+            ) |>
+            dplyr::mutate(
+              dhs_febrile_rdt_pos_act     = round(dhs_febrile_rdt_pos_act, 2),
+              dhs_febrile_rdt_pos_act_low = pmax(0, round(dhs_febrile_rdt_pos_act_low, 2)),
+              dhs_febrile_rdt_pos_act_upp = pmin(1, round(dhs_febrile_rdt_pos_act_upp, 2))
+            )
+
+          join_by_rpa <- if (!is.null(class_var)) class_var else "level"
+          act_results <- act_results |>
+            dplyr::left_join(
+              rpa_results |> dplyr::select(
+                dplyr::all_of(join_by_rpa),
+                dhs_febrile_rdt_pos_act, dhs_febrile_rdt_pos_act_low, dhs_febrile_rdt_pos_act_upp
+              ),
+              by = join_by_rpa
+            )
+        }
+      } else {
+        cli::cli_alert_warning("Too few RDT-positive children for febrile_rdt_pos_act estimates")
+      }
+
+      # Sample sizes for RDT indicators
+      if (!is.null(class_var)) {
+        rdt_sizes <- kr_merged |>
+          dplyr::group_by(.data[[class_var]]) |>
+          dplyr::summarise(
+            dhs_n_febrile_rdt     = dplyr::n(),
+            dhs_n_febrile_rdt_pos = sum(has_rdt_pos == 1, na.rm = TRUE),
+            .groups = "drop"
+          )
+        act_results <- act_results |>
+          dplyr::left_join(rdt_sizes, by = class_var)
+      } else {
+        act_results$dhs_n_febrile_rdt     <- nrow(kr_merged)
+        act_results$dhs_n_febrile_rdt_pos <- sum(kr_merged$has_rdt_pos == 1, na.rm = TRUE)
+      }
+    }
+  }
+
   # ---- 7. Format results ----
 
   # Round proportions
@@ -456,7 +619,7 @@ calc_act_dhs <- function(
 
   # Ensure count columns are integers
   count_cols <- intersect(
-    c("dhs_n_fever", "dhs_n_act", "dhs_n_tested"),
+    c("dhs_n_fever", "dhs_n_act", "dhs_n_tested", "dhs_n_febrile_rdt", "dhs_n_febrile_rdt_pos"),
     names(act_results)
   )
   act_results <- act_results |>

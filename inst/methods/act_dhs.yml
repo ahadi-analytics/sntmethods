@@ -31,6 +31,39 @@ indicators:
       More restrictive denominator than act. This is a secondary/exploratory
       indicator; the primary act indicator uses all febrile children as denominator.
 
+  febrile_rdt_pos:
+    name: "RDT positivity rate among febrile children under 5"
+    numerator: "Febrile U5 children with positive RDT (hml35 == 1)"
+    denominator: "Febrile U5 children with valid RDT result (hml35 == 0 or 1)"
+    data_sources: "KR (h22 fever) linked to PR (hml35 RDT result)"
+    description: >
+      Proportion of febrile children under 5 with a valid RDT test result who
+      tested positive for malaria. Requires linking the KR file (fever status
+      h22) with the PR file (RDT result hml35) via household and child line
+      numbers. Children without a valid RDT result (hml35 not in 0:1) are
+      excluded from the denominator. Requires dhs_pr argument.
+    note: >
+      This is the test positivity rate among febrile children — not the same
+      as population PfPR (which uses all children tested, not just febrile
+      ones). The linkage key is: KR.v001 + KR.v002 + KR.b16_01 = PR.hv001 +
+      PR.hv002 + PR.hvidx.
+
+  febrile_rdt_pos_act:
+    name: "ACT coverage among febrile RDT-positive children under 5"
+    numerator: "Febrile RDT-positive U5 children who received ACT (ml13e == 1)"
+    denominator: "Febrile U5 children who are RDT-positive (hml35 == 1)"
+    data_sources: "KR (h22 fever, ml13e ACT) linked to PR (hml35 RDT result)"
+    description: >
+      Proportion of febrile RDT-positive children under 5 who received ACT
+      treatment. Denominator is febrile children who tested positive by RDT.
+      ACT receipt implies care-seeking occurred; the indicator directly captures
+      the treatment gap among confirmed malaria cases in U5 children.
+      Requires dhs_pr argument.
+    note: >
+      This is the most policy-relevant ACT metric for confirmed malaria cases.
+      Compare with act (denominator = all febrile children) and act_tested
+      (denominator = survey_vars$test == 1, typically a proxy variable).
+
 data_sources:
   primary: "KR (Children's Recode)"
   gps: "GE (Geographic)"
@@ -79,6 +112,19 @@ variables:
       surveys such as BFA 2021 which use the h37* drug series instead of ml13*.
       Detection is automatic at runtime in .prepare_act_data().
 
+  rdt_result:
+    dhs_name: "hml35"
+    description: >
+      RDT test result from the Person Recode (PR) file. Used for febrile_rdt_pos
+      and febrile_rdt_pos_act indicators. Linked to KR via hv001 + hv002 + hvidx.
+    values:
+      0: "Negative"
+      1: "Positive"
+    note: >
+      Only values 0 and 1 are treated as valid test results. Other codes
+      (e.g., 6 = no result / not done) are excluded from the denominator.
+      This variable is from the PR file, not the KR file.
+
   test_filter:
     dhs_name: "ml13a (default; configurable via survey_vars$test)"
     description: >
@@ -101,6 +147,8 @@ eligibility:
   - "Non-missing ACT response (received_act not NA) for act indicator"
   - "survey_vars$test == 1 for act_tested indicator (default: ml13a == 1; see test_filter variable note)"
   - "Valid GPS coordinates required only for calc_act_mbg() output"
+  - "febrile_rdt_pos: febrile child matched to PR via v001+v002+b16_01 with hml35 in {0, 1}"
+  - "febrile_rdt_pos_act: same as above, restricted to hml35 == 1 (RDT-positive)"
 
 methodology:
   wmr_cascade_context: >
@@ -166,6 +214,14 @@ output_format:
       dhs_n_fever: "Unweighted count of febrile children (denominator for act)"
       dhs_n_act: "Unweighted count receiving ACT (numerator)"
       dhs_n_tested: "Unweighted count where test variable == 1 (denominator for act_tested)"
+      dhs_febrile_rdt_pos: "RDT positivity rate among febrile children with valid test (if dhs_pr provided)"
+      dhs_febrile_rdt_pos_low: "Lower 95% CI for febrile_rdt_pos"
+      dhs_febrile_rdt_pos_upp: "Upper 95% CI for febrile_rdt_pos"
+      dhs_febrile_rdt_pos_act: "ACT coverage among febrile RDT+ children (if dhs_pr provided)"
+      dhs_febrile_rdt_pos_act_low: "Lower 95% CI for febrile_rdt_pos_act"
+      dhs_febrile_rdt_pos_act_upp: "Upper 95% CI for febrile_rdt_pos_act"
+      dhs_n_febrile_rdt: "Unweighted count of febrile children with valid RDT result"
+      dhs_n_febrile_rdt_pos: "Unweighted count of febrile RDT-positive children"
 
   mbg_cluster_output:
     description: "Output of calc_act_mbg() — unweighted cluster-level counts for MBG"

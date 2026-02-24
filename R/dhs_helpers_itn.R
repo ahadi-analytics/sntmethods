@@ -90,7 +90,7 @@
       age = .data[[survey_vars$age]],
       sex = .data[[survey_vars$sex]],
       itn_used = dplyr::if_else(
-        .data[[survey_vars$itn_use]] %in% c(1, 2),
+        .data[[survey_vars$itn_use]] == 1L,
         1L, 0L, missing = 0L
       ),
       is_pregnant = if (survey_vars$pregnant %in% names(dhs_pr)) {

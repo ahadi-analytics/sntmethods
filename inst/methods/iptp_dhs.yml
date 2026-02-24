@@ -23,6 +23,16 @@ indicators:
       denominator: "Women with recent birth"
       note: "WHO-recommended minimum for malaria prevention in pregnancy"
 
+    iptp_4plus:
+      name: "IPTp 4+ doses"
+      numerator: "Women who received at least 4 doses of SP/Fansidar"
+      denominator: "Women with recent birth"
+      note: >
+        Some national programs target 4+ doses. Requires ml1_1 (sp_dose_count)
+        as the survey variable — m49a_1 (binary) cannot compute this indicator.
+        In the MBG path, map survey_vars$sp_doses to ml1_1 to enable 4+.
+        iptp_4plus <= iptp_3plus (subset relationship).
+
   exclusive:
     iptp_1only:
       name: "IPTp exactly 1 dose"
@@ -150,12 +160,37 @@ methodology:
     narrower DHS window focuses on more recent pregnancies.
 
 output_format:
-  columns:
+  mbg_cluster_output:
     cluster_id: "Cluster identifier"
     indicator: "Number meeting threshold"
     samplesize: "Total eligible women"
     x: "Longitude"
     y: "Latitude"
+
+  dhs_survey_output:
+    grouping_note: >
+      Grouping column is adm1 (v024 by default) or cluster_id when GPS data
+      is provided without a shapefile. When neither admin nor GPS variables
+      are available, a single row with level = "National" is returned.
+    columns:
+      dhs_iptp_1: "Proportion receiving 1+ SP doses (survey-weighted)"
+      dhs_iptp_1_low: "Lower 95% CI for IPTp 1+ (clamped to 0)"
+      dhs_iptp_1_upp: "Upper 95% CI for IPTp 1+ (clamped to 1)"
+      dhs_iptp_2: "Proportion receiving 2+ SP doses (survey-weighted)"
+      dhs_iptp_2_low: "Lower 95% CI for IPTp 2+ (clamped to 0)"
+      dhs_iptp_2_upp: "Upper 95% CI for IPTp 2+ (clamped to 1)"
+      dhs_iptp_3: "Proportion receiving 3+ SP doses (survey-weighted)"
+      dhs_iptp_3_low: "Lower 95% CI for IPTp 3+ (clamped to 0)"
+      dhs_iptp_3_upp: "Upper 95% CI for IPTp 3+ (clamped to 1)"
+      dhs_iptp_4: "Proportion receiving 4+ SP doses (survey-weighted; requires ml1_1)"
+      dhs_iptp_4_low: "Lower 95% CI for IPTp 4+ (clamped to 0)"
+      dhs_iptp_4_upp: "Upper 95% CI for IPTp 4+ (clamped to 1)"
+      dhs_n_women: "Unweighted count of eligible women (denominator)"
+      dhs_n_iptp_1plus: "Unweighted count receiving 1+ doses"
+      dhs_n_iptp_2plus: "Unweighted count receiving 2+ doses"
+      dhs_n_iptp_3plus: "Unweighted count receiving 3+ doses"
+      dhs_n_iptp_4plus: "Unweighted count receiving 4+ doses"
+    monotonicity: "dhs_iptp_1 >= dhs_iptp_2 >= dhs_iptp_3 >= dhs_iptp_4"
 
   wmr_note: >
     IPTp is NOT included in the WMR DHS analysis debug scripts (2a_functions).

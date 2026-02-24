@@ -1,0 +1,213 @@
+title: "Wealth Distribution DHS Indicator Methodology"
+version: "1.0.0"
+description: >
+  Methodology for estimating household wealth distribution and inequality
+  from DHS Household Records data. Provides quintile proportions (poorest
+  through richest), dominant quintile, and the Gini coefficient using
+  DHS-defined wealth index scores.
+
+indicators:
+  quintile_proportions:
+    dhs_prop_poorest:
+      name: "Proportion in poorest wealth quintile"
+      numerator: "Households in poorest quintile (hv270 == 1)"
+      denominator: "All surveyed households (weighted)"
+      note: >
+        Wealth quintiles are pre-classified by DHS during survey processing
+        using principal component analysis of household assets (hv270 = 1-5).
+        National quintiles may differ from subnational distributions used
+        in some alternative analyses.
+
+    dhs_prop_poorer:
+      name: "Proportion in poorer wealth quintile"
+      numerator: "Households in poorer quintile (hv270 == 2)"
+      denominator: "All surveyed households (weighted)"
+
+    dhs_prop_middle:
+      name: "Proportion in middle wealth quintile"
+      numerator: "Households in middle quintile (hv270 == 3)"
+      denominator: "All surveyed households (weighted)"
+
+    dhs_prop_richer:
+      name: "Proportion in richer wealth quintile"
+      numerator: "Households in richer quintile (hv270 == 4)"
+      denominator: "All surveyed households (weighted)"
+
+    dhs_prop_richest:
+      name: "Proportion in richest wealth quintile"
+      numerator: "Households in richest quintile (hv270 == 5)"
+      denominator: "All surveyed households (weighted)"
+
+  derived:
+    dhs_dominant_quintile:
+      name: "Dominant wealth quintile"
+      description: >
+        The wealth quintile with the highest proportion of households in the
+        area. Categorical variable (Poorest, Poorer, Middle, Richer, Richest).
+        Useful for geographic mapping of wealth concentration.
+
+    dhs_dominant_prop:
+      name: "Proportion in dominant quintile"
+      description: >
+        The value of dhs_prop_* for the dominant quintile. Ranges from 0.2
+        (uniform distribution) toward 1.0 (extreme concentration).
+
+    dhs_gini:
+      name: "Gini coefficient"
+      description: >
+        Measure of wealth inequality ranging from 0 (perfect equality) to
+        1 (maximum inequality). Computed from hv271 (wealth factor scores)
+        using the Brown formula with 100 wealth groups following DHS
+        methodology. More sensitive to within-quintile variation than
+        quintile proportions.
+      note: >
+        Gini is flagged as unreliable (dhs_gini_reliable = FALSE) when the
+        sample size is below 25 households. At subnational level, small
+        samples may produce unstable Gini estimates; interpret with caution.
+
+data_sources:
+  primary: "HR (Household Recode)"
+  gps: "GE (Geographic) — optional, for spatial aggregation"
+
+variables:
+  cluster_id:
+    dhs_name: "hv001"
+    description: "Cluster/enumeration area identifier"
+
+  survey_weight:
+    dhs_name: "hv005"
+    description: "Sample weight (divide by 1,000,000 for fractional weights)"
+
+  stratum:
+    dhs_name: "hv022"
+    description: "Sample stratum (used for stratified survey design)"
+
+  adm1:
+    dhs_name: "hv024"
+    description: "First administrative level (region/province)"
+
+  wealth_quintile:
+    dhs_name: "hv270"
+    description: "DHS wealth index quintile"
+    values:
+      1: "Poorest"
+      2: "Poorer"
+      3: "Middle"
+      4: "Richer"
+      5: "Richest"
+    note: >
+      Pre-classified by DHS using principal component analysis of household
+      asset ownership. Quintile cut-points are defined at the national level
+      by default. Valid values are 1-5; records outside this range are flagged
+      with a warning.
+
+  wealth_score:
+    dhs_name: "hv271"
+    description: "Wealth index factor score (continuous)"
+    note: >
+      Used exclusively for Gini coefficient computation (Brown formula).
+      Not used for quintile proportion calculations (which use hv270 directly).
+      Factor scores are survey-specific; do not compare absolute values across
+      different surveys.
+
+  hh_members:
+    dhs_name: "hv012"
+    description: "Number of de jure household members"
+    note: >
+      Used as population weight in Gini coefficient computation to account for
+      household size when measuring individual-level wealth inequality.
+
+  gps_cluster:
+    dhs_name: "DHSCLUST"
+    description: "Cluster ID in GPS file (GE recode)"
+
+  gps_lat:
+    dhs_name: "LATNUM"
+    description: "Latitude coordinate"
+
+  gps_lon:
+    dhs_name: "LONGNUM"
+    description: "Longitude coordinate"
+
+eligibility:
+  - "All households in the HR file are eligible (no age or other restrictions)"
+  - "Households with invalid quintile values (not 1-5) are flagged but included in totals"
+  - "Gini computation excludes households with missing hv271, hv005, or hv012"
+  - "Cluster coordinates required for spatial aggregation (GPS/shapefile path)"
+
+methodology:
+  quintile_computation: >
+    Weighted proportions are calculated as: sum(weight * (hv270 == q)) /
+    sum(weight) for each quintile q in 1:5. Survey weights (hv005) are
+    divided by 1,000,000. All proportions for a given geographic unit sum
+    to 1.0 (within floating-point tolerance).
+
+  gini_computation: >
+    Implements the DHS Brown formula with 100 wealth groups:
+    (1) Households are sorted into 100 equal-width groups by hv271 score.
+    (2) For each group, compute population-weighted cumulative share of
+        population and share of total wealth (above-minimum wealth).
+    (3) Apply Brown formula: G = 1 - sum[(p_k - p_{k-1}) * (w_k + w_{k-1})]
+        where p_k and w_k are cumulative population and wealth proportions.
+    Returns NA if fewer than 10 observations, or if all scores are equal (G=0).
+
+  spatial_aggregation: >
+    When gps_data and shapefile are both provided, clusters are spatially
+    joined to administrative polygons using sf::st_within(). Clusters outside
+    all polygons are assigned to the nearest polygon (join_nearest = TRUE by
+    default). Aggregated estimates use population-weighted means
+    (weighted by dhs_weighted_households). When only gps_data is provided
+    (no shapefile), cluster-level estimates are returned with lat/lon.
+
+  dominant_quintile: >
+    The dominant quintile is the quintile with the highest weighted proportion
+    in a geographic unit. It is a summary measure only; do not use it as a
+    substitute for the full quintile distribution. It is stored as an ordered
+    factor: Poorest < Poorer < Middle < Richer < Richest.
+
+output_format:
+  columns:
+    grouping_vars: "Administrative level columns (adm0, adm1, etc.) or cluster_id"
+    dhs_prop_poorest: "Proportion of households in poorest quintile (0-1)"
+    dhs_prop_poorer: "Proportion in poorer quintile (0-1)"
+    dhs_prop_middle: "Proportion in middle quintile (0-1)"
+    dhs_prop_richer: "Proportion in richer quintile (0-1)"
+    dhs_prop_richest: "Proportion in richest quintile (0-1)"
+    dhs_dominant_quintile: "Most common quintile in the area (ordered factor)"
+    dhs_dominant_prop: "Proportion of households in the dominant quintile (0-1)"
+    dhs_gini: "Gini coefficient (0-1; rounded to 3 decimals)"
+    dhs_n_households: "Unweighted household count"
+    dhs_weighted_households: "Survey-weighted household count"
+    dhs_gini_sample_size: "Number of households used for Gini calculation"
+    dhs_gini_reliable: "TRUE if dhs_gini_sample_size >= 25"
+
+  note: >
+    cluster_id and lat/lon are included only for cluster-level output
+    (gps_data provided without shapefile). level = "National" appears in
+    the ungrouped path.
+
+functions:
+  calc_wealth_dhs:
+    description: "Main function returning list(data, dict, metadata)"
+    parameters:
+      - "dhs_hr: DHS Household Records (required)"
+      - "survey_vars: list(cluster, weight, stratum, adm1, adm2, wealth_quintile, wealth_score, hh_members)"
+      - "gps_data: DHS GPS file (optional)"
+      - "shapefile: sf object with admin boundaries (optional)"
+      - "admin_level: character vector of admin columns in shapefile"
+      - "join_nearest: logical, assign unmatched clusters to nearest polygon"
+
+  calc_wealth_dhs_core:
+    description: "Core computation function (called internally by calc_wealth_dhs)"
+
+  aggregate_wealth_admin:
+    description: "Aggregate cluster-level wealth results to admin levels"
+    note: "Input must be cluster-level output from calc_wealth_dhs_core"
+
+  calculate_dhs_gini:
+    description: "Standalone Gini calculation using Brown formula"
+
+references:
+  - "DHS Guide to Statistics - Wealth Index"
+  - "Rutstein SO, Johnson K. The DHS wealth index. DHS Comparative Reports No.6. 2004."
+  - "DHS Program Wealth Index construction — https://dhsprogram.com/topics/wealth-index/"

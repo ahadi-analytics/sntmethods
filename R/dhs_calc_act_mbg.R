@@ -9,11 +9,17 @@
 #'
 #' @param dhs_kr DHS Children's Recode (KR) dataset.
 #' @param gps_data DHS GPS dataset with cluster coordinates.
+#' @param dhs_pr Optional DHS Person Recode (PR) dataset. Required for
+#'   "febrile_rdt_pos" and "febrile_rdt_pos_act" indicators (provides hml35).
 #' @param indicators Character vector of indicators to calculate:
 #'   \itemize{
 #'     \item "act": Received ACT among febrile children under 5
 #'     \item "act_tested": Received ACT among children who tested positive
 #'       (RDT or microscopy)
+#'     \item "febrile_rdt_pos": RDT positivity rate among febrile U5 children
+#'       (requires dhs_pr)
+#'     \item "febrile_rdt_pos_act": ACT coverage among febrile RDT-positive
+#'       children (requires dhs_pr)
 #'   }
 #'   Default: c("act", "act_tested").
 #' @param survey_vars Named list mapping DHS variable names:
@@ -51,6 +57,7 @@
 calc_act_mbg <- function(
   dhs_kr,
   gps_data,
+  dhs_pr = NULL,
   indicators = c("act", "act_tested"),
   survey_vars = list(
     cluster = "v001",
@@ -74,10 +81,17 @@ calc_act_mbg <- function(
     cli::cli_abort("`gps_data` must be a data.frame or tibble")
   }
 
-  valid_indicators <- c("act", "act_tested")
+  valid_indicators <- c("act", "act_tested", "febrile_rdt_pos", "febrile_rdt_pos_act")
   invalid <- setdiff(indicators, valid_indicators)
   if (length(invalid) > 0) {
     cli::cli_abort("Invalid indicators: {.val {invalid}}")
+  }
+
+  pr_required <- intersect(indicators, c("febrile_rdt_pos", "febrile_rdt_pos_act"))
+  if (length(pr_required) > 0 && is.null(dhs_pr)) {
+    cli::cli_alert_warning(
+      "Indicators {.val {pr_required}} require `dhs_pr` - these will be skipped"
+    )
   }
 
   # ---- Prepare data using shared helpers ----
@@ -151,6 +165,43 @@ calc_act_mbg <- function(
 
       if (!is.null(dt)) {
         results[["act_tested"]] <- dt
+      }
+    }
+  }
+
+  # ---- Febrile RDT indicators (require dhs_pr) ----
+
+  if (!is.null(dhs_pr) && length(pr_required) > 0) {
+    kr_merged <- .merge_kr_pr_febrile(kr_fever = kr_fever, dhs_pr = dhs_pr)
+
+    if (!is.null(kr_merged)) {
+      if ("febrile_rdt_pos" %in% indicators) {
+        dt <- .aggregate_to_mbg_clusters(
+          individual_data = kr_merged,
+          indicator_col   = "has_rdt_pos",
+          gps_clean       = gps_clean,
+          result_name     = "febrile_rdt_pos"
+        )
+        if (!is.null(dt)) results[["febrile_rdt_pos"]] <- dt
+      }
+
+      if ("febrile_rdt_pos_act" %in% indicators) {
+        rdt_pos_data <- kr_merged |>
+          dplyr::filter(has_rdt_pos == 1, !is.na(has_act))
+
+        if (nrow(rdt_pos_data) > 0) {
+          dt <- .aggregate_to_mbg_clusters(
+            individual_data = rdt_pos_data,
+            indicator_col   = "has_act",
+            gps_clean       = gps_clean,
+            result_name     = "febrile_rdt_pos_act"
+          )
+          if (!is.null(dt)) results[["febrile_rdt_pos_act"]] <- dt
+        } else {
+          cli::cli_alert_warning(
+            "No RDT-positive febrile children found for febrile_rdt_pos_act"
+          )
+        }
       }
     }
   }

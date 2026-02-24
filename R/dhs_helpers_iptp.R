@@ -102,6 +102,7 @@
       has_1plus = as.integer(sp_doses >= 1),
       has_2plus = as.integer(sp_doses >= 2),
       has_3plus = as.integer(sp_doses >= 3),
+      has_4plus = as.integer(sp_doses >= 4),
       has_1only = as.integer(sp_doses == 1),
       has_2only = as.integer(sp_doses == 2),
       has_3only = as.integer(sp_doses == 3)

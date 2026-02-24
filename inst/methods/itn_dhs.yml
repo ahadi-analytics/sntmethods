@@ -175,11 +175,12 @@ variables:
     description: "Net person slept under last night (treated or untreated)"
     values:
       0: "Did not sleep under a net"
-      1: "Slept under an ITN/treated net"
-      2: "Slept under an untreated net"
+      1: "Slept under an ITN/LLIN (insecticide-treated net)"
+      2: "Slept under an untreated net (excluded from ITN use)"
     note: >
-      Both values 1 and 2 are counted as net use (itn_used = 1).
-      R code: if_else(hml12 %in% c(1, 2), 1L, 0L, missing = 0L).
+      Only hml12 == 1 (LLIN/ITN) is counted as ITN use per SNT methodology.
+      hml12 == 2 (untreated net) is explicitly excluded.
+      R code: if_else(hml12 == 1L, 1L, 0L, missing = 0L).
       Missing values are treated as non-use (0).
 
   itn_net_type:
@@ -232,8 +233,10 @@ methodology:
 
   use: >
     ITN use is measured by hml12 (slept under net last night).
-    Both treated nets (hml12 == 1) and untreated nets (hml12 == 2) are
-    counted as use. Missing values are treated as non-use (0).
+    Per SNT methodology, ONLY treated/insecticide-treated nets (hml12 == 1)
+    are counted as ITN use. Untreated nets (hml12 == 2) are explicitly
+    excluded. This ensures itn_use indicators reflect true ITN (LLIN)
+    coverage, not general net use. Missing values are treated as non-use (0).
 
   age_stratification: >
     Age is in completed years (hv105). Age groups use an exclusive upper
