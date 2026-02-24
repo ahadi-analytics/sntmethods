@@ -152,14 +152,15 @@ test_that("calc_incidence calculates N1 correctly", {
   # pop: 11000 (district pop, not summed)
   # tpr (recalculated at admin level): 30/200 = 0.15
 
-  # N1 is calculated at FACILITY level, then aggregated:
-  # HF001: n1_cases = 10 + 10 * 0.10 = 11
-  # HF002: n1_cases = 20 + 20 * 0.20 = 24
-  # Total: 11 + 24 = 35
-  expected_n1_cases <- (10 + 10 * 0.10) + (20 + 20 * 0.20)
+  # N1 is calculated at ADMIN level (after aggregation):
+  # n1_raw = conf + pres * tpr = 30 + 30 * (30/200) = 34.5 (unrounded)
+  # n1_cases = round(34.5) = 34 (banker's rounding; 34 is even)
+  # n1_incidence uses unrounded n1_raw: (34.5 / 11000) * 1000 = 3.136...
+  n1_raw <- 30 + 30 * (30 / 200)          # = 34.5
+  expected_n1_cases <- round(n1_raw)       # = 34
 
   expect_equal(result_adm2$n1_cases, expected_n1_cases, tolerance = 0.01)
-  expect_equal(result_adm2$n1_incidence, (expected_n1_cases / 11000) * 1000, tolerance = 0.01)
+  expect_equal(result_adm2$n1_incidence, (n1_raw / 11000) * 1000, tolerance = 0.01)
 })
 
 

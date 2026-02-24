@@ -43,7 +43,7 @@ test_that("calc_antimalarial_dhs_core errors when no ml13 variables found", {
 
   expect_error(
     calc_antimalarial_dhs_core(kr_data),
-    "No ml13 antimalarial variables"
+    "No antimalarial treatment variables"
   )
 })
 
@@ -214,5 +214,5 @@ test_that("calc_antimalarial_dhs returns list with data, dict, metadata", {
   expect_type(result$metadata, "list")
   expect_equal(result$metadata$analysis_type, "Antimalarial Treatment")
   expect_equal(result$metadata$cascade_step, 3L)
-  expect_true(result$metadata$n_ml13_vars > 0)
+  expect_true(result$metadata$n_antimalarial_vars > 0)
 })

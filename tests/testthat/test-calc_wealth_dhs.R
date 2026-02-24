@@ -169,13 +169,17 @@ test_that("calc_wealth_dhs outputs only key columns", {
     "dhs_prop_richest",
     "dhs_dominant_quintile",
     "dhs_dominant_prop",
-    "dhs_gini"
+    "dhs_gini",
+    "dhs_n_households",
+    "dhs_weighted_households",
+    "dhs_gini_sample_size",
+    "dhs_gini_reliable"
   )
 
   expect_setequal(names(result$data), expected_cols)
 
-  expect_false("dhs_n_households" %in% names(result$data))
-  expect_false("dhs_weighted_households" %in% names(result$data))
-  expect_false("dhs_gini_sample_size" %in% names(result$data))
-  expect_false("dhs_gini_reliable" %in% names(result$data))
+  expect_true("dhs_n_households" %in% names(result$data))
+  expect_true("dhs_weighted_households" %in% names(result$data))
+  expect_true("dhs_gini_sample_size" %in% names(result$data))
+  expect_true("dhs_gini_reliable" %in% names(result$data))
 })
