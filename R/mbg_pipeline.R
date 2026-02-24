@@ -1009,15 +1009,15 @@ run_mbg_indicator_pipeline <- function(
           dhs_pr = survey_data$PR,
           gps_data = gps_data,
           indicators = c(
-            "ownership",
-            "access",
-            "use_all",
-            "use_u5",
-            "use_pregnant",
-            "use_5_10",
-            "use_10_20",
-            "use_20plus",
-            "use_if_access"
+            "itn_ownership",
+            "itn_access",
+            "itn_use_all",
+            "itn_use_u5",
+            "itn_use_pregnant",
+            "itn_use_5_10",
+            "itn_use_10_20",
+            "itn_use_20plus",
+            "itn_use_if_access"
           )
         )
       }, error = function(e) {
@@ -1038,13 +1038,12 @@ run_mbg_indicator_pipeline <- function(
           glue::glue("Missing {paste(missing_ft, collapse = ', ')} data")
         ))
       }
-      sub_ind <- sub("^itn_", "", category)
       tryCatch({
         calc_itn_mbg(
           dhs_hr = survey_data$HR,
           dhs_pr = survey_data$PR,
           gps_data = gps_data,
-          indicators = sub_ind
+          indicators = category
         )
       }, error = function(e) {
         results$skipped <<- glue::glue("Calculation error: {e$message}")
@@ -1081,7 +1080,7 @@ run_mbg_indicator_pipeline <- function(
         calc_anc_mbg(
           dhs_ir = survey_data$IR,
           gps_data = gps_data,
-          indicators = c("anc1", "anc4")
+          indicators = c("anc_1plus", "anc_3plus", "anc_4plus", "anc_8plus")
         )
       }, error = function(e) {
         results$skipped <<- glue::glue("Calculation error: {e$message}")
@@ -1145,7 +1144,7 @@ run_mbg_indicator_pipeline <- function(
         calc_iptp_mbg(
           dhs_ir = survey_data$IR,
           gps_data = gps_data,
-          indicators = c("1plus", "2plus", "3plus")
+          indicators = c("iptp_1plus", "iptp_2plus", "iptp_3plus", "iptp_4plus")
         )
       }, error = function(e) {
         results$skipped <<- glue::glue("Calculation error: {e$message}")

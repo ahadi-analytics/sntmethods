@@ -28,12 +28,19 @@
     cli::cli_abort("`dhs_pr` is empty")
   }
 
-  # Check required columns
-  needed <- c(survey_vars$cluster, survey_vars$age,
-               survey_vars$present, survey_vars$mother)
+  # Check required columns (mother/hv042 is optional — absent in some MIS surveys)
+  has_mother_col <- !is.null(survey_vars$mother) && survey_vars$mother %in% names(dhs_pr)
+  needed <- c(survey_vars$cluster, survey_vars$age, survey_vars$present)
   missing_cols <- setdiff(needed, names(dhs_pr))
   if (length(missing_cols) > 0) {
     cli::cli_abort("Columns not found in dhs_pr: {.var {missing_cols}}")
+  }
+
+  if (!has_mother_col) {
+    cli::cli_alert_warning(
+      "Column {.var {survey_vars$mother}} not found in dhs_pr; ",
+      "skipping mother-listed-in-household filter (common in MIS surveys)"
+    )
   }
 
   # Zap labels
@@ -47,7 +54,7 @@
       cluster_id = .data[[survey_vars$cluster]],
       age = .data[[survey_vars$age]],
       present = .data[[survey_vars$present]],
-      mother = .data[[survey_vars$mother]],
+      mother = if (has_mother_col) .data[[survey_vars$mother]] else 1L,
       rdt_res = if (survey_vars$rdt %in% names(dhs_pr)) .data[[survey_vars$rdt]] else NA_real_,
       mic_res = if (survey_vars$mic %in% names(dhs_pr)) .data[[survey_vars$mic]] else NA_real_
     )
