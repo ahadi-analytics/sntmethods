@@ -13,18 +13,19 @@
 #'   \itemize{
 #'     \item Cumulative:
 #'     \itemize{
-#'       \item "1plus": At least 1 dose
-#'       \item "2plus": At least 2 doses
-#'       \item "3plus": At least 3 doses (WHO recommendation)
+#'       \item "iptp_1plus": At least 1 dose
+#'       \item "iptp_2plus": At least 2 doses
+#'       \item "iptp_3plus": At least 3 doses (WHO recommendation)
+#'       \item "iptp_4plus": At least 4 doses (requires ml1_1 as sp_doses)
 #'     }
 #'     \item Exclusive:
 #'     \itemize{
-#'       \item "1only": Exactly 1 dose
-#'       \item "2only": Exactly 2 doses
-#'       \item "3only": Exactly 3 doses
+#'       \item "iptp_1only": Exactly 1 dose
+#'       \item "iptp_2only": Exactly 2 doses
+#'       \item "iptp_3only": Exactly 3 doses
 #'     }
 #'   }
-#'   Default: c("1plus", "2plus", "3plus").
+#'   Default: c("iptp_1plus", "iptp_2plus", "iptp_3plus").
 #' @param birth_window_months Months to look back for births. Default: 36.
 #' @param survey_vars Named list mapping DHS variable names.
 #' @param gps_vars Named list for GPS variable mapping.
@@ -32,16 +33,20 @@
 #' @return A list of data.tables (one per indicator).
 #'
 #' @details
-#' IPTp coverage is measured using m49a (SP/Fansidar during pregnancy).
-#' The denominator is women with a live birth in the specified window
-#' who attended ANC.
+#' No ANC attendance restriction is applied; the denominator is all women
+#' with a birth in the analysis window and a valid SP response
+#' (`sp_doses <= 7`). The default `survey_vars$sp_doses = "m49a_1"` is a
+#' **binary** variable (0 = No, 1 = Yes). Applying `>= 2`, `>= 3`, or `>= 4`
+#' against a binary variable will always produce zero — users must remap
+#' `sp_doses` to `"ml1_1"` (the actual dose count, 0–7) to compute 2+, 3+,
+#' and 4+ indicators correctly.
 #'
 #' @examples
 #' \dontrun{
 #' iptp_mbg <- calc_iptp_mbg(
 #'   dhs_ir = ir_data,
 #'   gps_data = gps_data,
-#'   indicators = c("2plus", "3plus")
+#'   indicators = c("iptp_2plus", "iptp_3plus")
 #' )
 #' }
 #'
@@ -50,7 +55,7 @@
 calc_iptp_mbg <- function(
   dhs_ir,
   gps_data,
-  indicators = c("1plus", "2plus", "3plus"),
+  indicators = c("iptp_1plus", "iptp_2plus", "iptp_3plus"),
   birth_window_months = 36,
   survey_vars = list(
     cluster = "v001",
@@ -70,7 +75,10 @@ calc_iptp_mbg <- function(
     cli::cli_abort("`gps_data` must be a data.frame or tibble")
   }
 
-  valid_indicators <- c("1plus", "2plus", "3plus", "1only", "2only", "3only")
+  valid_indicators <- c(
+    "iptp_1plus", "iptp_2plus", "iptp_3plus", "iptp_4plus",
+    "iptp_1only", "iptp_2only", "iptp_3only"
+  )
   invalid <- setdiff(indicators, valid_indicators)
   if (length(invalid) > 0) {
     cli::cli_abort("Invalid indicators: {.val {invalid}}")
@@ -90,31 +98,23 @@ calc_iptp_mbg <- function(
   # ---- Aggregate to cluster level ----
 
   indicator_map <- list(
-    `1plus` = "has_1plus",
-    `2plus` = "has_2plus",
-    `3plus` = "has_3plus",
-    `1only` = "has_1only",
-    `2only` = "has_2only",
-    `3only` = "has_3only"
-  )
-
-  result_names <- list(
-    `1plus` = "iptp_1plus",
-    `2plus` = "iptp_2plus",
-    `3plus` = "iptp_3plus",
-    `1only` = "iptp_1only",
-    `2only` = "iptp_2only",
-    `3only` = "iptp_3only"
+    iptp_1plus = "has_1plus",
+    iptp_2plus = "has_2plus",
+    iptp_3plus = "has_3plus",
+    iptp_4plus = "has_4plus",
+    iptp_1only = "has_1only",
+    iptp_2only = "has_2only",
+    iptp_3only = "has_3only"
   )
 
   results <- list()
 
   for (ind in indicators) {
     cluster_dt <- .aggregate_to_mbg_clusters(
-      ir, indicator_map[[ind]], gps_clean, result_names[[ind]]
+      ir, indicator_map[[ind]], gps_clean, ind
     )
     if (!is.null(cluster_dt)) {
-      results[[result_names[[ind]]]] <- cluster_dt
+      results[[ind]] <- cluster_dt
     }
   }
 
@@ -150,7 +150,7 @@ prep_iptp_mbg <- function(
     lon = "LONGNUM"
   )
 ) {
-  indicator_name <- paste0(doses, "plus")
+  indicator_name <- paste0("iptp_", doses, "plus")
 
   result <- calc_iptp_mbg(
     dhs_ir = dhs_ir,

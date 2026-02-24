@@ -11,11 +11,12 @@
 #' @param gps_data DHS GPS dataset with cluster coordinates.
 #' @param indicators Character vector of indicators to calculate:
 #'   \itemize{
-#'     \item "anc1": At least 1 ANC visit
-#'     \item "anc4": At least 4 ANC visits
-#'     \item "anc8": At least 8 ANC visits (2016 WHO recommendation)
+#'     \item "anc_1plus": At least 1 ANC visit
+#'     \item "anc_3plus": At least 3 ANC visits
+#'     \item "anc_4plus": At least 4 ANC visits
+#'     \item "anc_8plus": At least 8 ANC visits (2016 WHO recommendation)
 #'   }
-#'   Default: c("anc1", "anc4").
+#'   Default: c("anc_1plus", "anc_3plus", "anc_4plus").
 #' @param birth_window_months Number of months to look back for births.
 #'   Default: 36 (3 years). Max 60 (5 years).
 #' @param survey_vars Named list mapping DHS variable names.
@@ -39,7 +40,7 @@
 #' anc_mbg <- calc_anc_mbg(
 #'   dhs_ir = ir_data,
 #'   gps_data = gps_data,
-#'   indicators = c("anc1", "anc4")
+#'   indicators = c("anc_1plus", "anc_4plus")
 #' )
 #' }
 #'
@@ -47,7 +48,7 @@
 calc_anc_mbg <- function(
   dhs_ir,
   gps_data,
-  indicators = c("anc1", "anc4"),
+  indicators = c("anc_1plus", "anc_3plus", "anc_4plus"),
   birth_window_months = 36,
   survey_vars = list(
     cluster = "v001",
@@ -67,7 +68,7 @@ calc_anc_mbg <- function(
     cli::cli_abort("`gps_data` must be a data.frame or tibble")
   }
 
-  valid_indicators <- c("anc1", "anc4", "anc8")
+  valid_indicators <- c("anc_1plus", "anc_3plus", "anc_4plus", "anc_8plus")
   invalid <- setdiff(indicators, valid_indicators)
   if (length(invalid) > 0) {
     cli::cli_abort("Invalid indicators: {.val {invalid}}")
@@ -87,25 +88,20 @@ calc_anc_mbg <- function(
   # ---- Aggregate to cluster level ----
 
   indicator_map <- list(
-    anc1 = "has_anc1",
-    anc4 = "has_anc4",
-    anc8 = "has_anc8"
-  )
-
-  result_names <- list(
-    anc1 = "anc_1plus",
-    anc4 = "anc_4plus",
-    anc8 = "anc_8plus"
+    anc_1plus = "has_anc1",
+    anc_3plus = "has_anc3",
+    anc_4plus = "has_anc4",
+    anc_8plus = "has_anc8"
   )
 
   results <- list()
 
   for (ind in indicators) {
     cluster_dt <- .aggregate_to_mbg_clusters(
-      ir, indicator_map[[ind]], gps_clean, result_names[[ind]]
+      ir, indicator_map[[ind]], gps_clean, ind
     )
     if (!is.null(cluster_dt)) {
-      results[[result_names[[ind]]]] <- cluster_dt
+      results[[ind]] <- cluster_dt
     }
   }
 
@@ -144,7 +140,7 @@ prep_anc_mbg <- function(
     lon = "LONGNUM"
   )
 ) {
-  indicator_name <- paste0("anc", threshold)
+  indicator_name <- paste0("anc_", threshold, "plus")
 
   result <- calc_anc_mbg(
     dhs_ir = dhs_ir,

@@ -12,15 +12,15 @@
 #' @param gps_data DHS GPS dataset with cluster coordinates.
 #' @param indicators Character vector of indicators to calculate. Options:
 #'   \itemize{
-#'     \item "ownership": Households with at least one ITN
-#'     \item "access": Population with access to ITN (potential users / hh size)
-#'     \item "use_all": Population that used ITN last night
-#'     \item "use_u5": Under-5 children that used ITN
-#'     \item "use_5_10": Children 5-10 years that used ITN
-#'     \item "use_10_20": Adolescents 10-20 years that used ITN
-#'     \item "use_20plus": Adults 20+ that used ITN
-#'     \item "use_pregnant": Pregnant women that used ITN
-#'     \item "use_if_access": Of those with access, proportion that used ITN
+#'     \item "itn_ownership": Households with at least one ITN
+#'     \item "itn_access": Population with access to ITN (potential users / hh size)
+#'     \item "itn_use_all": Population that used ITN last night
+#'     \item "itn_use_u5": Under-5 children that used ITN
+#'     \item "itn_use_5_10": Children 5-10 years that used ITN
+#'     \item "itn_use_10_20": Adolescents 10-20 years that used ITN
+#'     \item "itn_use_20plus": Adults 20+ that used ITN
+#'     \item "itn_use_pregnant": Pregnant women that used ITN
+#'     \item "itn_use_if_access": Of those with access, proportion that used ITN
 #'   }
 #'   Default: all indicators.
 #' @param survey_vars Named list mapping DHS variable names.
@@ -57,7 +57,7 @@
 #'   dhs_hr = hr_data,
 #'   dhs_pr = pr_data,
 #'   gps_data = gps_data,
-#'   indicators = c("access", "use_u5")
+#'   indicators = c("itn_access", "itn_use_u5")
 #' )
 #' }
 #'
@@ -68,8 +68,8 @@ calc_itn_mbg <- function(
   dhs_pr,
   gps_data,
   indicators = c(
-    "ownership", "access", "use_all", "use_u5", "use_5_10",
-    "use_10_20", "use_20plus", "use_pregnant", "use_if_access"
+    "itn_ownership", "itn_access", "itn_use_all", "itn_use_u5", "itn_use_5_10",
+    "itn_use_10_20", "itn_use_20plus", "itn_use_pregnant", "itn_use_if_access"
   ),
   survey_vars = list(
     cluster = "hv001",
@@ -91,8 +91,8 @@ calc_itn_mbg <- function(
   # ---- Input validation ----
 
   valid_indicators <- c(
-    "ownership", "access", "use_all", "use_u5", "use_5_10",
-    "use_10_20", "use_20plus", "use_pregnant", "use_if_access"
+    "itn_ownership", "itn_access", "itn_use_all", "itn_use_u5", "itn_use_5_10",
+    "itn_use_10_20", "itn_use_20plus", "itn_use_pregnant", "itn_use_if_access"
   )
 
   invalid <- setdiff(indicators, valid_indicators)
@@ -117,25 +117,25 @@ calc_itn_mbg <- function(
   results <- list()
 
   # 1. Household ownership
-  if ("ownership" %in% indicators) {
+  if ("itn_ownership" %in% indicators) {
     result <- .aggregate_to_mbg_clusters(hr, "has_itn", gps_clean, "itn_ownership")
     if (!is.null(result)) results[["itn_ownership"]] <- result
   }
 
   # 2. Population access
-  if ("access" %in% indicators) {
+  if ("itn_access" %in% indicators) {
     result <- .aggregate_to_mbg_clusters(pr, "has_access", gps_clean, "itn_access")
     if (!is.null(result)) results[["itn_access"]] <- result
   }
 
   # 3. Population use (all ages)
-  if ("use_all" %in% indicators) {
+  if ("itn_use_all" %in% indicators) {
     result <- .aggregate_to_mbg_clusters(pr, "itn_used", gps_clean, "itn_use_all")
     if (!is.null(result)) results[["itn_use_all"]] <- result
   }
 
   # 4. Under-5 use
-  if ("use_u5" %in% indicators) {
+  if ("itn_use_u5" %in% indicators) {
     pr_u5 <- pr |> dplyr::filter(age < 5)
     if (nrow(pr_u5) > 0) {
       result <- .aggregate_to_mbg_clusters(pr_u5, "itn_used", gps_clean, "itn_use_u5")
@@ -144,7 +144,7 @@ calc_itn_mbg <- function(
   }
 
   # 5. Ages 5-10 use
-  if ("use_5_10" %in% indicators) {
+  if ("itn_use_5_10" %in% indicators) {
     pr_5_10 <- pr |> dplyr::filter(age >= 5, age <= 9)
     if (nrow(pr_5_10) > 0) {
       result <- .aggregate_to_mbg_clusters(pr_5_10, "itn_used", gps_clean, "itn_use_5_10")
@@ -153,7 +153,7 @@ calc_itn_mbg <- function(
   }
 
   # 6. Ages 10-20 use
-  if ("use_10_20" %in% indicators) {
+  if ("itn_use_10_20" %in% indicators) {
     pr_10_20 <- pr |> dplyr::filter(age >= 10, age <= 19)
     if (nrow(pr_10_20) > 0) {
       result <- .aggregate_to_mbg_clusters(pr_10_20, "itn_used", gps_clean, "itn_use_10_20")
@@ -162,7 +162,7 @@ calc_itn_mbg <- function(
   }
 
   # 7. Ages 20+ use
-  if ("use_20plus" %in% indicators) {
+  if ("itn_use_20plus" %in% indicators) {
     pr_20plus <- pr |> dplyr::filter(age >= 20)
     if (nrow(pr_20plus) > 0) {
       result <- .aggregate_to_mbg_clusters(pr_20plus, "itn_used", gps_clean, "itn_use_20plus")
@@ -171,7 +171,7 @@ calc_itn_mbg <- function(
   }
 
   # 8. Pregnant women use
-  if ("use_pregnant" %in% indicators) {
+  if ("itn_use_pregnant" %in% indicators) {
     pr_preg <- pr |> dplyr::filter(is_pregnant == 1, sex == 2)
     if (nrow(pr_preg) > 0) {
       result <- .aggregate_to_mbg_clusters(pr_preg, "itn_used", gps_clean, "itn_use_pregnant")
@@ -182,7 +182,7 @@ calc_itn_mbg <- function(
   }
 
   # 9. Use if access (proportion of those with access who used ITN)
-  if ("use_if_access" %in% indicators) {
+  if ("itn_use_if_access" %in% indicators) {
     pr_with_access <- pr |> dplyr::filter(has_access == 1)
     if (nrow(pr_with_access) > 0) {
       result <- .aggregate_to_mbg_clusters(
@@ -216,7 +216,7 @@ prep_itn_mbg <- function(
   dhs_hr,
   dhs_pr,
   gps_data,
-  indicator = "access",
+  indicator = "itn_access",
   survey_vars = list(
     cluster = "hv001",
     hhid = "hhid",
