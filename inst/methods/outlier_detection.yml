@@ -46,7 +46,7 @@ key_metrics:
   outlier_flag_mean: "Flag for outliers exceeding mean + SD bounds."
   outlier_flag_median: "Flag for outliers exceeding median + MAD bounds."
   outlier_flag_iqr: "Flag for outliers exceeding Tukey IQR upper fence."
-  outlier_flag_consensus: "Consensus flag requiring ≥2 methods to agree."
+  outlier_flag_consensus: "Consensus flag requiring ≥ consensus_rule methods to agree (default: all 3 methods)."
   outbreak_flag: "Reclassification of consecutive outliers as sustained outbreaks."
 
 data_inputs:
@@ -57,12 +57,15 @@ data_inputs:
   - "Indicator type (count or rate) for appropriate scaling."
 
 guardrails:
-  - "Minimum observations per comparison group (min_n ≥ 8)."
-  - "Reporting rate threshold (reporting_rate_min ≥ 0.5)."
-  - "Inactive or newly opened facilities excluded if `key_indicators_hf`
-    provided."
-  - "Guardrail reasons include: low_reporting, insufficient_n, unstable_scale,
-    inactive_facility."
+  - "Minimum observations per comparison group (min_n ≥ 8, default)."
+  - "Reporting rate threshold (reporting_rate_min ≥ 0.5, default)."
+  - "Inactive or newly opened facilities are filtered out entirely before
+    detection when `key_indicators_hf` is provided (not tagged with a reason
+    code—they are excluded from the output rather than flagged)."
+  - "Guardrail reasons applied to retained observations:
+    'low_reporting' (reporting rate below threshold),
+    'insufficient_n' (fewer than min_n observations in group),
+    'unstable_scale' (SD, MAD, or IQR is zero or undefined)."
 
 methods:
   mean_method:
@@ -80,11 +83,13 @@ methods:
 
   median_method:
     name: "Median Absolute Deviation (MAD)"
-    formula: "x > median + (multiplier × MAD × constant)"
+    formula: "x > median + (mad_multiplier × MAD)"
     description: >
       Robust to skew and unaffected by single anomalies. Uses the median as
-      center and MAD as spread measure. Ideal for indicators with irregular
-      distributions.
+      center and MAD as spread measure. MAD is computed by R's stats::mad()
+      with a constant (default 1.4826, baked into the MAD value to make it
+      consistent with the standard deviation for normal data). Ideal for
+      indicators with irregular distributions.
     strengths:
       - "Stable in presence of skewed data or heavy tails."
       - "Resilient to single data entry errors."
@@ -105,14 +110,18 @@ methods:
 
   consensus:
     name: "Cross-method agreement"
-    rule: "Flag as outlier when ≥2 of 3 methods agree."
+    rule: >
+      Flag as outlier when the number of agreeing methods meets or exceeds
+      consensus_rule (default: 3, meaning all three methods must agree).
+      Lowering consensus_rule to 2 requires only 2-of-3 methods to agree.
     purpose: >
       Provides balanced classification by combining evidence from multiple
       independent methods. Reduces false positives and strengthens confidence.
     validation:
-      - "At least two other methods must be active for consensus."
+      - "At least two detection methods (iqr, median, mean) must be active
+        for consensus to be computed."
       - "Consensus column (`outlier_flag_consensus`) produced only when
-        available methods ≥2."
+        at least 2 active detection methods are specified."
 
 strictness_presets:
   lenient:
@@ -135,21 +144,33 @@ strictness_presets:
 
 outbreak_classification:
   description: >
-    Consecutive outliers are reclassified as “outbreaks” if they occur over
-    multiple months and meet continuity criteria. This helps separate isolated
-    anomalies (e.g., reporting spikes) from sustained epidemiological events.
+    Consecutive outlier months are reclassified as “outbreaks” if they form
+    a sustained cluster meeting continuity criteria. This helps separate
+    isolated anomalies (e.g., reporting spikes) from sustained epidemiological
+    events. Controlled by classify_outbreaks = TRUE (default: FALSE).
+  parameters:
+    outbreak_min_run: “Minimum number of outlier months in a cluster to qualify
+      as an outbreak (default: 2).”
+    outbreak_max_gap: “Maximum number of non-outlier months allowed between
+      outlier months within the same cluster (default: 12). Clusters separated
+      by more than this gap are treated as independent events.”
+    outbreak_prop_tolerance: “Reserved parameter (default: 0.9). Not currently
+      used in gap-based clustering logic.”
   rules:
-    - "Minimum run length ≥ 2 months."
-    - "Allowed gap between outliers ≤ 1 month."
-    - "Within-run proportional consistency ≥ 0.9."
+    - “Minimum cluster size ≥ outbreak_min_run months (default ≥ 2).”
+    - “Allowed gap between outliers within a cluster ≤ outbreak_max_gap months
+      (default ≤ 12 months).”
+    - “All months between the first and last outlier in a valid cluster are
+      reclassified, even non-outlier months within the span.”
   outputs:
-    - "outlier_flag_* columns reclassified to include 'outbreak' state."
-    - "Simplified categories: normal, outlier, outbreak, insufficient_data."
+    - “outlier_flag_* columns reclassified to include 'outbreak' state.”
+    - “Simplified categories: normal, outlier, outbreak, insufficient_data.”
 
 integration_with_reporting_and_activity:
-  - "Facilities with reporting_rate < threshold are excluded from detection."
-  - "Inactive facilities (from `active_status.yaml`) are skipped and tagged
-    with `reason = 'inactive_facility'`."
+  - "Facilities with reporting_rate < reporting_rate_min are assigned
+    reason = 'low_reporting' and not flagged as outliers."
+  - "Inactive facilities are excluded from detection entirely when
+    `key_indicators_hf` is provided (see `active_status.yml`)."
   - "Integration with completeness diagnostics ensures outliers are not artefacts
     of reporting interruptions."
   - "Consistency across outlier detection and completeness assessment enables
@@ -160,7 +181,7 @@ validation_summary:
   - "Ensure at least min_n observations per comparison group."
   - "Confirm reporting_rate ∈ [0,1] if provided."
   - "Verify that time_mode ('within_year' vs 'across_time') is applied consistently."
-  - "Ensure consensus rule ≤ number of active detection methods."
+  - "Ensure consensus_rule ≤ number of active detection methods (iqr, median, mean)."
   - "Visually inspect outlier and outbreak patterns via plots."
 
 interpretation_guidance:

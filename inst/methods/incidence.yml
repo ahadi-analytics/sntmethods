@@ -1,14 +1,19 @@
 title: "Incidence Adjustment Framework"
-version: "1.2.0"
+version: "1.3.0"
 description: >
-  Defines the standard stepwise approach (N0–N4) for estimating malaria
+  Defines the standard stepwise approach (N0–N5) for estimating malaria
   incidence using routine DHIS2 data. Each step progressively adjusts for
   diagnostic, reporting, and care-seeking biases. N4 provides an alternative
-  to N3 that excludes private sector adjustment. The approach aligns with
-  WHO Global Malaria Programme guidance and uses standardized variable names
-  from SNT workflows (e.g., conf, test, pres, reprate, pop). When disaggregated
-  variables are used (e.g., conf_u5), the corresponding population denominator
-  is automatically aligned (e.g., pop_u5).
+  to N3 that excludes private sector adjustment. N5 provides a conservative
+  variant of N4 that halves the non-care-seeking fraction. The approach
+  aligns with WHO Global Malaria Programme guidance and uses standardized
+  variable names from SNT workflows (e.g., conf, test, pres, reprate, pop).
+  When disaggregated variables are used (e.g., conf_u5), the corresponding
+  population denominator is automatically aligned (e.g., pop_u5).
+
+  All levels (N0–N5) are calculated at admin-month level. Annual outputs
+  are produced by summing monthly case counts and recomputing incidence
+  rates using annual population denominators.
 
 levels:
   N0:
@@ -36,30 +41,33 @@ levels:
     name: "Testing-Adjusted Incidence"
     formula: "N1 = conf + pres × tpr"
     where:
-      conf: "Confirmed malaria cases"
-      pres: "Presumed malaria cases"
-      tpr: "Test positivity rate (TPR)"
+      conf: "Confirmed malaria cases (aggregated to admin-month level)"
+      pres: "Presumed malaria cases (aggregated to admin-month level)"
+      tpr: "Admin-level TPR = sum(conf) / sum(test) after aggregation"
     scale: "per 1,000 population"
     purpose: >
       Adjusts for incomplete testing by estimating additional confirmed cases
-      among presumed cases using the facility-level test positivity rate (TPR).
+      among presumed cases using the admin-level test positivity rate (TPR).
+      TPR is computed at the admin level after aggregation (not at facility
+      level), ensuring that all facilities contribute regardless of whether
+      they have individual TPR values.
+    tpr_note: >
+      TPR fallback logic (rolling, adm2, prev_year, adm1, adm0) is applied
+      before calling calc_incidence(), in the calc_tpr() step. By the time
+      calc_incidence() runs, the tpr column must already be present in the
+      input data. calc_incidence() then recalculates TPR at admin level as
+      sum(conf)/sum(test) across all facilities in each admin-month group.
     assumptions:
       - The TPR among presumed cases is similar to that among tested cases.
       - pres is either directly reported or derived from treated − confirmed.
       - TPR values are valid and within range [0,1].
-    fallback_logic:
-      1: "Use HF-level TPR (conf/test) if both values present."
-      2: "If missing, use HF rolling mean (previous + next month)."
-      3: "If still missing, use higher admin-level TPR (adm2 → adm1 → adm0)."
-      4: "If still missing, use same HF-month TPR from previous year."
     uncertainty_points:
       - Presumed cases may be inconsistently reported.
-      - Small denominators produce unstable TPR.
+      - Small denominators produce unstable admin-level TPR.
       - Seasonal variations may bias TPR if few months are reported.
     outputs:
       - n1_cases
       - n1_incidence
-      - tpr_method
     validation:
       - "0 ≤ TPR ≤ 1"
       - "pres floored at zero"
@@ -69,7 +77,8 @@ levels:
     name: "Reporting-Adjusted Incidence"
     formula: "N2 = N1 / reprate"
     where:
-      reprate: "Reporting rate = rep / exp, bounded to [0,1]"
+      reprate: "Reporting rate = rep / exp, valid range (0, 1]. Values ≤ 0
+        produce NA (no adjustment possible). Values > 1 are capped at 1."
     scale: "per 1,000 population"
     purpose: >
       Adjusts for incomplete facility reporting by dividing N1 by the reporting
@@ -83,7 +92,7 @@ levels:
     outputs:
       - n2_cases
       - n2_incidence
-      - reprate_used
+      - reprate
     validation:
       - "0 ≤ reprate ≤ 1"
       - "Expected reports (exp) > 0"
@@ -91,28 +100,31 @@ levels:
 
   N3:
     name: "Care-Seeking-Adjusted Incidence"
-    formula: "N3_annual = N2_annual × (1 + CS_Priv/CS_Pub + CS_None/CS_Pub)"
+    formula: "N3 = N2 × (1 + CS_Priv/CS_Pub + CS_None/CS_Pub)"
+    expanded_formula: >
+      N3 = N2 + (N2 × CS_Priv/CS_Pub) + (N2 × CS_None/CS_Pub)
     where:
-      N2_annual: "Sum of N2 cases within admin unit for the year"
-      CS_Pub: "Proportion seeking care in public facilities"
-      CS_Priv: "Proportion seeking care in private facilities"
-      CS_None: "Proportion not seeking care"
+      N2: "Reporting-adjusted cases at admin-month level"
+      CS_Pub: "Proportion seeking care in public facilities (cs_public)"
+      CS_Priv: "Proportion seeking care in private facilities (cs_private)"
+      CS_None: "Proportion not seeking care (cs_none)"
     scale: "per 1,000 population"
     purpose: >
       Adjusts for populations seeking care outside public facilities or not
-      seeking care at all, using care-seeking proportions (CS_Pub, CS_Priv, CS_None)
-      from national household surveys such as DHS or MIS.
+      seeking care at all, using care-seeking proportions (CS_Pub, CS_Priv,
+      CS_None) from national household surveys such as DHS or MIS.
     temporal_note: >
-      N3 is calculated at annual level only. Care-seeking behavior data from
-      DHS/MIS surveys is annual, so N3 is not available at monthly resolution.
-    aggregation_process:
-      - "Sum N2 cases within admin unit for the year"
-      - "Apply CSB adjustment to annual N2 totals"
+      N3 is calculated at admin-month level (same temporal resolution as N0–N2).
+      Care-seeking proportions from DHS/MIS surveys are typically available at
+      annual or survey-period resolution and are held constant within an
+      admin-year; monthly N3 values therefore share the same CS proportions
+      within a year. Annual N3 outputs are produced by summing monthly N3 cases.
     assumptions:
       - Care-seeking fractions are representative for the analysis period.
       - Care-seeking among febrile adults approximates that of children.
       - CS_Pub + CS_Priv + CS_None ≈ 1.
-      - CSB is constant within an admin-year (annual survey data).
+      - CS proportions are constant within an admin-year (annual survey data).
+      - CS_Pub > 0 (required to avoid division by zero).
     uncertainty_points:
       - Survey years may differ from routine data period.
       - Care-seeking data usually available for <5 children only.
@@ -129,12 +141,11 @@ levels:
 
   N4:
     name: "Care-Seeking-Adjusted Incidence (Public + Non-Seekers Only)"
-    formula: >
-      N4_annual = N2_annual × (1 + CS_None/CS_Pub)
+    formula: "N4 = N2 × (1 + CS_None/CS_Pub)"
     where:
-      N2_annual: "Sum of N2 cases within admin unit for the year"
-      CS_Pub: "Proportion seeking care in public facilities"
-      CS_None: "Proportion not seeking care"
+      N2: "Reporting-adjusted cases at admin-month level"
+      CS_Pub: "Proportion seeking care in public facilities (cs_public)"
+      CS_None: "Proportion not seeking care (cs_none)"
     scale: "per 1,000 population"
     purpose: >
       Adjusts for populations not seeking care, without adding private sector
@@ -142,12 +153,12 @@ levels:
       captured in DHIS2, or for conservative estimates. N4 will always be
       between N2 and N3 in magnitude (N2 < N4 < N3).
     temporal_note: >
-      N4 is calculated at annual level only. Like N3, care-seeking behavior data
-      from DHS/MIS surveys is annual, so N4 is not available at monthly resolution.
+      N4 is calculated at admin-month level (same resolution as N0–N3).
+      Annual N4 outputs are produced by summing monthly N4 cases.
     assumptions:
       - Care-seeking fractions are representative for the analysis period.
       - Private sector cases are excluded (either negligible or already captured).
-      - CS_Pub + CS_None represents the relevant population for this adjustment.
+      - CS_Pub > 0 (required to avoid division by zero).
     uncertainty_points:
       - Survey years may differ from routine data period.
       - Does not account for private sector burden.
@@ -160,22 +171,56 @@ levels:
       - "CS_Pub within [0,1] and > 0"
       - "CS_None within [0,1]"
 
+  N5:
+    name: "Conservative Care-Seeking-Adjusted Incidence (Reduced Non-Seekers)"
+    formula: "N5 = N2 × (1 + (CS_None / cs_none_divisor) / CS_Pub)"
+    where:
+      N2: "Reporting-adjusted cases at admin-month level"
+      CS_Pub: "Proportion seeking care in public facilities (cs_public)"
+      CS_None: "Proportion not seeking care (cs_none)"
+      cs_none_divisor: "Divisor applied to CS_None (default: 2)"
+    scale: "per 1,000 population"
+    purpose: >
+      Provides a conservative non-seeker adjustment by dividing CS_None by a
+      configurable divisor (default 2) before applying the adjustment. Like N4
+      but reduces the non-care-seeking component. N5 is always between N2 and
+      N4 in magnitude (N2 < N5 < N4).
+    temporal_note: >
+      N5 is calculated at admin-month level. Annual N5 outputs are produced by
+      summing monthly N5 cases.
+    assumptions:
+      - Care-seeking fractions are representative for the analysis period.
+      - Private sector cases are excluded.
+      - CS_Pub > 0 (required to avoid division by zero).
+    uncertainty_points:
+      - Choice of divisor is subjective; default of 2 is a pragmatic assumption.
+      - Survey years may differ from routine data period.
+    outputs:
+      - n5_cases
+      - n5_incidence
+      - adj_none
+      - adj_none_reduced
+    validation:
+      - "CS_Pub within [0,1] and > 0"
+      - "CS_None within [0,1]"
+      - "cs_none_divisor > 0"
+
 aggregation_rules:
-  - "Variables use SNT standardized naming: conf, test, pres, treated, reprate,
-    pop."
-  - "Output is at admin-month level (adm2-month). Facility-level data is
-    aggregated to admin level before calculating incidence."
-  - "N0, N1, N2 are calculated at admin-month level."
-  - "N3 uses annual aggregation of N2 before applying full CSB adjustment
-    (private + non-seekers). N3 is annual-only."
-  - "N4 uses annual aggregation of N2 before applying non-seeker adjustment
-    only (excludes private sector). N4 is annual-only."
-  - "When variables are age-disaggregated (e.g., conf_u5, conf_preg), matching
-    denominators follow the same pattern (e.g., pop_u5, pop_preg_exp)."
+  - "Variables use SNT standardized naming: conf, test, pres, reprate, pop."
+  - "Facility-level data is aggregated to admin-month level before calculating
+    incidence. TPR is recalculated at admin level as sum(conf)/sum(test).
+    Reporting rate is averaged across facilities."
+  - "N0, N1, N2, N3, N4, and N5 are all calculated at admin-month level."
+  - "Annual outputs are produced by summing monthly case counts and
+    recomputing incidence rates using annual population denominators."
+  - "When variables are age-disaggregated (e.g., conf_u5), matching
+    denominators follow the same pattern (e.g., pop_u5)."
   - "Aggregation across admin levels (adm1, adm2) uses weighted sums of cases
     and population."
-  - "When reprate or TPR missing for an area, fallback logic is applied before
-    aggregation."
+  - "When reprate or TPR is missing for an area, fallback logic is applied
+    prior to incidence calculation."
+  - "The return value is a named list with 'monthly' and 'annual' sublists,
+    each containing tibbles at adm0, adm1, adm2 (and optionally adm3) level."
 
 validation_summary:
   - "TPR validated at each level before use in N1."

@@ -1,5 +1,5 @@
 title: "IPTp DHS Indicator Methodology"
-version: "1.1.0"
+version: "1.2.0"
 description: >
   Methodology for estimating IPTp (Intermittent Preventive Treatment in
   pregnancy) indicators from DHS data. Supports cumulative and exclusive
@@ -48,6 +48,18 @@ variables:
     dhs_name: "v001"
     description: "Cluster/enumeration area identifier"
 
+  survey_weight:
+    dhs_name: "v005"
+    description: "Sample weight (divide by 1,000,000 for proportions)"
+
+  stratum:
+    dhs_name: "v022"
+    description: "Sample stratum (used for stratified survey design)"
+
+  adm1:
+    dhs_name: "v024"
+    description: "First administrative level (region/province)"
+
   interview_date:
     dhs_name: "v008"
     description: "Date of interview (CMC format)"
@@ -55,47 +67,66 @@ variables:
   birth_date:
     dhs_name: "b3_01"
     description: "Date of most recent birth (CMC format)"
+    note: "_1 suffix (or _01) indicates most recent birth from the birth history"
 
-  sp_doses:
+  sp_taken:
     dhs_name: "m49a_1"
-    description: "SP/Fansidar during pregnancy (interpretation varies by approach)"
+    description: "Took SP/Fansidar during pregnancy (binary: 0 = No, 1 = Yes)"
+    values:
+      0: "No"
+      1: "Yes"
+    note: >
+      _1 suffix indicates the most recent pregnancy. m49a_1 is a BINARY
+      variable (0/1 only). In the DHS survey-weighted path, m49a_1 is not
+      used directly for dose counting; ml1_1 provides the actual dose count.
+      In the MBG path (calc_iptp_mbg), the survey_vars$sp_doses key maps to
+      m49a_1 by default, and the dose indicators (1plus, 2plus, 3plus) are
+      computed by applying >= 1, >= 2, >= 3 to this binary variable.
+      Consequently, the MBG path can only correctly estimate 1+ coverage
+      (dose >= 1); 2+ and 3+ will always be zero because m49a_1 never
+      exceeds 1. To estimate 2+ and 3+ in the MBG path, map sp_doses to
+      ml1_1 instead.
+
+  sp_dose_count:
+    dhs_name: "ml1_1"
+    description: "Number of SP/Fansidar doses taken during pregnancy"
     values:
       0: "None"
       1-7: "Number of doses"
       90+: "Don't know / Other"
     note: >
-      _1 suffix indicates most recent pregnancy. The MBG approach uses m49a_1
-      as a numeric dose count directly. The DHS survey-weighted approach treats
-      m49a_1 as binary (SP taken at all: yes/no) and uses ml1_1 for the
-      actual dose count.
-
-  sp_dose_count:
-    dhs_name: "ml1_1"
-    description: "Number of SP/Fansidar doses (used by DHS survey-weighted approach)"
-    note: >
-      Used in the DHS survey-weighted implementation for counting doses.
-      The MBG approach uses m49a_1 directly instead.
+      Used in the DHS survey-weighted implementation for counting doses
+      (the default sp_doses key in calc_iptp_dhs_core). Valid responses
+      are 0-7; values >= 90 are excluded (filter: sp_doses <= 7). For the
+      MBG path, map survey_vars$sp_doses to ml1_1 to correctly compute
+      2+ and 3+ indicators.
 
   child_age_months:
     dhs_name: "b19_01"
-    description: "Age of most recent child in months (used for birth window filtering)"
+    description: "Age of most recent child in months"
     note: >
-      Alternative to computing birth window from v008 - b3_01. Some DHS
-      implementations use b19_01 directly for the recency filter.
+      Listed in survey_vars as birth_age_months but NOT currently used by
+      the R implementation. The birth window filter is computed via CMC
+      arithmetic (interview_cmc - birth_cmc), not from b19_01 directly.
 
   gps_cluster:
     dhs_name: "DHSCLUST"
+    description: "Cluster ID in GPS file (GE recode)"
 
   gps_lat:
     dhs_name: "LATNUM"
+    description: "Latitude coordinate"
 
   gps_lon:
     dhs_name: "LONGNUM"
+    description: "Longitude coordinate"
 
 eligibility:
-  - "Woman had a live birth within analysis window (default: 36 months)"
-  - "Valid response to SP doses question (0-7, not don't know)"
-  - "Cluster has valid GPS coordinates"
+  - "Woman had a birth within analysis window (CMC filter: interview_cmc - b3_01 <= birth_window_months)"
+  - "Birth is not in the future (months_since_birth >= 0)"
+  - "Valid SP response: sp_doses not NA and sp_doses <= 7 (excludes 'don't know' codes >= 90)"
+  - "Cluster has valid GPS coordinates (MBG path only)"
+  - "Note: no ANC attendance restriction is applied in the current implementation"
 
 methodology:
   who_recommendation: >
@@ -103,8 +134,10 @@ methodology:
     malaria-endemic areas. Some programs aim for 4+ doses.
 
   denominator: >
-    Denominator includes all women with recent births and valid SP data.
-    Some analyses restrict to women who attended ANC at least once.
+    Denominator is all women with a birth in the analysis window and a valid
+    SP response (sp_doses <= 7). No ANC attendance restriction is applied.
+    Some external analyses restrict to women who attended ANC at least once,
+    but this implementation does not apply that restriction.
 
   cumulative_vs_exclusive: >
     Cumulative indicators (1plus, 2plus, 3plus) count all women who

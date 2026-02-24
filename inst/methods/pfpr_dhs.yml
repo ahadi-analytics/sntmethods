@@ -24,25 +24,25 @@ indicators:
       6-59 months of age. Only P. falciparum infections counted as positive.
 
   pfpr_rdt_5_10:
-    name: "PfPR by RDT (children 5-10 years)"
+    name: "PfPR by RDT (children 5 to under 10 years)"
     numerator: "Number of RDT-positive children"
     denominator: "Number of children tested by RDT"
     age_range_months: [60, 120]
 
   pfpr_mic_5_10:
-    name: "PfPR by microscopy (children 5-10 years)"
+    name: "PfPR by microscopy (children 5 to under 10 years)"
     numerator: "Number of microscopy-positive children"
     denominator: "Number of children tested by microscopy"
     age_range_months: [60, 120]
 
   pfpr_rdt_u10:
-    name: "PfPR by RDT (children 6 months - 10 years)"
+    name: "PfPR by RDT (children under 10 years)"
     numerator: "Number of RDT-positive children"
     denominator: "Number of children tested by RDT"
     age_range_months: [6, 119]
 
   pfpr_mic_u10:
-    name: "PfPR by microscopy (children 6 months - 10 years)"
+    name: "PfPR by microscopy (children under 10 years)"
     numerator: "Number of microscopy-positive children"
     denominator: "Number of children tested by microscopy"
     age_range_months: [6, 119]
@@ -71,11 +71,58 @@ data_sources:
 variables:
   cluster_id:
     dhs_name: "hv001"
-    description: "Cluster/enumeration area identifier"
+    description: "Cluster/enumeration area identifier (geographic cluster number)"
+    note: >
+      Used as the join key between PR and GE files, and as the grouping unit
+      for MBG cluster-level output. For survey design (svydesign), the PSU
+      variable hv021 is used instead — see psu below.
+
+  psu:
+    dhs_name: "hv021"
+    description: "Primary sampling unit for survey design"
+    note: >
+      Used as the ids argument in svydesign() for survey-weighted estimation
+      (calc_pfpr_dhs / calc_pfpr_dhs_core). Distinct from hv001 (geographic
+      cluster number). Default in survey_vars$cluster for the weighted
+      estimation functions.
+
+  survey_weight:
+    dhs_name: "hv005"
+    description: "Household sample weight"
+    note: >
+      Divided by 1,000,000 before use in svydesign() to produce the
+      fractional weight. Default in survey_vars$weight.
+
+  stratum:
+    dhs_name: "hv022"
+    description: "Sample stratum number"
+    note: >
+      Used as the strata argument in svydesign() when present. If absent,
+      stratum is constructed from hv024 (admin1) crossed with hv025
+      (urban/rural). Default in survey_vars$stratum.
+
+  adm1:
+    dhs_name: "hv024"
+    description: "Region / first administrative level"
+    note: >
+      Used as a grouping variable for admin-level aggregation and as a
+      component of the fallback stratum when hv022 is unavailable.
+      Default in survey_vars$adm1.
+
+  urban_rural:
+    dhs_name: "hv025"
+    description: "Type of place of residence (urban/rural)"
+    values:
+      1: "Urban"
+      2: "Rural"
+    note: >
+      Used as the second component of the fallback stratum construction
+      (hv024 x hv025) when hv022 is not present in the data. Not mapped
+      via survey_vars; detected automatically by name.
 
   age_months:
     dhs_name: "hc1"
-    description: "Child's age in months"
+    description: "Child's age in months (available in PR file via household-child linkage)"
 
   present:
     dhs_name: "hv103"
@@ -84,12 +131,19 @@ variables:
       0: "No"
       1: "Yes"
 
-  mother_listed:
+  hh_selected_malaria:
     dhs_name: "hv042"
-    description: "Mother of child listed in household roster"
+    description: "Household selected for hemoglobin and malaria testing"
     values:
       0: "No"
       1: "Yes"
+    note: >
+      Sub-sampling flag used in DHS biomarker modules. Only a subset of
+      households are selected for malaria testing. This filter ensures the
+      denominator is restricted to children who were eligible to be tested,
+      maintaining survey design integrity. Mapped via survey_vars$mother
+      in the R functions (a historical naming artefact — the key refers to
+      this eligibility flag, not a maternal linkage variable).
 
   rdt_result:
     dhs_name: "hml35"
@@ -111,7 +165,7 @@ variables:
 
   gps_cluster:
     dhs_name: "DHSCLUST"
-    description: "Cluster ID in GPS file"
+    description: "Cluster ID in GPS file; used as join key between PR and GE files via hv001"
 
   gps_lat:
     dhs_name: "LATNUM"
@@ -130,38 +184,70 @@ variables:
       results. h47 is in KR, hml35/hml32 are in PR.
 
 eligibility:
-  - "Child age within specified range (e.g., 6-59 months for u5)"
+  - "Child age within specified range (e.g., 6-59 months for u5), applied as age >= min AND age <= max (both bounds inclusive)"
   - "Present in household (hv103 == 1)"
-  - "Mother listed in household (hv042 == 1)"
-  - "Valid test result (not missing/refused/not tested)"
+  - "Household selected for malaria testing (hv042 == 1)"
+  - "Valid test result (not missing/refused/not tested): hml35 in {0,1} for RDT; hml32 in {0,1,6} for microscopy"
 
 output_format:
-  columns:
-    cluster_id: "Cluster identifier"
-    indicator: "Numerator count (number positive)"
-    samplesize: "Denominator count (number tested)"
-    x: "Longitude"
-    y: "Latitude"
-  note: >
-    One row per cluster with valid GPS coordinates. Clusters with zero
-    tested children are excluded. This format is ready for direct input
-    to MBG spatial modeling.
+  survey_weighted:
+    description: >
+      Output of calc_pfpr_dhs() and calc_pfpr_dhs_core(). One row per cluster
+      (when gps_data is supplied) or per admin unit. Survey weights applied via
+      svydesign() / svyby(). Values are proportions rounded to 2 decimal places.
+    columns:
+      cluster_id: "Cluster identifier (when GPS data provided) or admin grouping key"
+      dhs_pfpr_rdt: "Survey-weighted PfPR by RDT (proportion, 0-1)"
+      dhs_pfpr_rdt_low: "Lower bound of 95% confidence interval for RDT PfPR"
+      dhs_pfpr_rdt_upp: "Upper bound of 95% confidence interval for RDT PfPR"
+      dhs_pfpr_mic: "Survey-weighted PfPR by microscopy (proportion, 0-1)"
+      dhs_pfpr_mic_low: "Lower bound of 95% confidence interval for microscopy PfPR"
+      dhs_pfpr_mic_upp: "Upper bound of 95% confidence interval for microscopy PfPR"
+      dhs_n_tested_rdt: "Survey-weighted total number tested by RDT (integer)"
+      dhs_n_pos_rdt: "Survey-weighted number RDT-positive (integer)"
+      dhs_n_tested_mic: "Survey-weighted total number tested by microscopy (integer)"
+      dhs_n_pos_mic: "Survey-weighted number microscopy-positive (integer)"
+      lat: "Latitude of cluster centroid (when GPS data provided)"
+      lon: "Longitude of cluster centroid (when GPS data provided)"
+
+  mbg_cluster:
+    description: >
+      Output of calc_pfpr_mbg() and prep_pfpr_mbg(). One row per cluster with
+      valid GPS coordinates. Unweighted cluster counts used as input for MBG
+      spatial modeling. Clusters with zero samplesize are excluded. This format
+      matches the expected input for mbg::MbgModelRunner.
+    columns:
+      cluster_id: "Cluster identifier"
+      indicator: "Numerator count (number positive)"
+      samplesize: "Denominator count (number tested with valid result)"
+      x: "Longitude (WGS84)"
+      y: "Latitude (WGS84)"
 
 methodology:
   survey_weights: >
-    For DHS direct estimates, survey weights are applied via svydesign().
-    For MBG spatial modeling inputs, unweighted cluster counts are used
-    as MBG handles spatial smoothing and uncertainty internally.
+    For DHS direct estimates (calc_pfpr_dhs / calc_pfpr_dhs_core), survey
+    weights are applied via svydesign(). The PSU variable hv021 is used as
+    the clustering unit (ids), hv022 as the stratum (or a derived stratum
+    from hv024 x hv025 when hv022 is absent), and hv005 / 1,000,000 as the
+    weight. For MBG spatial modeling inputs (calc_pfpr_mbg / prep_pfpr_mbg),
+    unweighted cluster counts are used as MBG handles spatial smoothing and
+    uncertainty internally.
 
   aggregation: >
-    Simple counts aggregated at cluster level. Numerator = sum of positive
-    tests. Denominator = total number tested. No weighting applied.
+    Survey-weighted: svyby() + svymean() per grouping variable. Counts via
+    svytotal(). For admin-level aggregation from cluster results, a
+    sample-size weighted mean (weighted.mean with w = n_tested) is used.
+    MBG: simple unweighted counts aggregated at cluster level.
+    Numerator = sum of positive tests. Denominator = total with valid results.
 
   age_groups: >
     Multiple age groups supported to enable analysis of different populations.
-    Standard groups include: u5 (6-59m), 5-10 (60-120m), u10 (6-119m), and
-    2-10 (24-119m). The 2-10 age group aligns with MAP standard for
-    cross-country comparison.
+    All age bounds are inclusive (age >= min AND age <= max). Standard groups
+    include: u5 (6-59 months), 5_10 (60-120 months), u10 (6-119 months), and
+    2_10 (24-119 months). The 2_10 age group aligns with MAP standard for
+    cross-country comparison. Age filtering in MBG functions occurs per-group
+    after a broad initial filter; in survey-weighted functions the default
+    filter is applied in .prepare_pfpr_data() with age_min=6, age_max=59.
 
   wmr_comparison: >
     WMR uses hml35 (RDT) as primary and refers to the indicator as
@@ -174,8 +260,8 @@ methodology:
 validation:
   - "Age range must be valid (min < max, both non-negative)"
   - "Test results must be 0 or 1 for RDT, 0/1/6 for microscopy"
-  - "Clusters with missing GPS coordinates are excluded"
-  - "Clusters with zero samplesize are excluded"
+  - "Clusters with missing GPS coordinates are excluded (filtered in .prepare_gps_data via x != 0 AND y != 0 AND not NA)"
+  - "Clusters with zero samplesize are excluded from MBG output"
 
 references:
   - "DHS Malaria Indicator Survey Guide"

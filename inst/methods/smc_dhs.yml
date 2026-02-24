@@ -20,7 +20,23 @@ data_sources:
 variables:
   cluster_id:
     dhs_name: "v001"
-    description: "Cluster identifier"
+    description: "Cluster identifier (used in MBG functions)"
+
+  psu_id:
+    dhs_name: "v021"
+    description: "Primary sampling unit / cluster ID (used in survey-weighted functions for survey design)"
+
+  survey_weight:
+    dhs_name: "v005"
+    description: "Sample weight (divide by 1,000,000 before use)"
+
+  stratum:
+    dhs_name: "v022"
+    description: "Stratum variable for stratified survey design"
+
+  region:
+    dhs_name: "v024"
+    description: "Region code; used as default grouping variable when no region_var is supplied"
 
   age_months:
     dhs_name: "hw1"
@@ -36,22 +52,28 @@ variables:
 
   smc_alternative:
     dhs_name: "ml13g"
-    description: "Child received antimalarials for prevention"
+    description: "Child received antimalarials for prevention (used when hml43 is absent)"
     availability: "Available in some surveys without specific SMC variable"
+    values:
+      0: "No"
+      1: "Yes"
 
   gps_cluster:
     dhs_name: "DHSCLUST"
+    description: "Cluster ID in GPS file (GE recode)"
 
   gps_lat:
     dhs_name: "LATNUM"
+    description: "Latitude coordinate"
 
   gps_lon:
     dhs_name: "LONGNUM"
+    description: "Longitude coordinate"
 
 eligibility:
-  - "Child age 0-59 months"
-  - "Valid SMC response (0 or 1, not don't know)"
-  - "Cluster has valid GPS coordinates"
+  - "Child age 0-59 months (age_months >= 0 AND age_months <= 59; children who have not yet reached their 5th birthday)"
+  - "Valid SMC response: only values 0 or 1 are retained (missing/NA and don't-know codes excluded via smc_receipt %in% c(0, 1))"
+  - "Cluster has valid GPS coordinates (for MBG functions)"
 
 methodology:
   variable_priority: >

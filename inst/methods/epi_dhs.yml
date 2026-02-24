@@ -78,7 +78,23 @@ data_sources:
 variables:
   cluster_id:
     dhs_name: "v001"
-    description: "Cluster identifier"
+    description: "Cluster identifier (used in MBG functions)"
+
+  psu_id:
+    dhs_name: "v021"
+    description: "Primary sampling unit / cluster ID (used in survey-weighted functions for survey design)"
+
+  survey_weight:
+    dhs_name: "v005"
+    description: "Sample weight (divide by 1,000,000 before use)"
+
+  stratum:
+    dhs_name: "v022"
+    description: "Stratum variable for stratified survey design"
+
+  region:
+    dhs_name: "v024"
+    description: "Region code; used as default grouping variable when no region_var is supplied"
 
   age_months:
     dhs_name: "hw1"
@@ -130,15 +146,20 @@ variables:
 
   malaria:
     dhs_name: "h68"
-    description: "Malaria vaccine (RTS,S)"
+    description: "Malaria vaccine (RTS,S/R21)"
 
 vaccination_coding:
   values:
     0: "No"
     1: "Vaccination date on card"
-    2: "Reported by mother"
-    3: "Vaccination marked on card"
+    2: "Reported by mother (no card)"
+    3: "Vaccination marked on card (no date)"
   received: "Values 1, 2, or 3 indicate vaccination received"
+  note: >
+    The R implementation codes any value in {1, 2, 3} as vaccinated (binary 1).
+    Value 0 and NA are coded as not vaccinated (binary 0). Values outside
+    {0, 1, 2, 3} (e.g., missing/don't know codes 8 or 9) remain NA and are
+    excluded via the %in% check.
 
 eligibility:
   - "Child age 12-23 months (completed 1 year, standard EPI target age)"

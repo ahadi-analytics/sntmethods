@@ -21,22 +21,39 @@ data_sources:
 variables:
   cluster_id:
     dhs_name: "hv001"
-    description: "Cluster/enumeration area identifier"
+    description: "Cluster/enumeration area identifier (used in MBG functions)"
+
+  psu_id:
+    dhs_name: "hv021"
+    description: "Primary sampling unit / cluster ID (used in survey-weighted functions for survey design)"
+
+  survey_weight:
+    dhs_name: "hv005"
+    description: "Sample weight (divide by 1,000,000 before use)"
+
+  stratum:
+    dhs_name: "hv022"
+    description: "Stratum variable for stratified survey design"
+
+  region:
+    dhs_name: "hv024"
+    description: "Region code; used as default grouping variable when no region_var is supplied"
 
   irs_sprayed:
     dhs_name: "hv253"
-    description: "Household interior walls sprayed in last 12 months"
+    description: "Household sprayed with residual insecticide in last 12 months"
     values:
       0: "No"
       1: "Yes"
     note: >
-      This variable may not be available in all DHS surveys. It is typically
-      included in Malaria Indicator Surveys (MIS) and DHS surveys in
-      malaria-endemic countries.
+      This is a household-level variable. Distinct from hv253a (walls of dwelling
+      sprayed), which is used in some surveys but is NOT used by this implementation.
+      hv253 may not be available in all DHS surveys; it is typically included in
+      Malaria Indicator Surveys (MIS) and DHS surveys in malaria-endemic countries.
 
   gps_cluster:
     dhs_name: "DHSCLUST"
-    description: "Cluster ID in GPS file"
+    description: "Cluster ID in GPS file (GE recode)"
 
   gps_lat:
     dhs_name: "LATNUM"
@@ -47,8 +64,9 @@ variables:
     description: "Longitude coordinate"
 
 eligibility:
-  - "Valid response to IRS question (not missing)"
-  - "Cluster has valid GPS coordinates"
+  - "Valid response to IRS question: households with NA hv253 are excluded (!is.na(irs_sprayed))"
+  - "Sprayed is coded binary: hv253 == 1 maps to sprayed = 1; all other non-NA values (including 0 and any don't-know codes) map to sprayed = 0"
+  - "Cluster has valid GPS coordinates (for MBG functions)"
 
 output_format:
   columns:
@@ -60,8 +78,8 @@ output_format:
 
 methodology:
   coverage_definition: >
-    A household is considered to have received IRS if the interior walls
-    were sprayed with residual insecticide in the 12 months preceding
+    A household is considered to have received IRS if the household was
+    sprayed with residual insecticide in the 12 months preceding
     the survey (hv253 == 1).
 
   survey_timing: >
@@ -75,9 +93,9 @@ methodology:
     analyzed separately from the fever/treatment cascade.
 
 validation:
-  - "hv253 must be 0 or 1 (exclude missing/don't know)"
-  - "Clusters with zero households excluded"
-  - "Clusters with missing GPS excluded"
+  - "hv253 must not be NA (missing records excluded); non-NA values are binarized as hv253 == 1"
+  - "Clusters with zero valid households after NA exclusion are excluded by .aggregate_to_mbg_clusters()"
+  - "Clusters with missing GPS coordinates excluded (for MBG functions)"
 
 references:
   - "DHS Guide to Statistics - IRS Coverage"

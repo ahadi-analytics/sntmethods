@@ -19,7 +19,32 @@ data_sources:
   primary: "KR (Children's Recode)"
 
 variables:
-  # --- Primary series: ml13* (DHS Phase 7+, most surveys from ~2015 onwards) ---
+  # --- Survey design variables ---
+  cluster:
+    dhs_name: "v021"
+    description: "Sample cluster/PSU identifier for survey design"
+    note: "Default survey_vars$cluster in calc_antimalarial_dhs_core()"
+
+  weight:
+    dhs_name: "v005"
+    description: "Survey sample weight (divided by 1e6 in R to obtain fractional weight)"
+
+  stratum:
+    dhs_name: "v022"
+    description: "Survey stratum identifier for stratified design"
+
+  age:
+    dhs_name: "hw1"
+    description: "Child's age in months (eligibility: 0-59)"
+
+  fever:
+    dhs_name: "h22"
+    description: "Child had fever in last 2 weeks"
+    values:
+      0: "No"
+      1: "Yes"
+
+  # --- Primary drug series: ml13* (DHS Phase 7+, most surveys from ~2015 onwards) ---
   drugs_act:
     dhs_name: "ml13e"
     description: "ACT (artemisinin-based combination therapy)"
@@ -51,42 +76,56 @@ variables:
     note: >
       WMR includes this as a catch-all in the receive_antimalarial formula.
       The actual DHS variable name varies by survey. Check the survey-specific
-      recode manual for the appropriate variable.
+      recode manual for the appropriate variable. In sntmethods the R regex
+      ^ml13[a-z]*$ captures ALL ml13* columns present in the data, including
+      any survey-specific catch-all variables, so no explicit mapping is needed.
 
   # --- Fallback series: h37* (older DHS surveys, e.g. BFA 2021) ---
   # When ml13* variables are absent, sntmethods auto-detects h37a-h as the
   # drug-specific treatment series for child fever/cough.
+  # The regex ^h37[a-h]$ detects h37a through h37h (eight variables).
   # IMPORTANT: ml1 is NOT a valid fallback — in BFA 2021, ml1 = "Times took
   # Fansidar during pregnancy" (IPTp), not child fever treatment.
-  fallback_act:
-    dhs_name: "h37e"
-    description: "Artemisinin combination taken for fever/cough (older surveys)"
-    note: "Equivalent to ml13e in newer surveys. Used when ml13e is absent."
-  fallback_cq:
-    dhs_name: "h37b"
-    description: "Chloroquine taken for fever/cough (older surveys)"
-    note: "Equivalent to ml13a in newer surveys."
-  fallback_qn:
-    dhs_name: "h37d"
-    description: "Quinine taken for fever/cough (older surveys)"
-    note: "Equivalent to ml13b in newer surveys."
-  fallback_aq:
-    dhs_name: "h37c"
-    description: "Amodiaquine taken for fever/cough (older surveys)"
-    note: "Equivalent to ml13c in newer surveys."
   fallback_sp:
     dhs_name: "h37a"
     description: "SP/Fansidar taken for fever/cough (older surveys)"
     note: >
-      Used for fever treatment. Distinct from ml1 which records SP taken
-      during pregnancy (IPTp) — do not confuse these two variables.
+      Used for fever treatment. Equivalent to ml13aa in newer surveys.
+      Distinct from ml1 which records SP taken during pregnancy (IPTp) —
+      do not confuse these two variables.
+  fallback_cq:
+    dhs_name: "h37b"
+    description: "Chloroquine taken for fever/cough (older surveys)"
+    note: "Equivalent to ml13a in newer surveys."
+  fallback_aq:
+    dhs_name: "h37c"
+    description: "Amodiaquine taken for fever/cough (older surveys)"
+    note: "Equivalent to ml13c in newer surveys."
+  fallback_qn:
+    dhs_name: "h37d"
+    description: "Quinine taken for fever/cough (older surveys)"
+    note: "Equivalent to ml13b in newer surveys."
+  fallback_act:
+    dhs_name: "h37e"
+    description: "Combination with artemisinin taken for fever/cough (older surveys)"
+    note: "Equivalent to ml13e in newer surveys. Used when ml13e is absent."
+  fallback_pq:
+    dhs_name: "h37f"
+    description: "Primaquine taken for fever/cough (older surveys)"
+    note: "Equivalent to ml13f in newer surveys. Detected by ^h37[a-h]$ regex."
+  fallback_mq:
+    dhs_name: "h37g"
+    description: "Mefloquine taken for fever/cough (older surveys)"
+    note: "Equivalent to ml13g in newer surveys. Detected by ^h37[a-h]$ regex."
   fallback_other:
     dhs_name: "h37h"
     description: "Other antimalarial taken for fever/cough (older surveys)"
+    note: "Catch-all for other antimalarials. Detected by ^h37[a-h]$ regex."
 
 eligibility:
-  - "Child age 0-59 months"
+  - "Child age 0-59 months (hw1 >= 0 and hw1 <= 59)"
   - "Child had fever in last 2 weeks (h22 == 1)"
+  - "At least one antimalarial drug variable must be non-missing"
 
 methodology:
   wmr_approach: >
@@ -96,9 +135,13 @@ methodology:
     no treatment) and by sociodemographic factors.
 
   cascade_position: >
-    Antimalarial treatment is step 3 of the care-seeking cascade:
-    Fever (h22) -> Sought care (CSB, h32 series) -> Diagnosed (MALARIA_DX, h47) ->
-    Treated (ANTIMALARIAL, ml13 series or h37 series) -> Received ACT (ml13e or h37e).
+    Antimalarial treatment is step 3 of the care-seeking cascade (0-indexed):
+    Step 0: Fever (h22) -> Step 1: Sought care (CSB, h32 series) ->
+    Step 2: Diagnosed (MALARIA_DX, h47) ->
+    Step 3: Treated (ANTIMALARIAL, ml13 series or h37 series) ->
+    Step 4: Received ACT (ml13e or h37e).
+    This numbering is consistent with calc_case_management_dhs() which assigns
+    step = 3L to the any_antimalarial cascade row.
 
   variable_detection: >
     sntmethods auto-detects the available drug series at runtime:
@@ -116,7 +159,11 @@ methodology:
 
   survey_design: >
     svydesign(id=~cluster, weights=~weight, strata=~strata, nest=TRUE).
-    svyciprop for proportions. options(survey.lonely.psu = "adjust").
+    options(survey.lonely.psu = "certainty") applied when strata are present.
+    sntmethods uses survey::svymean() (not svyciprop) for point estimates and
+    CIs. Both produce equivalent point estimates; CI widths differ slightly.
+    When only one stratum is present, the stratified design is dropped and
+    a cluster-only design is used to avoid singleton-PSU errors.
 
 status: "implemented"
 note: >

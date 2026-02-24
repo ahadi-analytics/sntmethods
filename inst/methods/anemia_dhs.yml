@@ -1,5 +1,5 @@
 title: "Anemia DHS Indicator Methodology"
-version: "1.1.0"
+version: "1.2.0"
 description: >
   Methodology for estimating anemia prevalence from DHS data.
   Supports multiple severity thresholds and both cumulative and exclusive
@@ -24,6 +24,11 @@ indicators:
       threshold: "Hb < 8 g/dL"
       numerator: "Children with Hb < 8 g/dL"
       denominator: "Children with valid Hb measurement"
+      note: >
+        Implementation threshold is 8 g/dL (clinically significant anemia
+        requiring intervention). The WHO clinical definition uses 7 g/dL;
+        this implementation uses 8 g/dL to capture a broader range of
+        clinically severe cases. See thresholds section.
 
   exclusive:
     anemia_mild_only:
@@ -54,25 +59,53 @@ variables:
     dhs_name: "hv001"
     description: "Cluster/enumeration area identifier"
 
+  survey_weight:
+    dhs_name: "hv005"
+    description: "Sample weight (divide by 1,000,000 for proportions)"
+    note: "Used in survey design for weighted estimates"
+
+  stratum:
+    dhs_name: "hv022"
+    description: "Sample stratum (used for stratified survey design)"
+
+  adm1:
+    dhs_name: "hv024"
+    description: "First administrative level (region/province)"
+
   age_months:
     dhs_name: "hc1"
     description: "Child's age in months"
 
   present:
     dhs_name: "hv103"
-    description: "Child slept in household last night"
+    description: "Child slept in household last night (1 = yes)"
 
-  mother_listed:
+  hh_selected_hemoglobin:
     dhs_name: "hv042"
-    description: "Mother of child listed in household"
+    description: "Household selected for hemoglobin and malaria testing (1 = yes)"
+    note: >
+      Eligibility filter: only children in households selected for Hb/malaria
+      testing are included. In survey_vars this key is called 'mother' for
+      historical reasons, but the variable is the household Hb-selection flag.
 
   hemoglobin:
     dhs_name: "hc56"
-    description: "Hemoglobin level (altitude-adjusted)"
+    description: "Hemoglobin level raw (HC module, PR file)"
     unit: "g/dL * 10"
     note: >
       Stored as g/dL * 10 (e.g., 110 = 11.0 g/dL). Values >= 900 indicate
-      not tested, refused, or other missing values.
+      not tested, refused, or other missing values. Used when
+      altitude_adjusted = FALSE.
+
+  hemoglobin_adj:
+    dhs_name: "hw53"
+    description: "Hemoglobin level altitude-adjusted (HW module, PR file)"
+    unit: "g/dL * 10"
+    note: >
+      Altitude-adjusted hemoglobin, preferred variable when
+      altitude_adjusted = TRUE (the default). WHO recommends altitude
+      adjustment for surveys in regions above 1000 m. WMR also uses hw53.
+      The R implementation defaults to hw53 over hc56.
 
   anemia_level:
     dhs_name: "hw57"
@@ -92,61 +125,67 @@ variables:
       numeric thresholds (e.g., < 80) to hw57. For altitude-adjusted
       hemoglobin as a continuous value, use hw53 instead.
 
-  hemoglobin_alt:
-    dhs_name: "hw53"
-    description: "Hemoglobin level altitude-adjusted (PR file variant)"
-    note: >
-      WMR uses hw53 from the PR file (altitude-adjusted). The sntmethods
-      implementation uses hc56 which is the HC module equivalent.
-
   gps_cluster:
     dhs_name: "DHSCLUST"
+    description: "Cluster ID in GPS file (GE recode)"
 
   gps_lat:
     dhs_name: "LATNUM"
+    description: "Latitude coordinate"
 
   gps_lon:
     dhs_name: "LONGNUM"
+    description: "Longitude coordinate"
 
 eligibility:
-  - "Child age 6-59 months (configurable)"
-  - "Present in household (hv103 == 1)"
-  - "Mother listed in household (hv042 == 1)"
-  - "Valid hemoglobin measurement (hc56 < 900)"
-  - "Cluster has valid GPS coordinates"
+  - "Child age 6-59 months (age_min and age_max are configurable)"
+  - "Present in household last night (hv103 == 1)"
+  - "Household selected for hemoglobin and malaria testing (hv042 == 1)"
+  - "Valid hemoglobin measurement: hb_raw not NA and hb_raw < 900 (applies to whichever Hb variable is active: hw53 or hc56)"
+  - "Cluster has valid GPS coordinates (MBG path only)"
 
 thresholds:
-  who_children_6_59_months:
+  who_clinical_children_6_59_months:
     no_anemia: ">= 11 g/dL"
     mild: "10.0 - 10.9 g/dL"
     moderate: "7.0 - 9.9 g/dL"
     severe: "< 7.0 g/dL"
+    note: >
+      WHO clinical reference thresholds (WHO 2011). These differ from the
+      implementation thresholds below.
 
-  dhs_implementation:
+  sntmethods_implementation:
     any_anemia: "< 11 g/dL"
     moderate_severe: "< 10 g/dL"
     severe: "< 8 g/dL"
     note: >
-      DHS uses slightly different thresholds than WHO clinical definitions.
-      This implementation follows DHS conventions for consistency with
-      standard DHS reports.
+      Implementation threshold for 'severe' is 8 g/dL (not the WHO clinical
+      7 g/dL). This captures clinically significant anemia requiring medical
+      attention. The moderate category in this implementation is therefore
+      8.0-9.9 g/dL (not 7.0-9.9 g/dL). The threshold is configurable via
+      the hb_threshold parameter in calc_severe_anemia_dhs().
 
 methodology:
   altitude_adjustment: >
-    Hemoglobin values in DHS are already altitude-adjusted. The variable
-    hc56 contains adjusted values. No further adjustment needed.
+    The preferred hemoglobin variable is hw53 (altitude-adjusted, HW module).
+    The raw variable hc56 (HC module) is NOT altitude-adjusted. When
+    altitude_adjusted = TRUE (default), the implementation uses hw53.
+    When altitude_adjusted = FALSE, hc56 is used. WHO recommends altitude
+    adjustment for populations above 1000 m elevation. DHS pre-computes
+    altitude-adjusted values in hw53 using WHO 2011 adjustment factors.
 
   cumulative_vs_exclusive: >
     Cumulative indicators (any, moderate_plus, severe) count all children
     below a threshold. Exclusive indicators (mild_only, moderate_only)
-    count children in exactly that category. For example, a child with
+    count children in exactly that category. Thresholds: any < 11,
+    moderate_plus < 10, severe < 8. For example, a child with
     Hb = 9 g/dL would be counted in:
-    - any (cumulative): Yes
-    - moderate_plus (cumulative): Yes
-    - severe (cumulative): No
-    - mild_only (exclusive): No
-    - moderate_only (exclusive): Yes
-    - severe_only (exclusive): No
+    - any (cumulative): Yes  [9 < 11]
+    - moderate_plus (cumulative): Yes  [9 < 10]
+    - severe (cumulative): No  [9 >= 8]
+    - mild_only (exclusive): No  [9 < 10, so not mild]
+    - moderate_only (exclusive): Yes  [8 <= 9 < 10]
+    - severe_only (exclusive): No  [9 >= 8]
 
 output_format:
   columns:
@@ -161,8 +200,9 @@ output_format:
     "moderate", "mild", "not anemic". WMR computes binary anemia_yno = any
     anemia vs not anemic. WMR stratifies by age group (6m intervals),
     wealth, sex, residence, and education using svyciprop. The sntmethods
-    implementation uses hc56 (hemoglobin value) with numeric thresholds,
-    which gives more flexibility for cumulative/exclusive categories.
+    implementation uses hw53 (altitude-adjusted, default) or hc56 (raw, when
+    altitude_adjusted = FALSE) with numeric thresholds, which gives more
+    flexibility for cumulative/exclusive categories.
 
 references:
   - "WHO. Haemoglobin concentrations for anemia diagnosis. 2011."

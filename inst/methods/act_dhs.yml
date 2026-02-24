@@ -16,25 +16,45 @@ indicators:
       those who sought public care) and by sociodemographic factors.
 
   act_tested:
-    name: "Received ACT among test-positive children"
-    numerator: "Test-positive febrile children who received ACT"
+    name: "Received ACT among test-filtered children"
+    numerator: "Children who received ACT within the test-filtered subset"
     denominator: >
-      Children under 5 with fever where ml13a == 1. NOTE: ml13a is chloroquine
-      in standard DHS recode. This usage assumes ml13a has been recoded or
-      repurposed as a test-positive indicator in the specific survey being analyzed.
-      WMR uses h47 (malaria_dx) for the diagnosed denominator.
+      Children under 5 with fever where the survey_vars$test variable equals 1.
+      The default test variable is ml13a (chloroquine in standard DHS recode).
+      This is a sntmethods-specific proxy and does NOT replicate the WMR
+      act_tested indicator. WMR uses h47 (malaria_dx, blood taken for testing)
+      as the diagnosed denominator. This indicator should be interpreted with
+      caution and the test variable verified against the survey-specific recode
+      manual before use.
     description: >
-      Proportion receiving ACT among children filtered by ml13a == 1.
-      More restrictive denominator than act.
+      Proportion receiving ACT among children where survey_vars$test == 1.
+      More restrictive denominator than act. This is a secondary/exploratory
+      indicator; the primary act indicator uses all febrile children as denominator.
 
 data_sources:
   primary: "KR (Children's Recode)"
   gps: "GE (Geographic)"
 
 variables:
-  cluster_id:
+  # --- Variables used by calc_act_dhs() (survey-weighted estimates) ---
+  cluster_dhs:
+    dhs_name: "v021"
+    description: "Sample cluster/PSU identifier for survey design (used in calc_act_dhs)"
+    note: "Default survey_vars$cluster. Not the same as v001 used by calc_act_mbg."
+
+  weight:
+    dhs_name: "v005"
+    description: "Survey sample weight (divided by 1e6 in R to obtain fractional weight)"
+
+  stratum:
+    dhs_name: "v022"
+    description: "Survey stratum identifier for stratified design"
+
+  # --- Variables used by calc_act_mbg() (cluster-level MBG counts) ---
+  cluster_mbg:
     dhs_name: "v001"
-    description: "Cluster/enumeration area identifier"
+    description: "Cluster/enumeration area identifier for MBG spatial aggregation"
+    note: "Default survey_vars$cluster in calc_act_mbg. Not the same as v021 used by calc_act_dhs."
 
   age:
     dhs_name: "hw1"
@@ -57,39 +77,51 @@ variables:
       When ml13e is absent, sntmethods uses h37e ("Combination with artemisinin
       taken for fever/cough") as the ACT variable. This occurs in older DHS
       surveys such as BFA 2021 which use the h37* drug series instead of ml13*.
-      Detection is automatic at runtime.
+      Detection is automatic at runtime in .prepare_act_data().
 
-  malaria_test:
-    dhs_name: "ml13a"
+  test_filter:
+    dhs_name: "ml13a (default; configurable via survey_vars$test)"
     description: >
-      Chloroquine (standard DHS ml13a). NOTE: In the sntmethods implementation,
-      this variable is repurposed as a proxy filter for the act_tested denominator.
-      In standard DHS recode, ml13a is chloroquine — verify actual meaning per survey.
-      The correct variable for "blood taken for malaria testing" is h47.
+      Variable used as denominator filter for the act_tested indicator.
+      Default is ml13a (chloroquine in standard DHS recode). This is a
+      sntmethods-specific proxy — not equivalent to WMR's diagnosed denominator.
+      WMR uses h47 (blood taken for malaria testing) for the diagnosed subset.
+      Verify the intended meaning of this variable per survey recode manual
+      before interpreting act_tested results.
     values:
-      0: "No"
-      1: "Yes"
-    note: "Used as denominator filter for act_tested indicator"
+      0: "No / not applicable"
+      1: "Yes / filter included"
+    note: >
+      Set survey_vars$test to a different column (e.g., "h47") to use a
+      more appropriate test-positive denominator aligned with WMR methodology.
 
 eligibility:
-  - "Child age 0-59 months"
+  - "Child age 0-59 months (hw1 >= 0 and hw1 <= 59)"
   - "Child had fever in last 2 weeks (h22 == 1)"
-  - "Non-missing ACT response for act indicator"
-  - "ml13a == 1 for act_tested indicator (NOTE: ml13a is chloroquine in standard DHS)"
-  - "Cluster has valid GPS coordinates"
+  - "Non-missing ACT response (received_act not NA) for act indicator"
+  - "survey_vars$test == 1 for act_tested indicator (default: ml13a == 1; see test_filter variable note)"
+  - "Valid GPS coordinates required only for calc_act_mbg() output"
 
 methodology:
   wmr_cascade_context: >
-    ACT is step 4 (final step) of the WMR care-seeking cascade:
-    Fever (h22) -> Sought care (CSB, h32 series) -> Diagnosed (MALARIA_DX, h47) ->
-    Treated (ANTIMALARIAL, ml13 series or h37 series) -> Received ACT (ml13e or h37e).
+    ACT is step 4 (final step) of the WMR care-seeking cascade (0-indexed):
+    Step 0: Fever (h22) -> Step 1: Sought care (CSB, h32 series) ->
+    Step 2: Diagnosed (MALARIA_DX, h47) ->
+    Step 3: Treated (ANTIMALARIAL, ml13 series or h37 series) ->
+    Step 4: Received ACT (ml13e or h37e).
+    This numbering is consistent with calc_case_management_dhs() which assigns
+    step = 4L to the received_act cascade row.
 
   variable_detection: >
     sntmethods auto-detects the ACT variable at runtime:
     (1) ml13e preferred — used when present (DHS Phase 7+, most surveys ~2015+).
     (2) h37e fallback — used when ml13e absent (older surveys, e.g. BFA 2021).
         h37e = "Combination with artemisinin taken for fever/cough".
-    Similarly, the full antimalarial series uses ml13a-h (primary) or h37a-h (fallback).
+    For the full antimalarial series (used in antimalarial_dhs.yml), the primary
+    series is all columns matching ^ml13[a-z]*$, and the fallback series is all
+    columns matching ^h37[a-h]$ (h37a through h37h — eight variables covering SP,
+    chloroquine, amodiaquine, quinine, ACT, primaquine, mefloquine, and other).
+    See antimalarial_dhs.yml for the complete variable mapping.
 
   wmr_act_levels: >
     WMR computes ACT receipt at multiple levels:
@@ -97,8 +129,10 @@ methodology:
     (2) among those who sought any treatment (denominator: csb_any==1),
     (3) among those who received any antimalarial (denominator: receive_antimalarial==1),
     (4) among those diagnosed with malaria (denominator: csb_any==1 & malaria_dx==yes).
-    This package implements level (1) as the act indicator and a variant of (4)
-    using ml13a as the act_tested indicator.
+    sntmethods implements level (1) as the act indicator.
+    The act_tested indicator uses a configurable proxy variable (default: ml13a)
+    as a denominator filter — this does NOT replicate WMR level (4). To align
+    with WMR level (4), set survey_vars$test = "h47" (blood taken for testing).
 
   antimalarial_variables: >
     WMR defines "received any antimalarial" as ANY of: ml13e (ACT), ml13a
@@ -108,20 +142,46 @@ methodology:
     The act indicator uses only ml13e.
 
   survey_design: >
-    WMR uses svydesign(id=~cluster, weights=~weight, strata=~strata, nest=TRUE)
-    with svyciprop for proportions. options(survey.lonely.psu = "adjust").
-    For MBG spatial modeling, unweighted cluster counts are used instead.
-    Note: sntmethods R functions use survey::svymean() for all DHS estimates,
-    while WMR reference code uses survey::svyciprop() for binary indicators.
-    Both produce valid point estimates; CIs differ slightly.
+    svydesign(id=~cluster, weights=~weight, strata=~strata, nest=TRUE).
+    options(survey.lonely.psu = "certainty") applied when strata are present.
+    sntmethods uses survey::svymean() for point estimates and CIs (not svyciprop).
+    Both produce equivalent point estimates; CI widths differ slightly.
+    When only one stratum is detected, the stratified design is dropped and
+    a cluster-only design is used to avoid singleton-PSU errors.
+    Survey weights (v005) are divided by 1e6 to obtain fractional weights.
+    For MBG spatial modeling (calc_act_mbg), unweighted cluster counts are
+    used instead — no survey design object is constructed.
 
 output_format:
-  columns:
-    cluster_id: "Cluster identifier"
-    indicator: "Numerator count"
-    samplesize: "Denominator count"
-    x: "Longitude"
-    y: "Latitude"
+  dhs_survey_output:
+    description: "Output of calc_act_dhs() — survey-weighted estimates by group"
+    columns:
+      grouping_var: "Region/admin grouping variable (or 'National' if ungrouped)"
+      dhs_act: "Proportion of febrile children who received ACT"
+      dhs_act_low: "Lower 95% CI (clamped to [0,1])"
+      dhs_act_upp: "Upper 95% CI (clamped to [0,1])"
+      dhs_act_tested: "Proportion receiving ACT among test-filtered children (if available)"
+      dhs_act_tested_low: "Lower 95% CI for act_tested (clamped to [0,1])"
+      dhs_act_tested_upp: "Upper 95% CI for act_tested (clamped to [0,1])"
+      dhs_n_fever: "Unweighted count of febrile children (denominator for act)"
+      dhs_n_act: "Unweighted count receiving ACT (numerator)"
+      dhs_n_tested: "Unweighted count where test variable == 1 (denominator for act_tested)"
+
+  mbg_cluster_output:
+    description: "Output of calc_act_mbg() — unweighted cluster-level counts for MBG"
+    columns:
+      cluster_id: "Cluster identifier (v001)"
+      indicator: "Numerator count (children receiving ACT in cluster)"
+      samplesize: "Denominator count (eligible febrile children in cluster)"
+      x: "Longitude"
+      y: "Latitude"
+
+status: "implemented"
+note: >
+  Survey-weighted estimates implemented as calc_act_dhs().
+  Cluster-level MBG inputs implemented as calc_act_mbg() and prep_act_mbg().
+  Also available as step 4 of calc_case_management_dhs().
+  The ACT indicator is a subset of the antimalarial indicator (antimalarial_dhs.yml).
 
 references:
   - "WHO World Malaria Report - ACT treatment indicators"

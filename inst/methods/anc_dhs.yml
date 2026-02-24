@@ -1,5 +1,5 @@
 title: "ANC DHS Indicator Methodology"
-version: "1.1.0"
+version: "1.2.0"
 description: >
   Methodology for estimating Antenatal Care (ANC) attendance from DHS data.
   Calculates proportion of women with recent births who received specified
@@ -36,8 +36,22 @@ data_sources:
 
 variables:
   cluster_id:
-    dhs_name: "v001"
-    description: "Cluster/enumeration area identifier"
+    dhs_name: "v021"
+    description: "PSU/cluster identifier used for survey design (v021)"
+    note: >
+      The DHS survey-weighted function (calc_anc_dhs_core) uses v021 (PSU)
+      as the cluster variable for the survey design ids argument. The MBG
+      function (calc_anc_mbg) defaults to v001 (community cluster number).
+      v021 and v001 often coincide but v021 is the recommended PSU identifier
+      for complex survey variance estimation.
+
+  survey_weight:
+    dhs_name: "v005"
+    description: "Sample weight (divide by 1,000,000 for proportions)"
+
+  stratum:
+    dhs_name: "v022"
+    description: "Sample stratum (used for stratified survey design)"
 
   interview_date:
     dhs_name: "v008"
@@ -46,18 +60,22 @@ variables:
   birth_date:
     dhs_name: "b3_01"
     description: "Date of most recent birth (CMC format)"
-    note: "_01 suffix indicates most recent birth (birth index 1)"
+    note: >
+      _1 (or _01 in zero-padded wide format) suffix indicates the most
+      recent birth from the birth history. Birth window is computed as
+      interview_cmc - b3_01 (months elapsed).
 
   anc_visits:
     dhs_name: "m14_1"
     description: "Number of antenatal visits during last pregnancy"
     note: >
-      Value 98 typically means "don't know" and should be excluded.
-      _1 suffix indicates most recent pregnancy.
+      Value 98 = 'don't know' and is excluded (filter: anc_visits < 98).
+      _1 (or _01) suffix indicates most recent birth. Values are integers
+      representing visit counts.
 
   gps_cluster:
     dhs_name: "DHSCLUST"
-    description: "Cluster ID in GPS file"
+    description: "Cluster ID in GPS file (GE recode)"
 
   gps_lat:
     dhs_name: "LATNUM"
@@ -68,15 +86,19 @@ variables:
     description: "Longitude coordinate"
 
 eligibility:
-  - "Woman had a live birth within analysis window (default: 36 months)"
-  - "Valid response to ANC visits question (not missing, not 'don't know')"
-  - "Cluster has valid GPS coordinates"
+  - "Woman had a birth within analysis window (CMC filter: interview_cmc - b3_01 <= birth_window_months)"
+  - "Birth is not in the future (months_since_birth >= 0)"
+  - "Valid ANC response: anc_visits not NA and anc_visits < 98 (98 = 'don't know')"
+  - "Cluster has valid GPS coordinates (MBG path only)"
 
 methodology:
   birth_window: >
-    Default analysis window is 36 months (3 years) before the survey.
-    Maximum is 60 months (5 years). Shorter windows provide more recent
-    data but may reduce sample sizes.
+    Default analysis window differs by function: calc_anc_dhs_core and
+    calc_anc_dhs use 24 months (2 years) as the default to match standard
+    DHS reporting conventions. calc_anc_mbg and prep_anc_mbg use 36 months
+    (3 years) to maximise spatial data density for geostatistical modelling.
+    Maximum is 60 months (5 years). Shorter windows reflect more recent
+    births but reduce sample sizes.
 
   cmc_format: >
     Century Month Code (CMC) is used for dates. CMC = (year - 1900) * 12 + month.
@@ -84,8 +106,10 @@ methodology:
 
   most_recent_birth: >
     Only the most recent birth is included to avoid double-counting women
-    with multiple births in the analysis window. The _01 suffix in variable
-    names indicates the most recent birth.
+    with multiple births in the analysis window. In DHS wide-format IR files
+    the birth history index uses _1 or _01 (zero-padded) for the most recent
+    birth (index 1 = chronologically last). The implementation uses b3_01 and
+    m14_1 which both refer to the most recent birth.
 
 output_format:
   columns:

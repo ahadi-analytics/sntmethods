@@ -35,6 +35,22 @@ variables:
     dhs_name: "h22"
     description: "Child had fever in last 2 weeks"
 
+  age:
+    dhs_name: "hw1"
+    description: "Child age in months"
+
+  cluster:
+    dhs_name: "v021"
+    description: "Cluster/PSU identifier (primary sampling unit)"
+
+  weight:
+    dhs_name: "v005"
+    description: "Sample weight (divided by 1,000,000 before use)"
+
+  stratum:
+    dhs_name: "v022"
+    description: "Survey stratum identifier"
+
 eligibility:
   - "Child age 0-59 months"
   - "Child had fever in last 2 weeks (h22 == 1)"
@@ -55,8 +71,9 @@ methodology:
 
   cascade_position: >
     Diagnosis is step 2 of the care-seeking cascade:
-    Fever (h22) -> Sought care (CSB, h32 series) -> Diagnosed (MALARIA_DX, h47) ->
-    Treated (ANTIMALARIAL, ml13 series) -> Received ACT (ml13e).
+    Step 0 Fever (h22) -> Step 1 Sought care (CSB, h32 series) ->
+    Step 2 Diagnosed (MALARIA_DX, h47/ml1) ->
+    Step 3 Any antimalarial (ml13 series) -> Step 4 Received ACT (ml13e).
 
   distinction_from_pfpr: >
     MALARIA_DX (h47) measures whether a diagnostic TEST was performed.
@@ -65,8 +82,13 @@ methodology:
     in KR (Children's Recode), hml35/hml32 are in PR (Person Recode).
 
   survey_design: >
+    options(survey.lonely.psu = "certainty").
     svydesign(id=~cluster, weights=~weight, strata=~strata, nest=TRUE).
-    svyciprop for proportions. options(survey.lonely.psu = "adjust").
+    Proportions computed via svymean with vartype="ci". When only one
+    stratum is present the design is constructed without strata. WMR
+    reference code uses svyciprop; this implementation uses svymean,
+    which produces identical point estimates with slightly different
+    CI computation.
 
 status: "implemented"
 note: >

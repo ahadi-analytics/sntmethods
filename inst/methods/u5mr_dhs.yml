@@ -12,7 +12,8 @@ indicator:
    Probability of dying between birth and exact age 5 years, expressed per
    1,000 live births.
  unit: "deaths per 1,000 live births"
- dhs_module: "BR (Birth Recode)"
+ dhs_module_survey_weighted: "KR (Children's Recode) — used by calc_u5mr_dhs() via DHS.rates::chmort()"
+ dhs_module_mbg: "BR (Birth Recode) — used by calc_u5mr_mbg() for cluster-level age-split modeling"
  standard_reference: "WHO/UNICEF/World Bank/UN IGME methodology"
 
 age_groups:
@@ -78,24 +79,30 @@ methodology:
 
 workflow:
  step1_load_data:
-   description: "Load DHS birth history microdata"
+   description: "Load DHS birth history microdata (BR recode) for MBG path; KR recode for survey-weighted path"
    inputs:
-     - "BR (Birth Recode) file from DHS"
-     - "GE (GPS) file for cluster coordinates"
+     mbg_path:
+       - "BR (Birth Recode) file from DHS"
+       - "GE (GPS) file for cluster coordinates"
+     survey_weighted_path:
+       - "KR (Children's Recode) file from DHS"
+       - "Optionally GE (GPS) + shapefile for spatial aggregation"
    key_variables:
      b3: "Date of birth (CMC format)"
      b5: "Child is alive (0=no, 1=yes)"
-     b7: "Age at death in months"
+     b7: "Age at death in months (used for MBG age-split; also used by DHS.rates in KR path)"
      v008: "Date of interview (CMC format)"
-     v001: "Cluster number"
-     v002: "Household number"
+     v001: "Cluster number (MBG functions)"
+     v021: "Primary sampling unit (survey-weighted functions)"
+     v002: "Household number (hhid)"
      bidx: "Birth index (child ID within mother)"
-     v005: "Sample weight"
+     v005: "Sample weight (survey-weighted functions)"
+     v022: "Stratum (survey-weighted functions)"
    output: "Cleaned birth history data.table"
 
  step2_split_ages:
-   description: "Split birth histories into age-specific cohorts"
-   function: "split_ages()"
+   description: "Split birth histories into age-specific cohorts (MBG path only; implemented inline in calc_u5mr_mbg())"
+   function: "calc_u5mr_mbg() inline loop (no separate split_ages() function)"
    parameters:
      age_groups:
        under1: [0, 12]
@@ -103,22 +110,23 @@ workflow:
        age2: [24, 36]
        age3: [36, 48]
        age4: [48, 60]
-     max_timediff_months: 60
-     child_id_columns: ["cluster_id", "hhid", "bidx"]
+     retrospective_months: 60
+     child_id_columns: ["cluster_id", "hhid", "birth_index"]
    logic:
-     - "For each age group, identify children who entered the age group during the analysis period"
-     - "Drop children who died before reaching the age group"
-     - "Drop children who would intersect the interview month during the age group"
-     - "Flag those who died within the age group boundaries"
-   output: "Data with age_group, year, and died columns"
+     - "For each age group [age_start, age_end]: include only children where months_since_birth >= age_end (child fully completed the age group before interview — right-censoring)"
+     - "Include children who survived to reach the age group: child_alive == 1 OR (child_alive == 0 AND death_age_months >= age_start)"
+     - "Restrict to retrospective window: months_since_birth - age_start <= retrospective_months"
+     - "Flag died_in_interval = 1 if child_alive == 0 AND death_age_months in [age_start, age_end)"
+   output: "Per-age-group data with died_in_interval column"
 
  step3_cluster_aggregation:
-   description: "Aggregate to cluster level for each age group"
+   description: "Aggregate to cluster level for each age group (MBG path)"
    aggregation:
-     grouping: ["cluster_id", "age_group"]
-     numerator: "sum(died)"
-     denominator: "n()"
-   output: "Cluster-level mortality counts by age group"
+     grouping: ["cluster_id"]
+     numerator: "sum(died_in_interval)"
+     denominator: "n() (count of eligible children in the age group)"
+     note: "Aggregation runs separately per age group in a loop; no combined age_group column"
+   output: "Cluster-level mortality counts by age group (one data frame per age group)"
 
  step4_merge_coordinates:
    description: "Merge GPS coordinates from GE file"
@@ -165,9 +173,16 @@ workflow:
 
 cmc_date_handling:
  description: "Century Month Code (CMC) conversion utilities"
- cmc_to_year: "floor(cmc / 12) + 1900"
- year_to_cmc: "(year - 1900) * 12"
- example: "CMC 1368 = January 2014 (1368/12 + 1900 = 2014)"
+ cmc_definition: "CMC = (year - 1900) * 12 + month, where month is 1 (January) through 12 (December)"
+ cmc_to_year: "floor((cmc - 1) / 12) + 1900"
+ cmc_to_month: "((cmc - 1) %% 12) + 1"
+ year_month_to_cmc: "(year - 1900) * 12 + month"
+ example_january: "CMC 1369 = January 2014: (2014 - 1900) * 12 + 1 = 1369; reverse: floor((1369 - 1) / 12) + 1900 = floor(114) + 1900 = 2014"
+ example_december: "CMC 1380 = December 2014: (2014 - 1900) * 12 + 12 = 1380; reverse: floor((1380 - 1) / 12) + 1900 = floor(114.9) + 1900 = 2014"
+ note: >
+   The R implementation uses CMC arithmetic directly for date differences
+   (e.g., months_since_birth = interview_cmc - birth_cmc) and passes b3
+   (birth CMC) and v008 (interview CMC) directly to DHS.rates::chmort().
 
 validation:
  data_quality:
@@ -177,8 +192,8 @@ validation:
    - "Validate cluster coordinates are within country boundaries"
 
  output_checks:
-   - "U5MR should be between 0 and 1 (0-1000 per 1000)"
-   - "Age-specific rates should decrease with age (generally)"
+   - "U5MR per 1,000 live births: dhs_u5mr from DHS.rates is already on per-1,000 scale; u5mr_raw in MBG function is multiplied by 1,000 to match"
+   - "Age-specific rates should generally decrease with age (under-1 typically highest)"
    - "Compare national aggregate to DHS report estimates"
    - "Check for spatial patterns consistent with known health gradients"
 

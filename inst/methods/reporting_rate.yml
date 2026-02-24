@@ -8,7 +8,7 @@ description: >
   and visualizes the proportion of active health facilities that reported valid
   data in each month and geographic unit. It provides both unweighted and
   weighted reporting rates, aligned with the classification of active facilities
-  established in `active_status.yaml`.
+  established in `active_status.yml`.
 
   The framework is used to generate time-series plots, administrative-level
   heatmaps, and faceted maps showing trends in reporting completeness. It is a
@@ -34,7 +34,7 @@ institutional_context: >
 
 principles:
   - "Reporting rate measures completeness among facilities classified as active
-    (see active_status.yaml)."
+    (see active_status.yml)."
   - "Missingness is defined at the variable level but summarized at facility or
     administrative level."
   - "Weighted reporting rate adjusts for the volume of patients served, giving
@@ -58,7 +58,7 @@ numerator_denominator_definition:
     of interest in the given period.
   denominator: >
     Number of facilities classified as active using the selected activity
-    definition from `active_status.yaml` (method1, method2, or method3).
+    definition from `active_status.yml` (method1, method2, or method3).
   institutional_considerations: >
     Before calculating the denominator, facilities that are not expected to
     report should be excluded—such as facilities closed, newly opened, or those
@@ -126,11 +126,11 @@ methods:
       - "avg_<weight_var>, min_<weight_var>, max_<weight_var>"
 
 integration_with_active_status:
-  reference: "active_status.yaml"
+  reference: "active_status.yml"
   linkage: >
     The denominator of the reporting rate calculation is defined by the
-    facility activity classification method chosen from `active_status.yaml`.
-    Method1, Method2, or Method3 determine whether a facility is considered
+    facility activity classification method chosen from `active_status.yml`.
+    method1, method2, or method3 determine whether a facility is considered
     “active” in a given period. This ensures internal consistency between
     completeness and incidence calculations.
   dependencies:
@@ -147,7 +147,7 @@ validation_summary:
   - "0 ≤ reprate, reprate_w ≤ 1 for all groups."
   - "Ensure expected > 0 for denominator calculations."
   - "Confirm activity definitions derived from valid methods in
-    `active_status.yaml`."
+    `active_status.yml`."
   - "Check that all key_indicators exist and are numeric."
   - "Validate rolling mean logic for weighting stability."
   - "Review trends visually to detect sudden drops caused by data entry or
@@ -165,7 +165,7 @@ interpretation_guidance:
 
 strengths_of_approach:
   - "Directly integrates with facility activity framework
-    (`active_status.yaml`)."
+    (`active_status.yml`)."
   - "Combines numeric and visual completeness diagnostics."
   - "Supports both unweighted and weighted completeness estimation."
   - "Facilitates early data-quality assessment before incidence computation."

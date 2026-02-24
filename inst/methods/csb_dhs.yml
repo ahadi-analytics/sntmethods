@@ -96,8 +96,8 @@ data_sources:
 
 variables:
   cluster_id:
-    dhs_name: "v001"
-    description: "Cluster/enumeration area identifier"
+    dhs_name: "v021"
+    description: "Cluster/PSU identifier (primary sampling unit)"
 
   age:
     dhs_name: "hw1"
@@ -110,11 +110,20 @@ variables:
       0: "No"
       1: "Yes"
 
+  weight:
+    dhs_name: "v005"
+    description: "Sample weight (divided by 1,000,000 before use)"
+
+  stratum:
+    dhs_name: "v022"
+    description: "Survey stratum identifier"
+
   treatment_sources:
     prefix: "h32"
     description: >
-      Series of variables (h32a through h32x) indicating where treatment
-      was sought. Value of 1 means source was visited.
+      Series of variables (h32a through h32u, and h32na through h32ne for
+      DHS-8 CHW variables) indicating where treatment was sought.
+      Value of 1 means source was visited.
 
 csb_classification:
   public:
@@ -140,7 +149,11 @@ csb_classification:
 eligibility:
   - "Child age 0-59 months"
   - "Child had fever in last 2 weeks (h22 == 1)"
-  - "Cluster has valid GPS coordinates"
+  note: >
+    All febrile U5 children are eligible regardless of GPS availability.
+    GPS coordinates are used only for spatial aggregation to administrative
+    units; clusters without valid coordinates are assigned to the nearest
+    admin unit when join_nearest = TRUE.
 
 methodology:
   overlapping_indicators: >
@@ -149,23 +162,25 @@ methodology:
     sectors. Only csb_any and csb_none are mutually exclusive.
 
   derived_indicators:
-    csb_public: "public OR chw"
-    csb_public_nochw: "public only (excluding CHW) — WMR subcategory"
-    csb_chw: "CHW/NGO providers only"
-    csb_private: "private_formal OR private_informal OR pharmacy"
-    csb_private_formal: "private hospitals, clinics, doctors only"
-    csb_pharmacy: "pharmacies and drug shops only"
-    csb_private_formal_pha: "private_formal OR pharmacy"
-    csb_private_informal: "traditional/informal providers only"
-    csb_trained: "public OR chw OR private_formal OR pharmacy"
-    csb_any: "visited ANY source (any h32 == 1)"
-    csb_none: "NOT(csb_any)"
+    csb_public: "has_public OR has_chw (any public sector or CHW visit)"
+    csb_private: "has_private_formal OR has_private_informal OR has_pharmacy"
+    csb_private_formal_pha: "has_private_formal OR has_pharmacy (intermediate)"
+    csb_trained: "csb_public OR csb_private_formal_pha (public OR chw OR private_formal OR pharmacy)"
+    csb_any: "csb_public OR csb_private (equivalent to any h32 variable == 1)"
+    csb_none: "NOT(csb_any) — i.e., csb_public == 0 AND csb_private == 0"
+    note: >
+      csb_public_nochw (public excluding CHW) and csb_chw, csb_private_formal,
+      csb_pharmacy, and csb_private_informal are intermediate base categories
+      (has_* columns) computed internally but not directly output by
+      calc_csb_dhs_core(). They are used by the MBG pipeline and are available
+      in the internal kr_fever data frame via .prepare_csb_data().
 
   wmr_cascade_context: >
     Care-seeking is step 1 of the WMR care-seeking cascade:
-    Fever (h22) -> Sought care (CSB, h32 series) -> Diagnosed (MALARIA_DX, h47) ->
-    Treated (ANTIMALARIAL, ml13 series) -> Received ACT (ml13e).
-    ACT indicators are now in a separate file (act_dhs.yml).
+    Step 0 Fever (h22) -> Step 1 Sought care (CSB, h32 series) ->
+    Step 2 Diagnosed (MALARIA_DX, h47/ml1) ->
+    Step 3 Any antimalarial (ml13 series) -> Step 4 Received ACT (ml13e).
+    ACT indicators are in a separate file (act_dhs.yml).
 
   wmr_stratification: >
     WMR computes CSB at multiple levels: (1) overall among febrile children,
@@ -175,18 +190,46 @@ methodology:
 
   survey_design: >
     WMR uses svydesign(id=~cluster, weights=~weight, strata=~strata, nest=TRUE)
-    with svyciprop for proportions. options(survey.lonely.psu = "adjust").
-    Note: sntmethods R functions use survey::svymean() for all DHS estimates,
-    while WMR reference code uses survey::svyciprop() for binary indicators.
-    Both produce valid point estimates; CIs differ slightly.
+    with svymean for proportions. options(survey.lonely.psu = "certainty").
+    Note: WMR reference code uses survey::svyciprop() for binary indicators;
+    this implementation uses survey::svymean(), which produces identical point
+    estimates with slightly different CI computation. When only one stratum is
+    present the design is constructed without strata.
 
 output_format:
+  description: >
+    calc_csb_dhs_core() returns a tibble with one row per grouping unit
+    (region, admin level, or a single national row). All proportion columns
+    are on the 0-1 scale (not percentages). Count columns are unweighted
+    integers.
   columns:
-    cluster_id: "Cluster identifier"
-    indicator: "Numerator count"
-    samplesize: "Denominator count"
-    x: "Longitude"
-    y: "Latitude"
+    region_var_or_admin: "Grouping variable (region or admin level column)"
+    dhs_n_fever: "Unweighted count of febrile U5 children (denominator)"
+    dhs_csb_any: "Proportion who sought care from any source"
+    dhs_csb_any_low: "Lower 95% CI for dhs_csb_any"
+    dhs_csb_any_upp: "Upper 95% CI for dhs_csb_any"
+    dhs_csb_public: "Proportion seeking care at public sector (incl. CHW)"
+    dhs_csb_public_low: "Lower 95% CI for dhs_csb_public"
+    dhs_csb_public_upp: "Upper 95% CI for dhs_csb_public"
+    dhs_csb_private: "Proportion seeking care at private sector (formal + informal + pharmacy)"
+    dhs_csb_private_low: "Lower 95% CI for dhs_csb_private"
+    dhs_csb_private_upp: "Upper 95% CI for dhs_csb_private"
+    dhs_csb_trained: "Proportion seeking care from trained provider (public + private_formal + pharmacy)"
+    dhs_csb_trained_low: "Lower 95% CI for dhs_csb_trained"
+    dhs_csb_trained_upp: "Upper 95% CI for dhs_csb_trained"
+    dhs_csb_none: "Proportion with no care-seeking (complement of dhs_csb_any)"
+    dhs_csb_none_low: "Lower 95% CI for dhs_csb_none"
+    dhs_csb_none_upp: "Upper 95% CI for dhs_csb_none"
+
+status: "implemented"
+note: >
+  Implemented as calc_csb_dhs_core() and calc_csb_dhs(). Also available as
+  step 1 of calc_case_management_dhs(). The alive (b5) variable is accepted
+  in survey_vars but NOT used to filter the CSB denominator — the function
+  assumes the KR dataset has already been restricted to living children, or
+  that the WMR convention of not explicitly filtering by alive status for the
+  care-seeking denominator is followed. The fever prevalence function
+  (calc_fever_dhs_core) DOES apply the b5 == 1 filter.
 
 references:
   - "WHO World Malaria Report - Care seeking methodology"

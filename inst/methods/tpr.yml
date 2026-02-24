@@ -32,12 +32,12 @@ compute_tpr:
   parameters:
     - name: fallback_method
       type: character vector
-      default: c("adm2", "adm1", "prev_year", "adm0")
+      default: c("rolling", "adm2", "prev_year", "adm1", "adm0")
       description: >
-        Order of proxy fallback methods. Valid options: "adm2" (district),
-        "adm1" (region), "prev_year" (same facility, previous year), "adm0"
-        (national), "rolling" (3-month rolling average). Set to
-        character(0) to disable all fallbacks.
+        Order of proxy fallback methods. Valid options: "rolling" (3-month
+        rolling average from same facility), "adm2" (district), "adm1"
+        (region), "prev_year" (same facility, previous year), "adm0"
+        (national). Set to NULL to disable all fallbacks.
     - name: prev_year_window
       type: integer
       default: 2
@@ -71,13 +71,13 @@ compute_tpr:
       default: 3
       description: >
         Method for classifying facility activity. Passed to
-        sntutils::get_active_facilities().
+        sntutils::classify_facility_activity().
     - name: nonreport_window
       type: integer
       default: 6
       description: >
         Maximum months of non-reporting before flagging facility as
-        inactive. Passed to sntutils::get_active_facilities().
+        inactive. Passed to sntutils::classify_facility_activity().
 
   stages:
     - stage: 1
@@ -127,18 +127,20 @@ compute_tpr:
           - Apply if extreme (flag_tpr_extreme)
           - Apply if low test (flag_low_test)"
         - "Apply fallbacks sequentially in order specified by
-          fallback_method parameter:
-          1. adm2: District (adm2) TPR - sum(conf)/sum(test) for all
-             facilities in district-month (leave-one-out for validation)
-          2. adm1: Regional (adm1) TPR - sum(conf)/sum(test) for all
-             facilities in region-month
-          3. prev_year: Same facility, previous year, with seasonal
-             window. When prev_year_window > 0, computes weighted average
-             across +/- window months.
-          4. adm0: National (adm0) TPR - sum(conf)/sum(test) for all
-             facilities in country-month
-          5. rolling: 3-month rolling average (+/-1 month) from same
-             facility, same year, weighted by test counts"
+          fallback_method parameter (default order shown below):
+          1. rolling: 3-month rolling average (+/-1 month) from same
+             facility, same year, weighted by test counts. Target month
+             excluded from average. Requires at least 1 adjacent month.
+          2. adm2: District (adm2) TPR - sum(conf)/sum(test) for all
+             clean facilities in district-month.
+          3. prev_year: Same facility, previous year. When
+             prev_year_window = 0 (default), exact same month only;
+             when prev_year_window > 0, weighted average across
+             +/- window months from previous year.
+          4. adm1: Regional (adm1) TPR - sum(conf)/sum(test) for all
+             clean facilities in region-month.
+          5. adm0: National (adm0) TPR - sum(conf)/sum(test) for all
+             clean facilities in country-month."
         - "After each fallback, update .should_fallback to FALSE for
           facility-months that received proxy values."
         - "Each fallback uses only clean data (no conf > test, not
@@ -196,6 +198,11 @@ compute_tpr:
         - flag_missing_conf
         - flag_inactive
 
+  return_value: >
+    A tibble (flat data frame) with one row per facility-month containing
+    all core columns plus optional flag columns (when include_flags = TRUE).
+    The function does NOT return a list; the tibble is returned directly.
+
   outputs:
     - name: tpr
       type: numeric
@@ -207,11 +214,11 @@ compute_tpr:
       description: "Indicates the origin of the TPR value."
       values:
         - facility_raw: "Raw TPR calculated from facility's own conf/test"
+        - proxy_rolling: "3-month rolling average from same facility (same year)"
         - proxy_adm2: "District-level aggregate TPR"
-        - proxy_adm1: "Regional-level aggregate TPR"
         - proxy_prev_year: "Same facility, previous year (with seasonal window)"
+        - proxy_adm1: "Regional-level aggregate TPR"
         - proxy_adm0: "National-level aggregate TPR"
-        - proxy_rolling: "3-month rolling average from same facility"
     - name: flags
       description: >
         Quality flags for data validation and proxy usage. Returned only

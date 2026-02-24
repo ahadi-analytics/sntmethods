@@ -1,5 +1,5 @@
 title: "ITN DHS Indicator Methodology"
-version: "1.1.0"
+version: "1.2.0"
 description: >
   Methodology for estimating ITN (Insecticide-Treated Net) indicators from DHS data.
   Supports ownership, access, and use indicators across multiple age groups.
@@ -22,7 +22,9 @@ indicators:
     description: >
       Proportion of de facto household members with access to an ITN.
       Access is calculated as min(ITNs * 2, household_size) / household_size.
-      For spatial modeling, probabilistic assignment converts this to binary (0/1).
+      For spatial modeling (calc_itn_mbg), deterministic binary assignment (0/1)
+      is used: individuals are sorted by ITN use (users first) and the first
+      N = potential_users individuals within each household are assigned access = 1.
 
   itn_use_all:
     name: "Population ITN use (all ages)"
@@ -37,31 +39,45 @@ indicators:
     name: "ITN use among children under 5"
     numerator: "Number of U5 children who slept under ITN"
     denominator: "Total U5 children"
-    age_range_years: [0, 4]
+    age_range_years: [0, 5]
+    age_filter: "age < 5"
     level: "individual"
     description: >
-      Proportion of children under 5 years of age who slept under
-      an ITN the night before the survey.
+      Proportion of children under 5 years of age (age < 5, i.e. ages 0-4)
+      who slept under an ITN the night before the survey.
 
   itn_use_5_10:
-    name: "ITN use among children 5-10 years"
-    numerator: "Number of children 5-10 who slept under ITN"
-    denominator: "Total children 5-10"
+    name: "ITN use among children 5-9 years"
+    numerator: "Number of children 5-9 who slept under ITN"
+    denominator: "Total children 5-9"
     age_range_years: [5, 10]
+    age_filter: "age >= 5 & age <= 9"
     level: "individual"
+    description: >
+      Proportion of children aged 5 to 9 years (age >= 5 & age <= 9,
+      exclusive upper bound at 10) who slept under an ITN the night
+      before the survey. Used in calc_itn_mbg(); the default age groups
+      in calc_itn_dhs() differ (see age_stratification in methodology).
 
   itn_use_10_20:
-    name: "ITN use among adolescents 10-20 years"
-    numerator: "Number of adolescents who slept under ITN"
-    denominator: "Total adolescents 10-20"
+    name: "ITN use among adolescents 10-19 years"
+    numerator: "Number of adolescents 10-19 who slept under ITN"
+    denominator: "Total adolescents 10-19"
     age_range_years: [10, 20]
+    age_filter: "age >= 10 & age <= 19"
     level: "individual"
+    description: >
+      Proportion of adolescents aged 10 to 19 years (age >= 10 & age <= 19,
+      exclusive upper bound at 20) who slept under an ITN the night
+      before the survey. Used in calc_itn_mbg(); the default age groups
+      in calc_itn_dhs() differ (see age_stratification in methodology).
 
   itn_use_20plus:
     name: "ITN use among adults 20+"
     numerator: "Number of adults 20+ who slept under ITN"
     denominator: "Total adults 20+"
     age_range_years: [20, null]
+    age_filter: "age >= 20"
     level: "individual"
 
   itn_use_if_access:
@@ -80,7 +96,7 @@ indicators:
     level: "household"
     description: >
       Proportion of households with enough ITNs (at least 1 per 2 members).
-      WMR calls this enough_itn.
+      Formula: n_itns >= hh_size / 2. WMR calls this enough_itn.
 
   itn_use_pregnant:
     name: "ITN use among pregnant women"
@@ -88,8 +104,10 @@ indicators:
     denominator: "Total pregnant women"
     level: "individual"
     description: >
-      Proportion of pregnant women (hml18 == 1) who slept under an ITN.
-      Note: Pregnancy status may not be available in all surveys.
+      Proportion of pregnant women (hml18 == 1 AND hv104 == 2, i.e. female)
+      who slept under an ITN. Both the pregnancy flag (hml18) and the sex
+      variable (hv104 == 2) are required. Note: Pregnancy status may not be
+      available in all surveys.
 
 data_sources:
   household: "HR (Household Recode)"
@@ -99,22 +117,44 @@ data_sources:
 variables:
   cluster_id:
     dhs_name: "hv001"
+    file: "HR / PR"
     description: "Cluster/enumeration area identifier"
 
   hhid:
     dhs_name: "hhid"
+    file: "HR / PR"
     description: "Household identifier"
 
   hhsize:
     dhs_name: "hv013"
+    file: "HR"
     description: "De facto household size"
+
+  weight:
+    dhs_name: "hv005"
+    file: "HR / PR"
+    description: "Survey weight (divide by 1,000,000 to get fractional weight)"
+    note: "Used in survey design for calc_itn_dhs(). Divided by 1e6 in R code."
+
+  stratum:
+    dhs_name: "hv022"
+    file: "HR / PR"
+    description: "Survey stratum variable for stratified design"
+    note: "Used in svydesign(strata=~stratum_id, ...). Strata with a single PSU handled via survey.lonely.psu = 'certainty'."
+
+  adm1:
+    dhs_name: "hv024"
+    file: "HR"
+    description: "First administrative level (region/province)"
 
   age:
     dhs_name: "hv105"
-    description: "Age of household member in years"
+    file: "PR"
+    description: "Age of household member in completed years"
 
   sex:
     dhs_name: "hv104"
+    file: "PR"
     description: "Sex of household member"
     values:
       1: "Male"
@@ -122,44 +162,63 @@ variables:
 
   pregnant:
     dhs_name: "hml18"
-    description: "Woman is pregnant"
+    file: "PR"
+    description: "Woman is currently pregnant"
     values:
       0: "Not pregnant or NA"
       1: "Pregnant"
+    note: "Combined with hv104 == 2 (female) to identify pregnant women in R."
 
   itn_use:
     dhs_name: "hml12"
-    description: "Person slept under ITN last night"
+    file: "PR"
+    description: "Net person slept under last night (treated or untreated)"
     values:
-      0: "No"
-      1: "Treated net"
-      2: "Untreated net"
-    note: "Both values 1 and 2 are counted as ITN use"
+      0: "Did not sleep under a net"
+      1: "Slept under an ITN/treated net"
+      2: "Slept under an untreated net"
+    note: >
+      Both values 1 and 2 are counted as net use (itn_used = 1).
+      R code: if_else(hml12 %in% c(1, 2), 1L, 0L, missing = 0L).
+      Missing values are treated as non-use (0).
 
   itn_net_type:
     dhs_name: "hml10_*"
-    description: "Type of net (series of variables for each net)"
+    file: "HR"
+    description: >
+      Series of per-net variables indicating whether each net is an ITN/LLIN.
+      The number of variables varies by survey (e.g., hml10_1, hml10_2, ...).
     values:
       1: "LLIN/ITN"
       0: "Other/not ITN"
-    note: "Count number of nets where hml10_* == 1"
+    note: >
+      n_itns = rowSums across all hml10_* columns where value == 1.
+      The prefix is controlled by survey_vars$itn_prefix (default "hml10_").
 
   gps_cluster:
     dhs_name: "DHSCLUST"
-    description: "Cluster ID in GPS file"
+    file: "GE"
+    description: "Cluster ID in GPS file (joins to hv001)"
 
   gps_lat:
     dhs_name: "LATNUM"
-    description: "Latitude coordinate"
+    file: "GE"
+    description: "Latitude coordinate of cluster centroid"
 
   gps_lon:
     dhs_name: "LONGNUM"
-    description: "Longitude coordinate"
+    file: "GE"
+    description: "Longitude coordinate of cluster centroid"
 
 methodology:
   ownership: >
-    Household ownership is straightforward: count households with at least
-    one ITN (any hml10_* == 1).
+    Household ownership: a household has at least one ITN if any hml10_*
+    variable equals 1 (n_itns >= 1). n_itns is computed as rowSums of
+    all hml10_* columns recoded to 0/1 (1 if == 1, else 0).
+
+  sufficient: >
+    Sufficient ITN coverage: n_itns >= hh_size / 2, i.e., at least one
+    ITN per two household members. Equivalent to 2 * n_itns >= hh_size.
 
   access: >
     ITN access follows standard DHS deterministic assignment methodology.
@@ -167,14 +226,28 @@ methodology:
     Individuals within each household are sorted by ITN use (users first),
     then access is assigned to the first N individuals where N = potential_users.
     This guarantees that use <= access at the individual level.
+    In calc_itn_dhs(), access is reported as itn_access_ratio =
+    potential_users / hh_size (continuous 0-1, svymean). In calc_itn_mbg(),
+    the binary has_access flag (0/1) is summed to cluster counts.
 
   use: >
-    ITN use is measured by hml12 variable (slept under net last night).
-    Both treated (1) and untreated (2) nets are counted as use.
+    ITN use is measured by hml12 (slept under net last night).
+    Both treated nets (hml12 == 1) and untreated nets (hml12 == 2) are
+    counted as use. Missing values are treated as non-use (0).
 
   age_stratification: >
-    Age is in completed years (hv105). Age groups are defined by boundaries.
+    Age is in completed years (hv105). Age groups use an exclusive upper
+    bound: the boundary value belongs to the NEXT group, not the current one.
+    calc_itn_dhs() default groups: [0,5) = u5, [5,15) = 5_14, [15,Inf) = ov15.
+    calc_itn_mbg() fixed groups: [0,5) age < 5, [5,10) age >= 5 & age <= 9,
+    [10,20) age >= 10 & age <= 19, [20,Inf) age >= 20.
     Each person is counted in exactly one age group.
+
+  pregnant_women: >
+    Pregnant women are identified by hml18 == 1 (pregnant) AND hv104 == 2
+    (female). Both conditions must be met. When hml18 is absent from the
+    survey data, is_pregnant defaults to 0 and the pregnant indicator is
+    not calculated.
 
   wmr_comparison: >
     WMR computes with_itn (household has >=1 ITN), enough_itn (>=1 ITN per
@@ -186,29 +259,59 @@ methodology:
     (pregnant women), stratified by wealth and residence.
 
   survey_design: >
-    svydesign(id=~cluster, weights=~weight, strata=~strata, nest=TRUE).
-    svyciprop for binary indicators, svymean for access.
-    options(survey.lonely.psu = "adjust").
+    svydesign(ids=~cluster_id, weights=~survey_weight, strata=~stratum_id,
+    nest=TRUE). Weights are hv005 / 1e6. Strata are hv022.
+    options(survey.lonely.psu = "certainty") is set globally for each call.
+    Strata with a single PSU are treated as certainty strata (zero variance
+    contribution). When all observations share one stratum, the strata
+    argument is omitted from svydesign().
     Note: sntmethods R functions use survey::svymean() for all DHS estimates,
     while WMR reference code uses survey::svyciprop() for binary indicators.
     Both produce valid point estimates; CIs differ slightly.
 
 output_format:
-  columns:
-    cluster_id: "Cluster identifier"
-    indicator: "Numerator count"
-    samplesize: "Denominator count"
-    x: "Longitude"
-    y: "Latitude"
-  note: >
-    One row per cluster with valid GPS coordinates. This format is
-    ready for direct input to MBG spatial modeling.
+  calc_itn_dhs:
+    description: >
+      Returns a named list with three elements: data, dict, metadata.
+      data is a tibble in wide format with one row per grouping unit
+      (cluster if GPS provided without shapefile, admin level if shapefile
+      provided, or national if neither). Columns include indicator proportions
+      (0-1), 95% CI bounds, and unweighted sample size counts.
+    key_columns:
+      grouping_vars: "cluster_id / adm1 / adm2 (depending on inputs)"
+      lat: "Latitude (present when GPS-only, no shapefile)"
+      lon: "Longitude (present when GPS-only, no shapefile)"
+      dhs_itn_ownership: "Proportion of households with >= 1 ITN"
+      dhs_itn_sufficient: "Proportion of households with >= 1 ITN per 2 members"
+      dhs_itn_access: "Proportion of population with ITN access (svymean of ratio)"
+      dhs_itn_use: "Proportion of population sleeping under ITN"
+      dhs_itn_use_if_access: "Proportion with access who slept under ITN"
+      dhs_itn_use_u5: "Proportion of children under 5 sleeping under ITN"
+      dhs_itn_use_preg: "Proportion of pregnant women sleeping under ITN"
+      "*_low / *_upp": "Lower and upper 95% CI bounds, clamped to [0, 1]"
+      dhs_n_*: "Unweighted sample size counts"
+  calc_itn_mbg:
+    description: >
+      Returns a named list of data.tables (one per indicator). Each table
+      has one row per cluster with valid GPS coordinates. This format is
+      ready for direct input to MBG spatial modeling.
+    columns:
+      cluster_id: "Cluster identifier (hv001)"
+      indicator: "Numerator count (unweighted)"
+      samplesize: "Denominator count (unweighted)"
+      x: "Longitude (LONGNUM)"
+      y: "Latitude (LATNUM)"
 
 validation:
-  - "Household size must be positive"
-  - "ITN count must be non-negative"
-  - "Age must be non-negative"
-  - "Clusters with missing GPS excluded"
+  - "dhs_hr must be a non-empty data.frame"
+  - "dhs_pr must be a non-empty data.frame"
+  - "Required HR variables must be present: hv001, hv005, hv022, hhid, hv013, hv024"
+  - "Required PR variables must be present: hv001, hv005, hv022, hhid, hv105, hv104, hml12"
+  - "At least one ITN variable with prefix hml10_ must exist in HR data"
+  - "age_breaks must be strictly increasing and non-negative (if provided)"
+  - "length(age_labels) must equal length(age_breaks) - 1 (if provided)"
+  - "For calc_itn_mbg: clusters with missing GPS coordinates are excluded from output"
+  - "For calc_itn_dhs with shapefile: GPS data is required"
 
 references:
   - "DHS Guide to Statistics - Chapter 5: ITN Coverage"

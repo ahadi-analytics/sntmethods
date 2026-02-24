@@ -71,7 +71,7 @@ methods:
       Suitable for early system expansion phases or initial SNT baselines when
       completeness is still improving.
     outputs:
-      - "activity_status_m1"
+      - "activity_status_method1"
       - "first_reporting_date"
 
   M2:
@@ -97,7 +97,7 @@ methods:
       Appropriate for mature reporting systems where permanent attrition
       should be represented.
     outputs:
-      - "activity_status_m2"
+      - "activity_status_method2"
       - "first_reporting_date"
       - "last_reporting_date"
 
@@ -125,9 +125,9 @@ methods:
       Best suited for ongoing monitoring and dynamic completeness adjustments
       where temporary operational issues are expected.
     outputs:
-      - "activity_status_m3"
+      - "activity_status_method3"
       - "gap_run"
-      - "run_length"
+      - "run_len"
 
 comparison_summary:
   - "M1: Stable denominators, ignores closures."
@@ -155,7 +155,7 @@ validation_summary:
   - "Check that all key_indicators exist and contain numeric values."
   - "Confirm reporting_rule correctly applied (any_non_na or positive_only)."
   - "Verify nonreport_window ≥ 1 and method ∈ {M1, M2, M3}."
-  - "Activity outputs aligned to standard naming (activity_status_m1–m3)."
+  - "Activity outputs aligned to standard naming (activity_status_method1–method3)."
 
 strengths_of_approach:
   - "Provides reproducible logic for determining expected reporting facilities."

@@ -509,10 +509,10 @@
     ),
     epi_vita2 = list(
       en = "Vitamin A dose 2", fr = "Vitamine A dose 2",
-      dhs_var = "h33b",
+      dhs_var = "h33a",
       num = "Children 12-23m with Vitamin A dose 2",
       den = "Children 12-23 months",
-      dhs_num = "h33b", dhs_den = "hw1"
+      dhs_num = "h33a", dhs_den = "hw1"
     ),
     epi_malaria = list(
       en = "Malaria vaccine (RTS,S/R21)",
