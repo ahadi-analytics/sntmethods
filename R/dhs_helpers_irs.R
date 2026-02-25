@@ -55,8 +55,7 @@
       ))
     } else {
       cli::cli_warn(
-        "IRS variable {.var {irs_col}} not found and no {.val hv253a-z} columns present; ",
-        "IRS coverage not available for this survey"
+        "IRS variable {.var {irs_col}} not found and no {.val hv253a-z} columns present; IRS coverage not available for this survey"
       )
       return(NULL)
     }
