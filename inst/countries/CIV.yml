@@ -1,0 +1,106 @@
+country: "Cote d'Ivoire"
+iso3: CIV
+surveys:
+  - type: DHS
+    year: 1994
+
+# -----------------------------------------------------------------------------
+# Indicator variable availability
+# Audited against: civ_dhs_mis_dictionary.csv (processed, Jan 2025)
+# Source file:
+#   01_data/1.6_health_systems/1.6a_dhs/processed/civ_dhs_mis_dictionary.csv
+# -----------------------------------------------------------------------------
+# WARNING: The processed dictionary contains only DHS 1994 (1,872 variables).
+# This predates the modern DHS malaria module entirely. Cote d'Ivoire has
+# more recent surveys (DHS 2011-12, MIS 2021) — if those are the target
+# surveys, the dictionary file needs to be regenerated from the correct
+# raw recode files.
+# -----------------------------------------------------------------------------
+
+indicators:
+
+  pfpr:
+    hml35: absent
+    hml32: absent
+    notes: >
+      PfPR variables did not exist in DHS 1994. Not usable for malaria
+      prevalence analysis.
+
+  itn:
+    hml10: absent
+    hml12: absent
+    hml18: absent
+    notes: >
+      ITN module did not exist in DHS 1994.
+
+  irs:
+    hv253: absent
+    hv253a_z: absent
+    pipeline_behaviour: >
+      Graceful skip will fire. Not a data gap per se — IRS module simply
+      was not collected in 1994.
+
+  fever_cascade:
+    h22: present            # Fever in last 2 weeks — DHS 1994, KR dataset
+    h32a_c: present         # h32a/b/c/d present (public care-seeking) — DHS 1994 KR
+    h32d_u: partial         # h32d present (mobile clinic); h32e and beyond absent
+    h47: absent             # Blood taken for malaria test
+    ml1: absent             # Malaria test result
+    ml13a_h: absent         # Antimalarial treatment variables
+    h37a_h: absent          # Antimalarial alt variables
+    pipeline_behaviour: >
+      Only early-stage fever cascade variables available. No treatment or
+      diagnosis data. Most cascade steps will fail — graceful skips needed.
+
+  anemia:
+    hw53: absent
+    hc56: absent
+    pipeline_behaviour: >
+      No haemoglobin data. Anemia indicators will abort — graceful skip needed.
+
+  anc:
+    m14_1: present          # ANC visits — DHS 1994, IR dataset
+    notes: >
+      ANC visit count confirmed. However context is 1994 — not useful for
+      current programme planning.
+
+  iptp:
+    m49a_1: absent
+    ml1_1: absent
+    pipeline_behaviour: >
+      IPTp did not exist as a policy in 1994. Both variables absent.
+      Pipeline will fail — graceful skip needed.
+
+  epi:
+    h2: present             # BCG — DHS 1994, KR dataset
+    h7: present             # DPT3 — DHS 1994, KR dataset
+    h9: present             # Measles — DHS 1994, KR dataset
+    notes: >
+      EPI variables present but 1994 data is not analytically useful for
+      current programme evaluation.
+
+  u5mr:
+    b5: present             # Child alive — DHS 1994, KR dataset
+    b7: present             # Age at death — DHS 1994, KR dataset
+    b3: present             # Date of birth — DHS 1994, KR dataset
+    notes: >
+      All U5MR variables present but data is from 1994.
+
+  smc:
+    hml43: absent
+    ml13g: absent
+    pipeline_behaviour: >
+      No SMC data. Pipeline will abort — graceful skip needed.
+
+# -----------------------------------------------------------------------------
+# Action items before running CIV pipeline
+# -----------------------------------------------------------------------------
+action_items:
+  - CRITICAL: Verify whether the dictionary reflects the correct surveys.
+    CIV should have DHS 2011-12 and/or MIS 2021 data. If the dictionary
+    was generated from the wrong files, regenerate from the correct raw
+    recode files before proceeding.
+  - If 1994 DHS is genuinely the only available file, almost all malaria
+    indicators will be absent and the pipeline output will be near-empty.
+  - Add graceful skips for anemia, IPTp, SMC, and malaria_dx / act_tested
+    before running any CIV pipeline.

@@ -1,0 +1,128 @@
+country: Guinea
+iso3: GIN
+surveys:
+  - type: DHS
+    year: 2012
+  - type: DHS
+    year: 2018
+  - type: MIS
+    year: 2021
+
+# -----------------------------------------------------------------------------
+# Indicator variable availability
+# Audited against: gin_dhs_mis_dictionary.csv (processed, Jan 2025)
+# Source file:
+#   01_data/1.6_health_systems/1.6a_dhs/processed/gin_dhs_mis_dictionary.csv
+# -----------------------------------------------------------------------------
+
+indicators:
+
+  pfpr:
+    hml35: present          # RDT result — DHS 2012, MIS 2021 (PR dataset)
+    hml32: present          # Microscopy result — DHS 2012, MIS 2021 (PR dataset)
+    hml35_dhs2018: absent
+    hml32_dhs2018: absent
+    notes: >
+      PfPR variables confirmed for DHS 2012 and MIS 2021 only. DHS 2018 did
+      not include the PR malaria module — no parasite prevalence data available
+      for that survey year.
+
+  itn:
+    hml10: present          # ITN ownership — all three surveys, PR dataset
+    hml12: present          # Slept under ITN — all three surveys, PR dataset
+    hml18: label_mismatch   # See warning below
+    hml18_warning: >
+      hml18 is present across all three surveys (PR dataset) but labeled
+      "Pregnancy from individual questionnaire", not "Population with access
+      to ITN". Same label-mismatch seen in Burundi and Togo. Confirm against
+      raw PR recode before using itn_access indicators.
+
+  irs:
+    hv253: absent
+    hv253a_z: absent
+    pipeline_behaviour: >
+      IRS module absent from all Guinea surveys. Graceful skip will fire.
+
+  fever_cascade:
+    h22: present            # Fever in last 2 weeks — all three surveys, KR
+    h32a_c: present         # Public care-seeking (h32a/b/c) — all three surveys, KR
+    h32d_e: present         # Mobile/CHW care-seeking — all three surveys, KR
+    ml13a_e: present        # Antimalarials ml13a–e — all three surveys, KR
+    ml13e: present          # ACT — all three surveys, KR
+    ml13f: partial          # CS antimalarial — MIS 2021 only, absent in DHS 2012/2018
+    ml13h: present          # Other antimalarial — all three surveys, KR
+    h37a_e: present         # Antimalarial alt h37a–e — DHS 2012 and 2018 only
+    h37e: present           # ACT alt — DHS 2012 and 2018 (absent MIS 2021)
+    h37a_h_mis2021: absent  # h37 series absent in MIS 2021
+    h47: absent             # Blood taken for malaria test — all surveys
+    ml1: present_wrong_meaning  # See note
+    ml1_note: >
+      ml1 is present in all three surveys (KR) but labeled "Times took
+      Fansidar during pregnancy" — it is the IPTp dose count variable, not
+      a malaria test result. Cannot be used for the malaria_dx cascade step.
+    pipeline_behaviour: >
+      malaria_dx (h47) is absent across all surveys; act_tested denominator
+      is therefore also unavailable. No graceful skip exists — recommend
+      adding NULL-return handling before running Guinea.
+
+  anemia:
+    hw53: present           # Haemoglobin g/dl — DHS 2012, DHS 2018 (KR dataset)
+    hw53_mis2021: absent    # hw53 absent in MIS 2021 KR
+    hc56: present           # Haemoglobin adjusted — all three surveys (PR dataset)
+    notes: >
+      hc56 (PR-based, altitude-adjusted) is the reliable source across all
+      surveys. hw53 (KR-based) is only available in DHS 2012 and 2018.
+      Anemia indicators should use hc56 as primary for MIS 2021.
+
+  anc:
+    m14_1: present          # ANC visits — all three surveys, IR dataset
+    notes: Confirmed across DHS 2012, DHS 2018, and MIS 2021.
+
+  iptp:
+    m49a_1: present         # IPTp SP/Fansidar — all three surveys, IR dataset
+    ml1_1: present          # Times took Fansidar — all three surveys, IR dataset
+    notes: Both primary and alt IPTp variables confirmed across all surveys.
+
+  epi:
+    h2: partial             # BCG — DHS 2018 only (absent DHS 2012 and MIS 2021)
+    h7: partial             # DPT3 — DHS 2018 only
+    h9: partial             # Measles — DHS 2018 only
+    notes: >
+      EPI vaccination variables only present in DHS 2018. Absent from DHS 2012
+      and MIS 2021 (MIS surveys typically omit the vaccination module).
+      EPI indicators will only produce results for DHS 2018; other survey
+      years will fail — graceful skip needed.
+
+  u5mr:
+    b5: present             # Child alive — all three surveys, KR
+    b3: present             # Date of birth — all three surveys, KR
+    b7: present             # Age at death — DHS 2012, DHS 2018 (KR)
+    b7_mis2021: absent      # b7 absent in MIS 2021
+    notes: >
+      U5MR calculable from DHS 2012 and DHS 2018. MIS 2021 lacks b7 (age
+      at death), so mortality cannot be computed for that survey year.
+
+  smc:
+    hml43: absent           # Absent all surveys
+    ml13g: present_wrong_meaning  # See note
+    ml13g_note: >
+      ml13g appears in limited records across surveys but is labeled as a
+      country-specific antimalarial treatment variable for fever/cough —
+      not an SMC receipt indicator. Cannot be used as the SMC alt.
+    pipeline_behaviour: >
+      No valid SMC data in any Guinea survey. Pipeline will abort — graceful
+      skip needed before running Guinea.
+
+# -----------------------------------------------------------------------------
+# Action items before running Guinea pipeline
+# -----------------------------------------------------------------------------
+action_items:
+  - Confirm hml18 meaning against raw PR recode (ITN access vs pregnancy) —
+    affects all three surveys
+  - Add graceful skip for malaria_dx / act_tested (h47 absent all surveys)
+  - Add graceful skip for SMC (hml43 absent; ml13g is wrong variable)
+  - Add graceful skip for EPI when processing DHS 2012 and MIS 2021
+    (h2/h7/h9 only available in DHS 2018)
+  - Note: hw53 absent in MIS 2021 KR — use hc56 (PR) for anemia in that year
+  - Note: b7 absent in MIS 2021 — U5MR not calculable from MIS 2021 alone
+  - Note: PfPR absent in DHS 2018 — no PR malaria module in that survey

@@ -1,0 +1,122 @@
+country: Togo
+iso3: TGO
+surveys:
+  - type: DHS
+    year: 1988
+  - type: MIS
+    year: 2017
+
+# -----------------------------------------------------------------------------
+# Indicator variable availability
+# Audited against: tgo_dhs_mis_dictionary.csv (processed, Jan 2025)
+# Source file:
+#   01_data/1.6_health_systems/1.6a_dhs/processed/tgo_dhs_mis_dictionary.csv
+# Note: DHS 1988 is too old for most malaria indicators; effective data
+#       comes from MIS 2017 only.
+# -----------------------------------------------------------------------------
+
+indicators:
+
+  pfpr:
+    hml35: present          # RDT result — MIS 2017, PR dataset
+    hml32: present          # Microscopy result — MIS 2017, PR and HR datasets
+    notes: >
+      Both confirmed in MIS 2017. DHS 1988 predates these variables.
+
+  itn:
+    hml10: present          # ITN ownership — MIS 2017, PR dataset
+    hml12: present          # Slept under ITN — MIS 2017, PR dataset
+    hml18: label_mismatch   # See warning below
+    hml18_warning: >
+      hml18 is present in MIS 2017 (PR dataset) but labeled "Pregnancy from
+      individual questionnaire", not "Population with access to ITN".
+      Same label-mismatch issue as seen in Burundi. Confirm against the raw
+      PR recode before using itn_access indicators.
+
+  irs:
+    hv253: absent
+    hv253a_z: absent
+    pipeline_behaviour: >
+      IRS module has no data in any Togo survey. The graceful-skip fallback
+      (hv253 → hv253a-z → warn + return NULL) handles this correctly.
+
+  fever_cascade:
+    h22: present            # Fever in last 2 weeks — MIS 2017, KR dataset
+    h32a_c: present         # Care-seeking public (h32a/b/c/f/g/h) — MIS 2017 KR+IR
+    h32d_u: present         # Care-seeking private (h32d/e/j–v) — MIS 2017 KR+IR
+    ml13a_h: present        # Antimalarials (ml13a–n, ml13x–z) — MIS 2017 KR+IR
+    ml13e: present          # ACT — MIS 2017, KR+IR datasets
+    h37a_h: present         # Antimalarial alt (h37a–n, h37x–z) — MIS 2017 KR+IR
+    h37e: present           # ACT alt — MIS 2017, KR+IR datasets
+    h47: absent             # Blood taken for malaria test
+    ml1: present_wrong_meaning  # See note
+    ml1_note: >
+      ml1 IS present but labeled "Times took Fansidar during pregnancy" — this
+      is the IPTp dose count variable, not a malaria test result. It cannot
+      be used for the malaria_dx cascade step. h47 is absent entirely.
+      The malaria_dx and act_tested indicators will have no valid data.
+    pipeline_behaviour: >
+      malaria_dx (h47) is absent; act_tested denominator (h47/ml1 for testing)
+      is also unavailable. No graceful skip exists for this path — recommend
+      adding NULL-return handling before running Togo.
+
+  anemia:
+    hw53: present           # Haemoglobin g/dl — MIS 2017, KR dataset
+    hc56: present           # Haemoglobin adjusted for altitude — MIS 2017, PR dataset
+    notes: >
+      Both variables confirmed. hw53 in KR (children), hc56 in PR. Full
+      anemia cascade (any / moderate+ / severe) should work for MIS 2017.
+
+  anc:
+    m14_1: absent
+    pipeline_behaviour: >
+      No ANC variables (m14 / m14_1) found in any Togo survey dataset.
+      ANC indicators will fail. Graceful skip needed before running Togo.
+
+  iptp:
+    m49a_1: present         # IPTp SP/Fansidar — MIS 2017, KR dataset
+    ml1_1: present          # Times took Fansidar — MIS 2017, IR dataset
+    notes: >
+      Both primary and alt IPTp variables confirmed for MIS 2017.
+
+  epi:
+    h2: absent              # BCG
+    h7: absent              # DPT3
+    h9: absent              # Measles
+    pipeline_behaviour: >
+      No EPI vaccination variables found in any Togo survey. This likely
+      reflects the MIS design (MIS surveys typically skip the full
+      vaccination module). EPI indicators will fail — graceful skip needed.
+
+  u5mr:
+    b5: present             # Child alive — DHS 1988, MIS 2017
+    b7: present             # Age at death — DHS 1988 only (absent in MIS 2017)
+    b3: present             # Date of birth — DHS 1988, MIS 2017
+    b7_note: >
+      b7 (age at death) is absent in MIS 2017. U5MR calculation requires b7
+      for deaths; MIS 2017 alone will not be sufficient for mortality estimates.
+      DHS 1988 is available but far too old to be analytically useful.
+
+  smc:
+    hml43: absent
+    ml13g: present_wrong_meaning  # See note
+    ml13g_note: >
+      ml13g IS present in MIS 2017 KR dataset but is labeled "CS antimalarial
+      taken for fever/cough" — it is a country-specific antimalarial treatment
+      variable, not an SMC receipt indicator. It cannot be used as the SMC alt.
+      hml43 is absent entirely. No valid SMC data exists in Togo surveys.
+    pipeline_behaviour: >
+      SMC has no usable data. The pipeline will abort because there is no
+      graceful skip for SMC. Recommend adding the same NULL-return fallback
+      as IRS before running Togo.
+
+# -----------------------------------------------------------------------------
+# Action items before running Togo pipeline
+# -----------------------------------------------------------------------------
+action_items:
+  - Confirm hml18 meaning against raw MIS 2017 PR recode (ITN access vs pregnancy)
+  - Add graceful skip for ANC (m14_1 absent)
+  - Add graceful skip for EPI (h2/h7/h9 absent — MIS survey design)
+  - Add graceful skip for SMC (hml43 absent; ml13g is wrong variable)
+  - Add graceful skip for malaria_dx / act_tested (h47 absent)
+  - Note: b7 absent in MIS 2017 — U5MR not calculable from MIS alone
