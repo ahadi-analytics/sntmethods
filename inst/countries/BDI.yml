@@ -1,0 +1,116 @@
+country: Burundi
+iso3: BDI
+surveys:
+  - type: DHS
+    year: 2010
+  - type: MIS
+    year: 2012
+  - type: DHS
+    year: 2016
+
+# -----------------------------------------------------------------------------
+# Indicator variable availability
+# Audited against: bdi_dhs_mis_dictionary.csv (processed, Jan 2025)
+# Source file:
+#   01_data/1.6_health_systems/1.6a_dhs/processed/bdi_dhs_mis_dictionary.csv
+# -----------------------------------------------------------------------------
+
+indicators:
+
+  pfpr:
+    hml35: present          # RDT result — DHS 2016, MIS 2012
+    hml32: present          # Microscopy result — DHS 2016, MIS 2012
+    notes: >
+      Both primary variables confirmed in PR and HR datasets across surveys.
+
+  itn:
+    hml10: present          # ITN ownership (hml10, hml10_1–4)
+    hml12: present          # Slept under ITN (hml12, hml12_01–20)
+    hml18: label_mismatch   # See warning below
+    hml18_warning: >
+      hml18 is present in the raw data but the Burundi dictionary labels it
+      "Pregnancy from individual questionnaire", NOT "Population with access
+      to ITN" (the standard DHS PR meaning). Confirm against the raw PR recode
+      before using itn_access indicators. If mislabeled, ITN access will need
+      to be derived manually from hml10* (nets-per-capita approach).
+
+  irs:
+    hv253: absent
+    hv253a_z: absent
+    pipeline_behaviour: >
+      IRS module has no data in any Burundi survey. The graceful-skip
+      fallback (hv253 → hv253a-z → warn + return NULL) handles this
+      correctly; no crash expected. IRS indicators will be skipped.
+
+  fever_cascade:
+    h22: present            # Fever in last 2 weeks — DHS 2010, 2016; MIS 2012
+    h32a_c: present         # Care-seeking public (h32a/b/c)
+    h32d_u: present         # Care-seeking private (h32d/e/j–u)
+    ml13a_h: present        # Antimalarial drugs (ml13a–e, ml13h–m)
+    ml13e: present          # ACT (artemisinin combination)
+    h47: absent             # Blood taken for malaria test
+    ml1: absent             # Malaria test result (blood smear)
+    h37a_h: absent          # Antimalarial alt (h37 series)
+    pipeline_behaviour: >
+      The malaria_dx step (h47/ml1) will have no data; the indicator will
+      either be missing or yield NA across all clusters. act_tested
+      (ACT among test-positives, denominator = h47/ml1) will similarly
+      be empty. No graceful skip exists for this path yet — recommend
+      adding NULL-return handling equivalent to the IRS fix.
+
+  anemia:
+    hw53: absent            # Haemoglobin (PR recode)
+    hc56: absent            # Haemoglobin alt
+    pipeline_behaviour: >
+      No haemoglobin data in any Burundi survey. The pipeline will abort
+      on anemia indicators. A graceful skip (same pattern as IRS) should
+      be implemented before running Burundi.
+
+  anc:
+    m14_1: present          # ANC visits — DHS 2010, 2016
+    notes: >
+      m49a_1 (Fansidar/SP during pregnancy) is also present for IPTp counting.
+
+  iptp:
+    m49a_1: present         # IPTp SP/Fansidar — DHS 2010, 2016; MIS 2012
+    ml1_1: uncertain        # ml1 (times took Fansidar) found in KR only;
+                            # _1 suffix form not consistently confirmed
+    notes: >
+      m49a_1 is the reliable primary source. Additional drugs present:
+      m49b (chloroquine), m49c–f (country-specific, MIS 2012), m49x (other).
+
+  epi:
+    h2: present             # BCG — DHS 2010, 2016
+    h7: present             # DPT3 — DHS 2010, 2016
+    h9: present             # Measles — DHS 2010, 2016
+    notes: >
+      All three confirmed with date components (h2d/m/y, h7d/m/y, h9d/m/y).
+
+  u5mr:
+    b5: present             # Child alive — DHS 2010, 2016; MIS 2012
+    b7: present             # Age at death — DHS 2010, 2016
+    b3: present             # Date of birth — DHS 2010, 2016; MIS 2012
+
+  smc:
+    hml43: absent           # Primary SMC variable
+    ml13g: absent           # Alt SMC variable (ml13g not in ml13 series)
+    pipeline_behaviour: >
+      SMC has no data in Burundi surveys. The pipeline will abort because
+      there is no graceful skip for SMC yet. Recommend adding the same
+      NULL-return fallback as IRS before running Burundi.
+    notes: >
+      ml13g is specifically absent — only ml13a–e and ml13h–m are present.
+      Even if ml13g were present, its meaning varies across survey versions
+      (sometimes "received Fansidar for fever", not SMC). A Burundi-specific
+      SMC variable under a non-standard name should be investigated in the
+      raw KR file before assuming SMC was not collected.
+
+# -----------------------------------------------------------------------------
+# Action items before running Burundi pipeline
+# -----------------------------------------------------------------------------
+action_items:
+  - Confirm hml18 meaning against raw PR recode file (ITN access vs pregnancy)
+  - Add graceful skip for anemia (hw53/hc56 absent)
+  - Add graceful skip for SMC (hml43/ml13g absent)
+  - Add graceful skip for malaria_dx / act_tested (h47/ml1 absent)
+  - Investigate whether a non-standard SMC variable exists in the KR file
