@@ -76,7 +76,6 @@ NULL
 #'     \item "u5mr": Under-5 mortality
 #'     \item "smc": SMC receipt
 #'     \item "fever": Fever prevalence (U5)
-#'     \item "malaria_dx": Malaria diagnostic testing (febrile U5)
 #'     \item "antimalarial": Any antimalarial treatment (febrile U5)
 #'   }
 #' @param aggregation_level Primary aggregation level for MBG outputs. One of:
@@ -145,7 +144,7 @@ run_mbg_indicator_pipeline <- function(
   survey_type = NULL,
   indicators = c(
     "pfpr", "itn", "irs", "anc", "csb", "anemia", "iptp",
-    "fever", "malaria_dx", "antimalarial"
+    "fever", "antimalarial"
   ),
   aggregation_level = c("adm2", "adm3"),
   run_mbg = TRUE,
@@ -240,10 +239,10 @@ run_mbg_indicator_pipeline <- function(
   # ---- Input Validation ----
 
   # Validate indicator names
-  # antimalarial/act/act_tested already filter to febrile U5 via KR helper
+  # antimalarial/act already filter to febrile U5 via KR helper
   valid_indicators <- c(
     "pfpr", "itn", "irs", "anc", "csb", "act", "anemia", "iptp", "epi",
-    "u5mr", "smc", "fever", "malaria_dx", "antimalarial",
+    "u5mr", "smc", "fever", "antimalarial",
     # ITN sub-indicators (selectable individually for faster pipelines)
     "itn_ownership", "itn_access", "itn_use_all", "itn_use_u5",
     "itn_use_pregnant", "itn_use_if_access"
@@ -1112,7 +1111,7 @@ run_mbg_indicator_pipeline <- function(
         calc_act_mbg(
           dhs_kr = survey_data$KR,
           gps_data = gps_data,
-          indicators = c("act", "act_tested")
+          indicators = c("act")
         )
       }, error = function(e) {
         results$skipped <<- glue::glue("Calculation error: {e$message}")
@@ -1210,21 +1209,6 @@ run_mbg_indicator_pipeline <- function(
       }
       tryCatch({
         calc_fever_mbg(
-          dhs_kr = survey_data$KR,
-          gps_data = gps_data
-        )
-      }, error = function(e) {
-        results$skipped <<- glue::glue("Calculation error: {e$message}")
-        list()
-      })
-    },
-
-    malaria_dx = {
-      if (!"KR" %in% names(survey_data)) {
-        return(skip_indicator("Missing KR data (Children Recode)"))
-      }
-      tryCatch({
-        calc_malaria_dx_mbg(
           dhs_kr = survey_data$KR,
           gps_data = gps_data
         )
@@ -1369,8 +1353,6 @@ run_mbg_indicator_pipeline <- function(
     labels <- list(numerator = "n_received_smc", denominator = "n_children")
   } else if (grepl("^fever", ind_name)) {
     labels <- list(numerator = "n_fever", denominator = "n_children")
-  } else if (grepl("^malaria_dx", ind_name)) {
-    labels <- list(numerator = "n_tested", denominator = "n_febrile")
   } else if (grepl("^antimalarial", ind_name)) {
     labels <- list(numerator = "n_antimalarial", denominator = "n_febrile")
   }

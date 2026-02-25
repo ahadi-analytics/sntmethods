@@ -262,7 +262,10 @@ calc_pfpr_mbg <- function(
   results <- .filter_redundant_mbg_results(results, age_groups)
 
   if (length(results) == 0) {
-    cli::cli_abort("No valid MBG data could be prepared from the input data")
+    cli::cli_warn(
+      "No valid PfPR data could be prepared; {.var {survey_vars$rdt}} and {.var {survey_vars$mic}} may be absent from this survey"
+    )
+    return(NULL)
   }
 
   results

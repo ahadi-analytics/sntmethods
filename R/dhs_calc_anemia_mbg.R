@@ -111,6 +111,7 @@ calc_anemia_mbg <- function(
     dhs_pr, survey_vars, age_min, age_max,
     include_survey_vars = FALSE
   )
+  if (is.null(pr)) return(NULL)
 
   # ---- Aggregate to cluster level ----
 
@@ -143,9 +144,7 @@ calc_anemia_mbg <- function(
     }
   }
 
-  if (length(results) == 0) {
-    cli::cli_abort("No valid MBG data could be prepared")
-  }
+  if (length(results) == 0) return(NULL)
 
   results
 }

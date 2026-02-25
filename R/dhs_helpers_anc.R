@@ -39,7 +39,10 @@
   }
   missing_cols <- setdiff(required_cols, names(dhs_ir))
   if (length(missing_cols) > 0) {
-    cli::cli_abort("Required columns not found: {.var {missing_cols}}")
+    cli::cli_warn(
+      "ANC required columns not found: {.var {missing_cols}}; ANC not available for this survey"
+    )
+    return(NULL)
   }
 
   ir <- dhs_ir |>

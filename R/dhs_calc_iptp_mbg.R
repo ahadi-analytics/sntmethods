@@ -94,6 +94,7 @@ calc_iptp_mbg <- function(
     dhs_ir, survey_vars, birth_window_months,
     include_survey_vars = FALSE
   )
+  if (is.null(ir)) return(NULL)
 
   # ---- Aggregate to cluster level ----
 
@@ -118,9 +119,7 @@ calc_iptp_mbg <- function(
     }
   }
 
-  if (length(results) == 0) {
-    cli::cli_abort("No valid MBG data could be prepared")
-  }
+  if (length(results) == 0) return(NULL)
 
   results
 }

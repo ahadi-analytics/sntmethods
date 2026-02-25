@@ -30,10 +30,10 @@
   # Check SP variable
   sp_var <- survey_vars$sp_doses %||% survey_vars$sp_taken
   if (!sp_var %in% names(dhs_ir)) {
-    cli::cli_abort(c(
-      "SP doses variable {.var {sp_var}} not found",
-      "i" = "IPTp data may not be available in this survey"
-    ))
+    cli::cli_warn(
+      "IPTp variable {.var {sp_var}} not found; IPTp not available for this survey"
+    )
+    return(NULL)
   }
 
   # Zap labels

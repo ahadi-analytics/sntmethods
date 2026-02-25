@@ -66,17 +66,15 @@ calc_smc_mbg <- function(
 
   # ---- Prepare KR data ----
 
-  kr <- .prepare_smc_data(dhs_kr, survey_vars, include_survey_vars = FALSE)
+  kr <- .prepare_smc_data(dhs_kr, survey_vars, include_survey_vars = FALSE, strict = FALSE)
+  if (is.null(kr)) return(NULL)
 
   # ---- Aggregate to cluster level ----
 
   result <- .aggregate_to_mbg_clusters(
     kr, "received_smc", gps_clean, "smc_coverage"
   )
-
-  if (is.null(result)) {
-    cli::cli_abort("No valid MBG data could be prepared for SMC coverage")
-  }
+  if (is.null(result)) return(NULL)
 
   result
 }

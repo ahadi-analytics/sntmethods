@@ -105,7 +105,10 @@ calc_u5mr_mbg <- function(
   required <- unlist(survey_vars)
   missing <- setdiff(required, names(dhs_br))
   if (length(missing) > 0) {
-    cli::cli_abort("Required columns not found: {.var {missing}}")
+    cli::cli_warn(
+      "U5MR column(s) not found in BR data: {.var {missing}}; U5MR not available for this survey"
+    )
+    return(NULL)
   }
 
   # ---- Prepare GPS data ----
@@ -215,7 +218,8 @@ calc_u5mr_mbg <- function(
   }
 
   if (length(age_specific_results) == 0) {
-    cli::cli_abort("No valid data for any age group")
+    cli::cli_warn("No valid U5MR data for any age group; U5MR not available for this survey")
+    return(NULL)
   }
 
   # ---- Combine age groups into U5MR ----

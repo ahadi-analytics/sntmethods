@@ -126,9 +126,7 @@ calc_epi_mbg <- function(
     }
   }
 
-  if (length(results) == 0) {
-    cli::cli_abort("No valid MBG data could be prepared")
-  }
+  if (length(results) == 0) return(NULL)
 
   results
 }

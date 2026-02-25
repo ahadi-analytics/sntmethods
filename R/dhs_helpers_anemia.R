@@ -32,10 +32,10 @@
 
   # Check hemoglobin variable
   if (!survey_vars$hemoglobin %in% names(dhs_pr)) {
-    cli::cli_abort(c(
-      "Hemoglobin variable {.var {survey_vars$hemoglobin}} not found",
-      "i" = "Anemia data may not be available in this survey"
-    ))
+    cli::cli_warn(
+      "Hemoglobin variable {.var {survey_vars$hemoglobin}} not found; anemia not available for this survey"
+    )
+    return(NULL)
   }
 
   # Zap labels

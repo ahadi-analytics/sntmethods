@@ -15,7 +15,8 @@
 .prepare_smc_data <- function(
   dhs_kr,
   survey_vars,
-  include_survey_vars = FALSE
+  include_survey_vars = FALSE,
+  strict = TRUE
 ) {
   if (!is.data.frame(dhs_kr)) {
     cli::cli_abort("`dhs_kr` must be a data.frame or tibble")
@@ -32,12 +33,15 @@
   } else if (!is.null(survey_vars$smc_alt) && survey_vars$smc_alt %in% names(dhs_kr)) {
     smc_var <- survey_vars$smc_alt
     cli::cli_alert_info("Using SMC variable: {.var {smc_var}} (alternative)")
+  } else if (strict) {
+    cli::cli_abort(
+      "No SMC variable found; checked {.var {survey_vars$smc_primary}} and {.var {survey_vars$smc_alt}}"
+    )
   } else {
-    cli::cli_abort(c(
-      "No SMC variable found in data",
-      "i" = "Checked for: {.var {survey_vars$smc_primary}}, {.var {survey_vars$smc_alt}}",
-      "i" = "SMC data may not be available for this survey"
-    ))
+    cli::cli_warn(
+      "No SMC variable found; checked {.var {survey_vars$smc_primary}} and {.var {survey_vars$smc_alt}}; SMC not available for this survey"
+    )
+    return(NULL)
   }
 
   kr <- dhs_kr |>
