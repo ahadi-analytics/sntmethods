@@ -599,6 +599,12 @@
       dhs_var = "hml43/ml13g",
       num = "Children receiving SMC", den = "Children under 5",
       dhs_num = "hml43/ml13g", dhs_den = "hw1"
+    ),
+    smc_receipt = list(
+      en = "SMC receipt", fr = "Reception de la CPS",
+      dhs_var = "hml43/ml13g",
+      num = "Children who received SMC in last 30 days", den = "Children under 5",
+      dhs_num = "hml43/ml13g", dhs_den = "hw1"
     )
   )
 
@@ -799,7 +805,8 @@
     # IRS — HR module
     irs_coverage      = list(recode = "HR", category = "IRS",           cascade = na_int, age = "all ages"),
     # SMC — KR module
-    smc_coverage      = list(recode = "KR", category = "SMC",           cascade = na_int, age = "0-59 months")
+    smc_coverage      = list(recode = "KR", category = "SMC",           cascade = na_int, age = "0-59 months"),
+    smc_receipt       = list(recode = "KR", category = "SMC",           cascade = na_int, age = "0-59 months")
   )
 
   m <- meta[[ind]]
