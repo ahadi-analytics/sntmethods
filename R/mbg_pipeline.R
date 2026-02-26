@@ -1079,7 +1079,7 @@ run_mbg_indicator_pipeline <- function(
         calc_anc_mbg(
           dhs_ir = survey_data$IR,
           gps_data = gps_data,
-          indicators = c("anc_1plus", "anc_3plus", "anc_4plus", "anc_8plus")
+          indicators = c("anc_1plus", "anc_2plus", "anc_3plus", "anc_4plus", "anc_8plus")
         )
       }, error = function(e) {
         results$skipped <<- glue::glue("Calculation error: {e$message}")
