@@ -56,6 +56,15 @@
     cli::cli_abort("No h32 treatment-seeking variables found in data.")
   }
 
+  # Warn if any detected h32 variables are not in the classification table
+  expected_h32 <- csb_classification$variable
+  unexpected_h32 <- setdiff(available_h32, expected_h32)
+  if (length(unexpected_h32) > 0) {
+    cli::cli_warn(
+      "Detected h32 variables not in standard classification: {paste(unexpected_h32, collapse = ', ')}. These may be country-specific non-standard slots. Check that the default classification is appropriate or supply a custom csb_classification."
+    )
+  }
+
   # Filter classification to available variables
   csb_classification <- csb_classification |>
     dplyr::filter(variable %in% available_h32)

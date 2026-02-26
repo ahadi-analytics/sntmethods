@@ -104,6 +104,16 @@
     }
   }
 
+  # Guard: if both rdt_res and mic_res are entirely NA, skip rather than crash
+  rdt_vals <- pr$rdt_res
+  mic_vals <- pr$mic_res
+  if (all(is.na(rdt_vals)) && all(is.na(mic_vals))) {
+    cli::cli_warn(
+      "Both {.var {survey_vars$rdt}} and {.var {survey_vars$mic}} are entirely NA; skipping pfpr - no valid malaria test data"
+    )
+    return(NULL)
+  }
+
   # Create test flags
   pr <- pr |>
     dplyr::mutate(

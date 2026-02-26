@@ -145,6 +145,15 @@ calc_u5mr_mbg <- function(
       !is.na(interview_cmc)
     )
 
+  # Guard: if death_age column exists but is entirely NA, skip
+  death_age_col <- survey_vars[["death_age"]]
+  if (all(is.na(br$death_age_months))) {
+    cli::cli_warn(
+      "{.var {death_age_col}} is entirely NA; U5MR cannot be estimated - skipping"
+    )
+    return(NULL)
+  }
+
   # Calculate time since birth
   br <- br |>
     dplyr::mutate(

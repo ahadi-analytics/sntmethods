@@ -138,6 +138,14 @@ calc_u5mr_dhs_core <- function(
     }
   }
 
+  # Guard: if age_at_death column exists but is entirely NA, skip
+  if (all(is.na(dhs_kr[[age_death_var]]))) {
+    cli::cli_warn(
+      "{.var {age_death_var}} is entirely NA; U5MR cannot be estimated - skipping"
+    )
+    return(NULL)
+  }
+
   # ---- 2. join gps and shapefile if provided --------------------------------
 
   class_var <- NULL

@@ -186,6 +186,18 @@ calc_csb_dhs_core <- function(
     "Detected {length(available_h32)} h32 source variables"
   )
 
+  # Warn if any detected h32 variables are not in the (default) classification
+  {
+    ref_class <- if (!is.null(csb_classification)) csb_classification else .default_csb_classification()
+    expected_h32 <- ref_class$variable
+    unexpected_h32 <- setdiff(available_h32, expected_h32)
+    if (length(unexpected_h32) > 0) {
+      cli::cli_warn(
+        "Detected h32 variables not in standard classification: {paste(unexpected_h32, collapse = ', ')}. These may be country-specific non-standard slots. Check that the default classification is appropriate or supply a custom csb_classification."
+      )
+    }
+  }
+
   # ---- 2. Handle classification parameter ------------------------------------
 
   # Handle backwards compatibility and defaults

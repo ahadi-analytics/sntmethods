@@ -30,7 +30,7 @@ test_that("calc_malaria_dx_dhs_core validates input data", {
   )
 })
 
-test_that("calc_malaria_dx_dhs_core uses ml1 fallback when h47 missing", {
+test_that("calc_malaria_dx_dhs_core warns and returns NULL when h47 missing", {
   skip_if_not_installed("survey")
 
   set.seed(55)
@@ -47,24 +47,16 @@ test_that("calc_malaria_dx_dhs_core uses ml1 fallback when h47 missing", {
     stringsAsFactors = FALSE
   )
 
-  # No h47 column, but ml1 is present
-  febrile <- kr_data$h22 == 1
-  kr_data$ml1[febrile] <- sample(
-    c(0, 1), sum(febrile), replace = TRUE, prob = c(0.5, 0.5)
-  )
-
-  # Should succeed using ml1 as fallback
-  expect_message(
+  # No h47 column present; ml1 is no longer a valid fallback
+  # Should warn and return NULL
+  expect_warning(
     result <- calc_malaria_dx_dhs_core(kr_data),
-    "using.*ml1"
+    "not found"
   )
-
-  expect_s3_class(result, "tbl_df")
-  expect_true("dhs_malaria_dx" %in% names(result))
-  expect_true(all(result$dhs_malaria_dx >= 0 & result$dhs_malaria_dx <= 1))
+  expect_null(result)
 })
 
-test_that("calc_malaria_dx_dhs_core errors when neither h47 nor ml1 present", {
+test_that("calc_malaria_dx_dhs_core warns and returns NULL when h47 absent", {
   skip_if_not_installed("survey")
 
   kr_data <- data.frame(
@@ -76,10 +68,11 @@ test_that("calc_malaria_dx_dhs_core errors when neither h47 nor ml1 present", {
     stringsAsFactors = FALSE
   )
 
-  expect_error(
-    calc_malaria_dx_dhs_core(kr_data),
-    "also tried"
+  expect_warning(
+    result <- calc_malaria_dx_dhs_core(kr_data),
+    "not found"
   )
+  expect_null(result)
 })
 
 test_that("calc_malaria_dx_dhs_core calculates diagnostic testing rate", {

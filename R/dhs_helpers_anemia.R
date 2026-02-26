@@ -103,7 +103,10 @@
     )
 
   if (nrow(pr) == 0) {
-    cli::cli_abort("No eligible children with valid hemoglobin data found")
+    cli::cli_warn(
+      "No valid hemoglobin values in {.var {survey_vars$hemoglobin}}; skipping anemia"
+    )
+    return(NULL)
   }
 
   cli::cli_alert_info(

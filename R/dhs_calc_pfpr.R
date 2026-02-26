@@ -274,6 +274,7 @@ calc_pfpr_dhs_core <- function(
     age_max = 59,
     include_survey_vars = TRUE
   )
+  if (is.null(pr)) return(NULL)
 
   use_strata <- dplyr::n_distinct(pr$stratum_id) > 1
 

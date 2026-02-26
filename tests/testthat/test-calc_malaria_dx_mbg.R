@@ -71,21 +71,19 @@ test_that("calc_malaria_dx_mbg computes malaria_dx indicator with valid data", {
   expect_true(all(dt$y != 0))
 })
 
-test_that("calc_malaria_dx_mbg uses ml1 fallback when h47 missing", {
+test_that("calc_malaria_dx_mbg warns and returns empty list when h47 missing (no ml1 fallback)", {
   kr <- .mock_kr_malaria_dx()
-  # Replace h47 with ml1
+  # Replace h47 with ml1 — ml1 is not a valid fallback
   kr$ml1 <- kr$h47
   kr$h47 <- NULL
   gps <- .mock_gps_malaria_dx()
 
-  result <- calc_malaria_dx_mbg(kr, gps)
+  suppressWarnings(
+    result <- calc_malaria_dx_mbg(kr, gps)
+  )
 
   expect_type(result, "list")
-  expect_true("malaria_dx" %in% names(result))
-
-  dt <- result[["malaria_dx"]]
-  expect_s3_class(dt, "tbl_df")
-  expect_true(all(dt$indicator <= dt$samplesize))
+  expect_equal(length(result), 0)
 })
 
 test_that("calc_malaria_dx_mbg returns empty list when neither h47 nor ml1 present", {

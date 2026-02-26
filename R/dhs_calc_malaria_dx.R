@@ -114,6 +114,7 @@ calc_malaria_dx_dhs_core <- function(
     survey_vars = survey_vars,
     include_survey_vars = TRUE
   )
+  if (is.null(kr_fever)) return(NULL)
 
   # ---- 3. Spatial join if GPS + shapefile provided ----
 

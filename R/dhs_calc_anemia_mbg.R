@@ -105,6 +105,17 @@ calc_anemia_mbg <- function(
 
   gps_clean <- .prepare_gps_data(gps_data, gps_vars)
 
+  # ---- hc56 -> hw53 fallback ----
+  if ("hc56" %in% names(dhs_pr) && all(is.na(dhs_pr[["hc56"]]))) {
+    if ("hw53" %in% names(dhs_pr)) {
+      cli::cli_warn("hc56 is entirely NA; falling back to hw53 for haemoglobin")
+      survey_vars$hemoglobin <- "hw53"
+    } else {
+      cli::cli_warn("hc56 and hw53 are both absent/NA; skipping anemia")
+      return(NULL)
+    }
+  }
+
   # ---- Prepare PR data ----
 
   pr <- .prepare_anemia_data(
