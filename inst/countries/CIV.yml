@@ -3,104 +3,153 @@ iso3: CIV
 surveys:
   - type: DHS
     year: 1994
+  - type: DHS
+    year: 1998
+  - type: DHS
+    year: 2012
+  - type: DHS
+    year: 2021
 
 # -----------------------------------------------------------------------------
 # Indicator variable availability
-# Audited against: civ_dhs_mis_dictionary.csv (processed, Jan 2025)
+# Audited against: civ_dhs_mis_dictionary.csv (processed, Feb 2025)
 # Source file:
 #   01_data/1.6_health_systems/1.6a_dhs/processed/civ_dhs_mis_dictionary.csv
-# -----------------------------------------------------------------------------
-# WARNING: The processed dictionary contains only DHS 1994 (1,872 variables).
-# This predates the modern DHS malaria module entirely. Cote d'Ivoire has
-# more recent surveys (DHS 2011-12, MIS 2021) — if those are the target
-# surveys, the dictionary file needs to be regenerated from the correct
-# raw recode files.
+# Surveys confirmed in dictionary: DHS 1994, DHS 1998, DHS 2012, DHS 2021
+# Datasets available: GE, HR, IR, KR, PR (all four surveys)
+# Note: DHS 1994 and 1998 predate the modern DHS malaria module. Most malaria
+#       indicators are only available from 2012 onward. Analyses should use
+#       DHS 2012 and/or DHS 2021 as the primary target surveys.
+# Note on 100% missing: hml32 and hml35 are present as columns in 2012 and
+#       2021 PR datasets but have n_unique=0 (all values missing). This likely
+#       reflects a DHS that did not conduct malaria testing in those years.
+#       Confirm against raw PR recode before assuming they are usable.
 # -----------------------------------------------------------------------------
 
 indicators:
 
   pfpr:
-    hml35: absent
-    hml32: absent
+    hml35: present              # RDT result — DHS 2012 and 2021, PR dataset; 100% missing
+    hml32: present              # Microscopy result — DHS 2012 and 2021, PR dataset; 100% missing
     notes: >
-      PfPR variables did not exist in DHS 1994. Not usable for malaria
-      prevalence analysis.
+      Both hml35 and hml32 exist as columns in the DHS 2012 and 2021 PR datasets
+      but n_unique = 0 in both years, indicating 100% missing values. The malaria
+      testing module may not have been implemented in these DHS rounds. Absent in
+      DHS 1994 and 1998. Confirm against raw PR recode before running pfpr
+      indicators — the pipeline will likely skip both sub-indicators.
 
   itn:
-    hml10: absent
-    hml12: absent
-    hml18: absent
-    notes: >
-      ITN module did not exist in DHS 1994.
+    hml10: present              # ITN ownership — DHS 2012 and 2021, PR dataset
+    hml12: present              # Slept under ITN — DHS 2012 and 2021, PR dataset
+    hml18: label_mismatch       # See warning below
+    hml18_warning: >
+      hml18 is present in DHS 2012 and DHS 2021 (PR dataset) but labeled
+      "Pregnancy from individual questionnaire", not "Population with access to
+      ITN". Same label-mismatch as seen in Burundi and Togo. Confirm against the
+      raw PR recode before using itn_access indicators. Absent in DHS 1994/1998.
 
   irs:
     hv253: absent
     hv253a_z: absent
     pipeline_behaviour: >
-      Graceful skip will fire. Not a data gap per se — IRS module simply
-      was not collected in 1994.
+      IRS module (hv253 and all extensions) is absent across all four CIV surveys.
+      The graceful-skip fallback (hv253 -> hv253a-z -> warn + return NULL) will
+      handle this correctly for all years.
 
   fever_cascade:
-    h22: present            # Fever in last 2 weeks — DHS 1994, KR dataset
-    h32a_c: present         # h32a/b/c/d present (public care-seeking) — DHS 1994 KR
-    h32d_u: partial         # h32d present (mobile clinic); h32e and beyond absent
-    h47: absent             # Blood taken for malaria test
-    ml1: absent             # Malaria test result
-    ml13a_h: absent         # Antimalarial treatment variables
-    h37a_h: absent          # Antimalarial alt variables
+    h22: present                # Fever in last 2 weeks — all years, KR dataset
+    h32a_c: present             # h32a/b/c present — all years, KR dataset
+    h32d_u: partial             # h32d present in 1994, 2012, 2021 (absent in 1998);
+                                # h32e present in 2012 and 2021 only
+    h47: absent                 # Blood taken for malaria test — absent all years
+    ml1: present_wrong_meaning  # See note
+    ml1_note: >
+      ml1 IS present in DHS 2012 and DHS 2021 (KR dataset) but labeled "Times
+      took Fansidar during pregnancy" — this is the IPTp dose count variable, not
+      a malaria test result. It cannot be used for the malaria_dx cascade step.
+      h47 is absent entirely across all years. The malaria_dx and act_tested
+      indicators will have no valid data for CIV.
+    ml13a_h: partial            # ml13a/b/c/d/e/h present in DHS 2012 (KR);
+                                # ml13f and ml13g absent; absent in 1994/1998/2021
+    h37a_h: partial             # h37a/b/c/d/e/h present in DHS 2021 (KR);
+                                # h37f and h37g absent; absent in 1994/1998/2012
+    ml13e: present              # ACT — DHS 2012, KR dataset
+    h37e: present               # ACT alt — DHS 2021, KR dataset
     pipeline_behaviour: >
-      Only early-stage fever cascade variables available. No treatment or
-      diagnosis data. Most cascade steps will fail — graceful skips needed.
+      malaria_dx (h47) is absent across all years; ml1 has wrong meaning (IPTp).
+      act_tested denominator is also unavailable. The antimalarial/ACT variable
+      naming shifted between 2012 (ml13a-h) and 2021 (h37a-h) — both sets are
+      partial, missing the f and g variants. Graceful skips for malaria_dx and
+      act_tested are required before running CIV. Use min_year >= 2012 to exclude
+      the pre-malaria-module surveys.
 
   anemia:
-    hw53: absent
-    hc56: absent
-    pipeline_behaviour: >
-      No haemoglobin data. Anemia indicators will abort — graceful skip needed.
+    hw53: present               # Haemoglobin g/dl — DHS 2012 and 2021, KR dataset
+    hc56: present               # Haemoglobin adjusted for altitude — DHS 2012 and 2021, PR dataset
+    notes: >
+      hw53 and hc56 are present in DHS 2012 and 2021. hw53 is in KR (children);
+      hc56 is in PR. hc56 shows 100% missing in DHS 2012 (n_unique=0) — confirm
+      against raw PR recode. DHS 2021 hc56 also shows 100% missing. Anemia
+      cascade (any/moderate+/severe) should work via hw53 in KR for both years.
+      Absent in DHS 1994 and 1998.
 
   anc:
-    m14_1: present          # ANC visits — DHS 1994, IR dataset
+    m14_1: present              # ANC visits — all years, IR dataset
     notes: >
-      ANC visit count confirmed. However context is 1994 — not useful for
-      current programme planning.
+      m14_1 confirmed in DHS 1994, 1998, 2012, and 2021 (IR dataset). ANC
+      indicators are usable for all years, though 1994/1998 data are not
+      analytically relevant for current programme planning.
 
   iptp:
-    m49a_1: absent
-    ml1_1: absent
-    pipeline_behaviour: >
-      IPTp did not exist as a policy in 1994. Both variables absent.
-      Pipeline will fail — graceful skip needed.
+    m49a_1: present             # Took Fansidar during pregnancy — DHS 2012 and 2021, IR
+    ml1_1: present              # Times took Fansidar — DHS 2012 and 2021, IR dataset
+    notes: >
+      Both IPTp variables confirmed for DHS 2012 and 2021 (IR dataset). Absent
+      in DHS 1994 and 1998 — IPTp did not exist as policy then.
 
   epi:
-    h2: present             # BCG — DHS 1994, KR dataset
-    h7: present             # DPT3 — DHS 1994, KR dataset
-    h9: present             # Measles — DHS 1994, KR dataset
+    h2: present                 # BCG — all years, KR dataset
+    h7: present                 # DPT3 — all years, KR dataset
+    h9: present                 # Measles — all years, KR dataset
     notes: >
-      EPI variables present but 1994 data is not analytically useful for
-      current programme evaluation.
+      All three EPI variables confirmed across DHS 1994, 1998, 2012, and 2021
+      (KR dataset). Use min_year >= 2012 to restrict to analytically relevant data.
 
   u5mr:
-    b5: present             # Child alive — DHS 1994, KR dataset
-    b7: present             # Age at death — DHS 1994, KR dataset
-    b3: present             # Date of birth — DHS 1994, KR dataset
-    notes: >
-      All U5MR variables present but data is from 1994.
+    b5: present                 # Child alive — all years, KR dataset
+    b7: present                 # Age at death — all years, KR dataset; 100% missing
+    b3: present                 # Date of birth (CMC) — all years, KR dataset
+    b7_note: >
+      b7 (age at death) is present as a column in all four survey years (KR) but
+      shows n_unique=0 (100% missing) in DHS 1994, 1998, and 2012, and n_unique=1
+      with pct_missing=50 in DHS 2021. This is expected — most children in the
+      birth history are alive (b7 is only populated for children who died). Verify
+      that the non-missing records in DHS 2021 are sufficient for mortality
+      estimation before running u5mr for CIV.
 
   smc:
-    hml43: absent
-    ml13g: absent
+    hml43: absent               # SMC receipt — absent all years
+    ml13g: absent               # ml13g — absent all years
     pipeline_behaviour: >
-      No SMC data. Pipeline will abort — graceful skip needed.
+      Neither hml43 nor ml13g is present in any CIV survey. CIV is not a major
+      SMC country. The pipeline will skip SMC gracefully — confirm that the
+      graceful-skip fallback for SMC is in place before running.
 
 # -----------------------------------------------------------------------------
 # Action items before running CIV pipeline
 # -----------------------------------------------------------------------------
 action_items:
-  - CRITICAL: Verify whether the dictionary reflects the correct surveys.
-    CIV should have DHS 2011-12 and/or MIS 2021 data. If the dictionary
-    was generated from the wrong files, regenerate from the correct raw
-    recode files before proceeding.
-  - If 1994 DHS is genuinely the only available file, almost all malaria
-    indicators will be absent and the pipeline output will be near-empty.
-  - Add graceful skips for anemia, IPTp, SMC, and malaria_dx / act_tested
-    before running any CIV pipeline.
+  - Use min_year >= 2012 to exclude DHS 1994 and 1998, which predate most
+    malaria-specific variables (pfpr, itn, iptp, anemia modules all absent).
+  - Confirm hml35 and hml32 against raw PR recode — both are 100% missing in
+    the dictionary. If malaria testing was not conducted, pfpr will be skipped.
+  - Confirm hml18 label against raw PR recode (ITN access vs pregnancy variable).
+  - Confirm hc56 in DHS 2012 and 2021 PR — both show 100% missing; use hw53
+    from KR for anemia indicators.
+  - Add graceful skip for malaria_dx / act_tested (h47 absent all years; ml1
+    has wrong meaning — IPTp dose count, not test result).
+  - Verify b7 non-missing records in DHS 2021 are sufficient for U5MR estimates.
+  - SMC absent — confirm graceful-skip fallback is in place.
+  - IRS absent across all years — graceful-skip fallback should handle this.
+  - Note: antimalarial variable naming differs between DHS 2012 (ml13a-h) and
+    DHS 2021 (h37a-h); ml13f/g and h37f/g absent in both years.

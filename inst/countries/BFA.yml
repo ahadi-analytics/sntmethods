@@ -1,0 +1,150 @@
+country: "Burkina Faso"
+iso3: BFA
+surveys:
+  - type: DHS
+    year: 1993
+
+# -----------------------------------------------------------------------------
+# Indicator variable availability
+# Audited against: bfa_dhs_mis_dictionary.csv (processed, Feb 2025)
+# Source file:
+#   01_data/1.6_health_systems/1.6a_dhs/processed/bfa_dhs_mis_dictionary.csv
+# Surveys confirmed in dictionary: DHS 1993 only (459 variables total)
+# Datasets available: GE, PR, KR only — HR and IR datasets are absent
+# WARNING: This dictionary covers only DHS 1993, which predates the modern DHS
+#          malaria module entirely. Burkina Faso has multiple more recent surveys
+#          (DHS 1998/99, 2003, 2010, MIS 2010, 2014, 2017, 2021) that are not
+#          represented here. If those are the target surveys, this dictionary
+#          must be regenerated from the correct raw recode files before proceeding.
+# WARNING: The absence of HR and IR datasets means ANC, IPTp, IRS, and household-
+#          level ITN indicators cannot be assessed from this dictionary at all.
+# -----------------------------------------------------------------------------
+
+indicators:
+
+  pfpr:
+    hml35: absent               # RDT result — absent; predates modern malaria module
+    hml32: absent               # Microscopy result — absent; predates modern malaria module
+    notes: >
+      PfPR variables (hml35, hml32) did not exist in DHS 1993. Not usable for
+      malaria prevalence analysis. These variables are only available in DHS
+      surveys from the mid-2000s onward and in MIS surveys. Regenerate the
+      dictionary from later surveys (e.g. DHS 2010, MIS 2014/2017/2021) to
+      access malaria prevalence data for Burkina Faso.
+
+  itn:
+    hml10: absent               # ITN ownership — absent; ITN module did not exist in 1993
+    hml12: absent               # Slept under ITN — absent
+    hml18: absent               # ITN access — absent
+    notes: >
+      The ITN module did not exist in DHS 1993. All three variables absent.
+      Note also that the HR dataset is absent from this dictionary; even if
+      household-level ITN ownership variables existed, they would not be
+      assessable from this file.
+
+  irs:
+    hv253: absent               # IRS module absent; also HR dataset not present
+    hv253a_z: absent
+    pipeline_behaviour: >
+      IRS variable hv253 is absent, and the HR dataset is not present in the
+      dictionary at all. Graceful-skip fallback will fire for any IRS indicator.
+
+  fever_cascade:
+    h22: present                # Fever in last 2 weeks — DHS 1993, KR dataset
+    h32a_c: present             # h32a/b/c present — DHS 1993, KR dataset
+    h32d_u: absent              # h32d and h32e absent; h32f/i/k/l/t/x/y/z present
+    h32d_note: >
+      BFA 1993 KR has h32a, h32b, h32c (standard public-sector care-seeking)
+      and a range of non-standard h32 variants (h32f, h32g, h32h, h32i, h32k,
+      h32l, h32o, h32p, h32t, h32u, h32x, h32y, h32z). Standard h32d (mobile
+      clinic) and h32e (community health worker) are absent.
+    h47: absent                 # Blood taken for malaria test — absent all years
+    ml1: absent                 # Malaria test result — absent
+    ml13a_h: absent             # Antimalarial treatment variables — absent
+    h37a_h: partial             # h37a only (Fansidar) present; h37b-h absent
+    h37a_note: >
+      Only h37a (Fansidar taken for fever/cough) is present in DHS 1993 KR.
+      h37b through h37h are absent. This is insufficient for ACT or full
+      antimalarial cascade analysis.
+    ml13e: absent               # ACT — absent
+    h37e: absent                # ACT alt — absent (h37e not present)
+    pipeline_behaviour: >
+      Malaria diagnosis variables (h47, ml1) are absent. Antimalarial coverage
+      is limited to h37a (Fansidar) only — ACT, quinine, amodiaquine, and
+      chloroquine variables are missing. The malaria_dx, act_tested, and full
+      antimalarial cascade indicators will not be computable from DHS 1993.
+      Graceful skips required. Use later surveys for any fever/treatment analysis.
+
+  anemia:
+    hw53: absent                # Haemoglobin g/dl — absent (KR dataset has hw variables
+                                # for anthropometry but not hemoglobin)
+    hc56: absent                # Haemoglobin adjusted — absent (PR dataset, no hc56)
+    pipeline_behaviour: >
+      No haemoglobin data in DHS 1993. The KR dataset includes hw1-hw15 (weight,
+      height, anthropometry) but not hw53 (hemoglobin). Anemia indicators will
+      abort — graceful skip needed before running BFA 1993.
+
+  anc:
+    m14_1: absent               # ANC visits — IR dataset absent from dictionary
+    pipeline_behaviour: >
+      The IR (Individual/Women's Recode) dataset is not present in the BFA 1993
+      dictionary at all. ANC indicators require m14_1 from IR and will fail.
+      Graceful skip needed. Note: KR has m14 (not m14_1) present as a birth-
+      history record for last birth — this is not a direct substitute.
+
+  iptp:
+    m49a_1: absent              # Took SP during pregnancy — IR dataset absent
+    ml1_1: absent               # Times took Fansidar — IR dataset absent
+    pipeline_behaviour: >
+      The IR dataset is absent from the dictionary, so IPTp variables cannot be
+      assessed. Additionally, IPTp did not exist as a policy in 1993. Both
+      variables absent. Graceful skip needed.
+
+  epi:
+    h2: present                 # BCG — DHS 1993, KR dataset
+    h7: present                 # DPT3 — DHS 1993, KR dataset
+    h9: present                 # Measles — DHS 1993, KR dataset
+    notes: >
+      All three EPI vaccination variables confirmed in DHS 1993 KR. However,
+      1993 data is not analytically useful for current programme evaluation.
+      EPI estimates from more recent surveys should be used for programme planning.
+
+  u5mr:
+    b5: present                 # Child alive — DHS 1993, KR dataset
+    b7: present                 # Age at death (months, imputed) — DHS 1993, KR dataset;
+                                # n_unique=0, meaning 100% missing
+    b3: present                 # Date of birth (CMC) — DHS 1993, KR dataset
+    b7_note: >
+      b7 (age at death) is present as a column in DHS 1993 KR but has n_unique=0
+      (100% missing). This is expected — most children in the birth history are
+      alive, so b7 is only populated for deaths, which are a small fraction of
+      records. The n_unique=0 may indicate very few or zero deaths recorded, or
+      a data quality issue. Verify b7 completeness against the raw KR recode
+      before running u5mr for DHS 1993.
+
+  smc:
+    hml43: absent               # SMC receipt — absent; DHS 1993 predates SMC rollout
+    ml13g: absent               # SMC alt — absent
+    pipeline_behaviour: >
+      SMC was not a programme in 1993. Neither hml43 nor ml13g is present.
+      Graceful-skip fallback for SMC should handle this correctly.
+
+# -----------------------------------------------------------------------------
+# Action items before running BFA pipeline
+# -----------------------------------------------------------------------------
+action_items:
+  - CRITICAL: This dictionary covers only DHS 1993. Burkina Faso has multiple
+    later surveys (DHS 1998/99, 2003, 2010; MIS 2010, 2014, 2017, 2021) with
+    full malaria modules. Regenerate the dictionary from later surveys before
+    running any BFA malaria pipeline.
+  - CRITICAL: HR and IR datasets are absent from this dictionary. IRS, ANC,
+    IPTp, and household ITN indicators cannot be evaluated or run without them.
+  - Add graceful skip for anemia (hw53/hc56 absent).
+  - Add graceful skip for ANC (m14_1 absent; IR dataset missing).
+  - Add graceful skip for IPTp (m49a_1/ml1_1 absent; IR dataset missing).
+  - Add graceful skip for malaria_dx / act_tested (h47/ml1 absent; h37 only
+    has h37a covering Fansidar).
+  - Add graceful skip for SMC (hml43/ml13g absent).
+  - Add graceful skip for pfpr (hml35/hml32 absent).
+  - Add graceful skip for ITN (hml10/hml12/hml18 absent).
+  - Verify b7 non-missing record count before running u5mr.
