@@ -10,7 +10,7 @@
 #'
 #' @return A data frame of eligible women with columns:
 #'   cluster_id, anc_visits, and binary indicators:
-#'   has_anc1, has_anc4, has_anc8.
+#'   has_anc1, has_anc2, has_anc3, has_anc4, has_anc8.
 #'   If include_survey_vars = TRUE, also: survey_weight, stratum_id.
 #'
 #' @noRd
@@ -96,6 +96,7 @@
   ir <- ir |>
     dplyr::mutate(
       has_anc1 = as.integer(anc_visits >= 1),
+      has_anc2 = as.integer(anc_visits >= 2),
       has_anc3 = as.integer(anc_visits >= 3),
       has_anc4 = as.integer(anc_visits >= 4),
       has_anc8 = as.integer(anc_visits >= 8)

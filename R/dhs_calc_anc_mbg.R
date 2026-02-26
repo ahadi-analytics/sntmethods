@@ -12,11 +12,12 @@
 #' @param indicators Character vector of indicators to calculate:
 #'   \itemize{
 #'     \item "anc_1plus": At least 1 ANC visit
+#'     \item "anc_2plus": At least 2 ANC visits
 #'     \item "anc_3plus": At least 3 ANC visits
 #'     \item "anc_4plus": At least 4 ANC visits
 #'     \item "anc_8plus": At least 8 ANC visits (2016 WHO recommendation)
 #'   }
-#'   Default: c("anc_1plus", "anc_3plus", "anc_4plus").
+#'   Default: c("anc_1plus", "anc_2plus", "anc_3plus", "anc_4plus").
 #' @param birth_window_months Number of months to look back for births.
 #'   Default: 36 (3 years). Max 60 (5 years).
 #' @param survey_vars Named list mapping DHS variable names.
@@ -48,7 +49,7 @@
 calc_anc_mbg <- function(
   dhs_ir,
   gps_data,
-  indicators = c("anc_1plus", "anc_3plus", "anc_4plus"),
+  indicators = c("anc_1plus", "anc_2plus", "anc_3plus", "anc_4plus"),
   birth_window_months = 36,
   survey_vars = list(
     cluster = "v001",
@@ -68,7 +69,7 @@ calc_anc_mbg <- function(
     cli::cli_abort("`gps_data` must be a data.frame or tibble")
   }
 
-  valid_indicators <- c("anc_1plus", "anc_3plus", "anc_4plus", "anc_8plus")
+  valid_indicators <- c("anc_1plus", "anc_2plus", "anc_3plus", "anc_4plus", "anc_8plus")
   invalid <- setdiff(indicators, valid_indicators)
   if (length(invalid) > 0) {
     cli::cli_abort("Invalid indicators: {.val {invalid}}")
@@ -90,6 +91,7 @@ calc_anc_mbg <- function(
 
   indicator_map <- list(
     anc_1plus = "has_anc1",
+    anc_2plus = "has_anc2",
     anc_3plus = "has_anc3",
     anc_4plus = "has_anc4",
     anc_8plus = "has_anc8"

@@ -22,8 +22,8 @@
 #' @param join_nearest Logical; if TRUE, assigns unmatched clusters.
 #'
 #' @return Tibble with ANC estimates including:
-#'   dhs_anc_1plus, dhs_anc_3plus, dhs_anc_4plus, dhs_anc_8plus (each with _low, _upp),
-#'   dhs_n_recent_births.
+#'   dhs_anc_1plus, dhs_anc_2plus, dhs_anc_3plus, dhs_anc_4plus, dhs_anc_8plus
+#'   (each with _low, _upp), dhs_n_recent_births.
 #'
 #' @seealso [calc_anc_mbg()] for cluster-level MBG inputs
 #' @export
@@ -86,7 +86,7 @@ calc_anc_dhs_core <- function(
   }
 
   # Calculate ANC indicators
-  indicator_formula <- ~has_anc1 + has_anc3 + has_anc4 + has_anc8
+  indicator_formula <- ~has_anc1 + has_anc2 + has_anc3 + has_anc4 + has_anc8
 
   if (!is.null(class_var)) {
     group_formula <- stats::as.formula(paste("~", class_var))
@@ -117,6 +117,9 @@ calc_anc_dhs_core <- function(
       has_anc1 = as.numeric(anc_means["has_anc1"]),
       `ci_l.has_anc1` = anc_ci["has_anc1", 1],
       `ci_u.has_anc1` = anc_ci["has_anc1", 2],
+      has_anc2 = as.numeric(anc_means["has_anc2"]),
+      `ci_l.has_anc2` = anc_ci["has_anc2", 1],
+      `ci_u.has_anc2` = anc_ci["has_anc2", 2],
       has_anc3 = as.numeric(anc_means["has_anc3"]),
       `ci_l.has_anc3` = anc_ci["has_anc3", 1],
       `ci_u.has_anc3` = anc_ci["has_anc3", 2],
@@ -135,6 +138,9 @@ calc_anc_dhs_core <- function(
       dhs_anc_1plus = has_anc1,
       dhs_anc_1plus_low = `ci_l.has_anc1`,
       dhs_anc_1plus_upp = `ci_u.has_anc1`,
+      dhs_anc_2plus = has_anc2,
+      dhs_anc_2plus_low = `ci_l.has_anc2`,
+      dhs_anc_2plus_upp = `ci_u.has_anc2`,
       dhs_anc_3plus = has_anc3,
       dhs_anc_3plus_low = `ci_l.has_anc3`,
       dhs_anc_3plus_upp = `ci_u.has_anc3`,
@@ -218,6 +224,9 @@ calc_anc_dhs <- function(
     "dhs_anc_1plus", "ANC 1+ visit coverage", "Couverture CPN 1+ visite", "m14_1", "Women with 1+ ANC visits", "Women with recent birth", "m14_1", "v208", "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "IR module; ANC visit count for most recent birth",
     "dhs_anc_1plus_low", "ANC 1+ - lower 95% CI", "CPN 1+ - IC 95% inferieur", "m14_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
     "dhs_anc_1plus_upp", "ANC 1+ - upper 95% CI", "CPN 1+ - IC 95% superieur", "m14_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_anc_2plus", "ANC 2+ visit coverage", "Couverture CPN 2+ visites", "m14_1", "Women with 2+ ANC visits", "Women with recent birth", "m14_1", "v208", "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "IR module; ANC visit count for most recent birth",
+    "dhs_anc_2plus_low", "ANC 2+ - lower 95% CI", "CPN 2+ - IC 95% inferieur", "m14_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
+    "dhs_anc_2plus_upp", "ANC 2+ - upper 95% CI", "CPN 2+ - IC 95% superieur", "m14_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
     "dhs_anc_3plus", "ANC 3+ visit coverage", "Couverture CPN 3+ visites", "m14_1", "Women with 3+ ANC visits", "Women with recent birth", "m14_1", "v208", "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "IR module; ANC visit count for most recent birth; anc_3plus >= anc_4plus",
     "dhs_anc_3plus_low", "ANC 3+ - lower 95% CI", "CPN 3+ - IC 95% inferieur", "m14_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
     "dhs_anc_3plus_upp", "ANC 3+ - upper 95% CI", "CPN 3+ - IC 95% superieur", "m14_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
