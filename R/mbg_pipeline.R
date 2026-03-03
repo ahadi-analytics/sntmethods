@@ -683,6 +683,26 @@ run_mbg_indicator_pipeline <- function(
       })
     }
 
+    # ---- Compute derived indicators (eff_cm = CSB x ACT) ----
+    if (isTRUE(run_mbg) && length(year_results$raster_paths) > 0) {
+      derived <- .compute_derived_rasters(
+        raster_paths = year_results$raster_paths,
+        primary_sf = if (aggregation_level == "adm3") adm3_aligned else adm2_aligned,
+        output_dirs = output_dirs,
+        country_iso3 = country_iso3,
+        survey_year = current_year,
+        survey_type = current_survey_type,
+        save_rasters = save_rasters
+      )
+      for (name in names(derived$mbg_estimates)) {
+        year_results$mbg_estimates[[name]] <- derived$mbg_estimates[[name]]
+        processed_indicators <- c(processed_indicators, name)
+      }
+      for (name in names(derived$raster_paths)) {
+        year_results$raster_paths[[name]] <- derived$raster_paths[[name]]
+      }
+    }
+
     # ---- Save cluster data for this year ----
     if (length(year_results$cluster_data) > 0) {
       .save_cluster_data(
@@ -1690,6 +1710,144 @@ run_mbg_indicator_pipeline <- function(
 }
 
 
+#' Compute Derived Rasters (Effective Coverage of Case Management)
+#'
+#' Multiplies CSB and ACT raster surfaces to produce effective coverage
+#' of case management indicators. Produces two derived indicators:
+#' \itemize{
+#'   \item \code{eff_cm_any}: CSB(any) x ACT
+#'   \item \code{eff_cm_public}: CSB(public) x ACT
+#' }
+#'
+#' @param raster_paths Named list of raster paths from the indicator loop.
+#'   Each element is a list with \code{mean}, \code{lower}, \code{upper} paths.
+#' @param primary_sf sf object for admin-level extraction.
+#' @param output_dirs List with output directory paths (must include \code{rasters}).
+#' @param country_iso3 Three-letter ISO country code.
+#' @param survey_year Survey year.
+#' @param survey_type Survey type (e.g., "DHS").
+#' @param save_rasters Logical. If TRUE, writes derived rasters to disk.
+#'
+#' @return A list with:
+#'   \itemize{
+#'     \item \code{mbg_estimates}: Named list of admin-level estimate data frames
+#'     \item \code{raster_paths}: Named list of raster path lists for derived indicators
+#'   }
+#'
+#' @noRd
+.compute_derived_rasters <- function(
+  raster_paths,
+  primary_sf,
+  output_dirs,
+  country_iso3,
+  survey_year,
+
+  survey_type,
+  save_rasters = TRUE
+) {
+  result <- list(mbg_estimates = list(), raster_paths = list())
+
+  # Define pairs: derived_name = list(csb_indicator, act_indicator)
+  pairs <- list(
+    eff_cm_any    = list(csb = "csb_any",    act = "act"),
+    eff_cm_public = list(csb = "csb_public", act = "act")
+  )
+
+  for (derived_name in names(pairs)) {
+    pair <- pairs[[derived_name]]
+    csb_key <- pair$csb
+    act_key <- pair$act
+
+    # Check both component indicators exist
+    if (is.null(raster_paths[[csb_key]]) || is.null(raster_paths[[act_key]])) {
+      next
+    }
+
+    # Verify all raster files exist
+    csb_paths <- raster_paths[[csb_key]]
+    act_paths <- raster_paths[[act_key]]
+    all_exist <- all(
+      vapply(csb_paths, fs::file_exists, logical(1)),
+      vapply(act_paths, fs::file_exists, logical(1))
+    )
+    if (!all_exist) next
+
+    cli::cli_alert_info("Computing derived indicator: {.val {derived_name}}")
+
+    tryCatch({
+      # Load component rasters (on 0-1 scale)
+      csb_mean  <- terra::rast(csb_paths$mean)
+      csb_lower <- terra::rast(csb_paths$lower)
+      csb_upper <- terra::rast(csb_paths$upper)
+      act_mean  <- terra::rast(act_paths$mean)
+      act_lower <- terra::rast(act_paths$lower)
+      act_upper <- terra::rast(act_paths$upper)
+
+      # Multiply surfaces (both on 0-1 scale)
+      prod_mean  <- csb_mean  * act_mean
+      prod_lower <- csb_lower * act_lower
+      prod_upper <- csb_upper * act_upper
+
+      # Save derived rasters
+      derived_raster_paths <- NULL
+      if (isTRUE(save_rasters)) {
+        fs::dir_create(output_dirs$rasters)
+        raster_base <- glue::glue(
+          "{tolower(country_iso3)}_{derived_name}_mbg_{tolower(survey_type)}_{survey_year}"
+        )
+        derived_raster_paths <- list(
+          mean  = fs::path(output_dirs$rasters, paste0(raster_base, "_mean.tif")),
+          lower = fs::path(output_dirs$rasters, paste0(raster_base, "_lower.tif")),
+          upper = fs::path(output_dirs$rasters, paste0(raster_base, "_upper.tif"))
+        )
+
+        terra::writeRaster(prod_mean, derived_raster_paths$mean, overwrite = TRUE)
+        terra::writeRaster(prod_lower, derived_raster_paths$lower, overwrite = TRUE)
+        terra::writeRaster(prod_upper, derived_raster_paths$upper, overwrite = TRUE)
+
+        for (rast_type in names(derived_raster_paths)) {
+          rel_path <- .relative_path(derived_raster_paths[[rast_type]])
+          cli::cli_alert_success("Saved derived raster ({rast_type}): {.file {rel_path}}")
+        }
+      }
+
+      # Extract admin-level estimates (multiply by 100 for percentage)
+      mean_col  <- paste0(derived_name, "_mean")
+      lower_col <- paste0(derived_name, "_lower")
+      upper_col <- paste0(derived_name, "_upper")
+
+      adm_estimates <- primary_sf |>
+        sf::st_drop_geometry() |>
+        dplyr::mutate(
+          !!mean_col := terra::extract(
+            prod_mean, primary_sf, fun = mean, na.rm = TRUE
+          )[[2]] * 100,
+          !!lower_col := terra::extract(
+            prod_lower, primary_sf, fun = mean, na.rm = TRUE
+          )[[2]] * 100,
+          !!upper_col := terra::extract(
+            prod_upper, primary_sf, fun = mean, na.rm = TRUE
+          )[[2]] * 100
+        )
+
+      result$mbg_estimates[[derived_name]] <- adm_estimates
+      if (!is.null(derived_raster_paths)) {
+        result$raster_paths[[derived_name]] <- derived_raster_paths
+      }
+
+      cli::cli_alert_success("Derived indicator {.val {derived_name}} complete")
+
+    }, error = function(e) {
+      cli::cli_alert_warning(
+        "Failed to compute {derived_name}: {e$message}"
+      )
+    })
+  }
+
+  result
+}
+
+
 #' Aggregate Cluster Data to Administrative Level
 #'
 #' Spatially joins cluster-level data to admin boundaries and aggregates
@@ -2307,7 +2465,7 @@ run_mbg_indicator_pipeline <- function(
   # Indicator columns (percentages 0-100, or rates like u5mr per 1,000) → 2 decimal places
   proportion_patterns <- c(
     "^pfpr_", "^itn_", "^irs_", "^anc_", "^csb_", "^anemia",
-    "^severe_anemia", "^iptp_", "^epi_", "^u5mr", "^smc_", "^act_",
+    "^severe_anemia", "^iptp_", "^epi_", "^u5mr", "^smc_", "^act_", "^eff_cm",
     "access", "use", "ownership", "coverage", "proportion", "prop_",
     "_low$", "_upp$", "_se$", "^ci_l", "^ci_u",
     "^mean$", "^lower$", "^upper$", "_raw$",

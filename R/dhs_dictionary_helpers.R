@@ -605,6 +605,23 @@
       dhs_var = "hml43/ml13g",
       num = "Children who received SMC in last 30 days", den = "Children under 5",
       dhs_num = "hml43/ml13g", dhs_den = "hw1"
+    ),
+    # Derived: Effective coverage of case management (CSB x ACT)
+    eff_cm_any = list(
+      en = "Effective coverage of case management (any care-seeking)",
+      fr = "Couverture effective de la prise en charge (toute recherche de soins)",
+      dhs_var = "h32 series x ml13e",
+      num = "CSB(any) x P(ACT | antimalarial)",
+      den = "Derived: product of two MBG surfaces",
+      dhs_num = "h32 x ml13e", dhs_den = "h22 x ml13a-h"
+    ),
+    eff_cm_public = list(
+      en = "Effective coverage of case management (public care-seeking)",
+      fr = "Couverture effective de la prise en charge (secteur public)",
+      dhs_var = "h32a-i x ml13e",
+      num = "CSB(public) x P(ACT | antimalarial)",
+      den = "Derived: product of two MBG surfaces",
+      dhs_num = "h32a-i x ml13e", dhs_den = "h22 x ml13a-h"
     )
   )
 
@@ -630,6 +647,24 @@
     meta <- .mbg_indicator_meta(ind)
     na_int <- NA_integer_
 
+    # Derived indicators (eff_cm) get custom notes
+    is_derived <- grepl("^eff_cm", ind)
+    note_mean <- if (is_derived) {
+      "Derived indicator: product of two MBG surfaces (CSB x ACT); population-weighted; x100 for percentage"
+    } else {
+      "MBG model-based estimate; population-weighted using WorldPop rasters; x100 for percentage"
+    }
+    note_lower <- if (is_derived) {
+      "Conservative lower bound: product of component lower bounds (not a proper posterior percentile)"
+    } else {
+      "Lower bound of 95% credible interval from MBG posterior distribution"
+    }
+    note_upper <- if (is_derived) {
+      "Conservative upper bound: product of component upper bounds (not a proper posterior percentile)"
+    } else {
+      "Upper bound of 95% credible interval from MBG posterior distribution"
+    }
+
     tibble::tribble(
       ~variable, ~label_en, ~label_fr, ~dhs_variable,
       ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var,
@@ -642,7 +677,7 @@
       info$dhs_var,
       num, den, dhs_num, dhs_den,
       meta$recode, meta$category, meta$cascade, meta$age, meta$base_unit,
-      "MBG model-based estimate; population-weighted using WorldPop rasters; x100 for percentage",
+      note_mean,
 
       paste0(ind, "_lower"),
       paste0(info$en, " - Lower 95% CI"),
@@ -650,7 +685,7 @@
       info$dhs_var,
       na_chr, na_chr, na_chr, na_chr,
       meta$recode, meta$category, meta$cascade, meta$age, meta$base_unit,
-      "Lower bound of 95% credible interval from MBG posterior distribution",
+      note_lower,
 
       paste0(ind, "_upper"),
       paste0(info$en, " - Upper 95% CI"),
@@ -658,7 +693,7 @@
       info$dhs_var,
       na_chr, na_chr, na_chr, na_chr,
       meta$recode, meta$category, meta$cascade, meta$age, meta$base_unit,
-      "Upper bound of 95% credible interval from MBG posterior distribution",
+      note_upper,
 
       paste0("n_tested_", ind),
       paste0("N tested - ", info$en),
@@ -806,7 +841,10 @@
     irs_coverage      = list(recode = "HR", category = "IRS",           cascade = na_int, age = "all ages"),
     # SMC — KR module
     smc_coverage      = list(recode = "KR", category = "SMC",           cascade = na_int, age = "0-59 months"),
-    smc_receipt       = list(recode = "KR", category = "SMC",           cascade = na_int, age = "0-59 months")
+    smc_receipt       = list(recode = "KR", category = "SMC",           cascade = na_int, age = "0-59 months"),
+    # Derived: Effective coverage of case management
+    eff_cm_any        = list(recode = "KR", category = "Malaria",       cascade = na_int, age = "0-59 months"),
+    eff_cm_public     = list(recode = "KR", category = "Malaria",       cascade = na_int, age = "0-59 months")
   )
 
   m <- meta[[ind]]
