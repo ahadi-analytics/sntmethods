@@ -1,5 +1,5 @@
-# Helper to create a complete mock KR dataset with all cascade variables
-.make_cascade_kr_data <- function(n = 300, seed = 42) {
+# Helper to create a mock KR dataset with CSB + antimalarial + ACT variables
+.make_eff_cm_kr_data <- function(n = 300, seed = 42) {
   set.seed(seed)
 
   kr_data <- data.frame(
@@ -10,27 +10,21 @@
     hw1 = sample(0:59, n, replace = TRUE),
     h22 = sample(c(0, 1), n, replace = TRUE, prob = c(0.65, 0.35)),
     b5 = rep(1, n),
-    h47 = NA_real_,
     ml13a = NA_real_,
     ml13b = NA_real_,
     ml13e = NA_real_,
     stringsAsFactors = FALSE
   )
 
-  # Add h32 sources for CSB (public and private)
+  # Add h32 sources for CSB
   febrile <- kr_data$h22 == 1
   kr_data$h32a <- NA_real_
   kr_data$h32j <- NA_real_
   kr_data$h32a[febrile] <- sample(
-    c(0, 1), sum(febrile), replace = TRUE, prob = c(0.5, 0.5)
+    c(0, 1), sum(febrile), replace = TRUE, prob = c(0.4, 0.6)
   )
   kr_data$h32j[febrile] <- sample(
     c(0, 1), sum(febrile), replace = TRUE, prob = c(0.7, 0.3)
-  )
-
-  # h47: blood taken for malaria test
-  kr_data$h47[febrile] <- sample(
-    c(0, 1), sum(febrile), replace = TRUE, prob = c(0.5, 0.5)
   )
 
   # ml13 antimalarial variables
@@ -41,7 +35,7 @@
     c(0, 1), sum(febrile), replace = TRUE, prob = c(0.9, 0.1)
   )
   kr_data$ml13e[febrile] <- sample(
-    c(0, 1), sum(febrile), replace = TRUE, prob = c(0.75, 0.25)
+    c(0, 1), sum(febrile), replace = TRUE, prob = c(0.65, 0.35)
   )
 
   kr_data
@@ -59,182 +53,147 @@ test_that("calc_case_management_dhs validates input data", {
   )
 })
 
-test_that("calc_case_management_dhs validates step names", {
-  kr_data <- .make_cascade_kr_data()
-
-  expect_error(
-    calc_case_management_dhs(kr_data, steps = c("fever", "invalid_step")),
-    "Invalid cascade steps"
-  )
-})
-
-test_that("calc_case_management_dhs produces complete cascade", {
+test_that("calc_case_management_dhs returns expected columns at national level", {
   skip_if_not_installed("survey")
 
-  kr_data <- .make_cascade_kr_data()
-
-  # Use region_var to get predictable grouping (3 regions)
-  result <- calc_case_management_dhs(kr_data, region_var = "v024")
-
-  expect_type(result, "list")
-  expect_named(result, c("cascade", "data", "dict", "metadata"))
-
-  # Check cascade table structure
-  cascade <- result$cascade
-  expect_s3_class(cascade, "tbl_df")
-  expect_true(all(c("step", "indicator", "estimate", "low", "upp",
-                     "n_eligible", "n_positive") %in% names(cascade)))
-
-  # Should have 5 steps x 3 regions = 15 rows
-  expect_equal(nrow(cascade), 15)
-
-  # Each region should have steps 0-4
-  for (region in unique(cascade$v024)) {
-    region_data <- cascade[cascade$v024 == region, ]
-    expect_equal(region_data$step, 0:4)
-  }
-
-  # Indicators should be in order within each region
-  expect_equal(
-    unique(cascade$indicator),
-    c("fever", "sought_care", "tested", "any_antimalarial", "received_act")
-  )
-
-  # All estimates between 0 and 1
-  expect_true(all(cascade$estimate >= 0 & cascade$estimate <= 1))
-
-  # Check wide-format data
-  expect_s3_class(result$data, "tbl_df")
-
-  # Check metadata
-  expect_equal(result$metadata$analysis_type, "Case Management Cascade")
-  expect_equal(result$metadata$n_steps, 5)
-})
-
-test_that("calc_case_management_dhs cascade has valid proportions", {
-  skip_if_not_installed("survey")
-
-  kr_data <- .make_cascade_kr_data()
+  kr_data <- .make_eff_cm_kr_data()
 
   result <- calc_case_management_dhs(kr_data)
-  cascade <- result$cascade
 
-  # All estimates should be between 0 and 1
-  expect_true(all(cascade$estimate >= 0 & cascade$estimate <= 1))
-  expect_true(all(cascade$low >= 0))
-  expect_true(all(cascade$upp <= 1))
+  expect_s3_class(result, "tbl_df")
+  expect_equal(nrow(result), 1)
 
-  # CI ordering
-  expect_true(all(cascade$low <= cascade$estimate))
-  expect_true(all(cascade$upp >= cascade$estimate))
+  expected_cols <- c(
+    "dhs_eff_cm_any", "dhs_eff_cm_any_low", "dhs_eff_cm_any_upp",
+    "dhs_eff_cm_public", "dhs_eff_cm_public_low", "dhs_eff_cm_public_upp",
+    "dhs_n_fever", "dhs_n_antimalarial"
+  )
+  for (col in expected_cols) {
+    expect_true(col %in% names(result), info = paste("Missing column:", col))
+  }
+})
 
-  # n_positive <= n_eligible
-  expect_true(all(cascade$n_positive <= cascade$n_eligible))
+test_that("calc_case_management_dhs estimates are valid proportions", {
+  skip_if_not_installed("survey")
+
+  kr_data <- .make_eff_cm_kr_data()
+
+  result <- calc_case_management_dhs(kr_data)
+
+  # Estimates between 0 and 1
+  expect_true(result$dhs_eff_cm_any >= 0 && result$dhs_eff_cm_any <= 1)
+  expect_true(result$dhs_eff_cm_public >= 0 && result$dhs_eff_cm_public <= 1)
+
+  # CI ordering: low <= est <= upp
+  expect_true(result$dhs_eff_cm_any_low <= result$dhs_eff_cm_any)
+  expect_true(result$dhs_eff_cm_any_upp >= result$dhs_eff_cm_any)
+  expect_true(result$dhs_eff_cm_public_low <= result$dhs_eff_cm_public)
+  expect_true(result$dhs_eff_cm_public_upp >= result$dhs_eff_cm_public)
+
+  # CIs clamped to [0, 1]
+  expect_true(result$dhs_eff_cm_any_low >= 0)
+  expect_true(result$dhs_eff_cm_any_upp <= 1)
+  expect_true(result$dhs_eff_cm_public_low >= 0)
+  expect_true(result$dhs_eff_cm_public_upp <= 1)
+
+  # Counts are positive integers
+  expect_true(result$dhs_n_fever > 0)
+  expect_true(result$dhs_n_antimalarial > 0)
+  expect_true(result$dhs_n_antimalarial <= result$dhs_n_fever)
 })
 
 test_that("calc_case_management_dhs works with region_var", {
   skip_if_not_installed("survey")
 
-  kr_data <- .make_cascade_kr_data()
+  kr_data <- .make_eff_cm_kr_data()
 
   result <- calc_case_management_dhs(kr_data, region_var = "v024")
-  cascade <- result$cascade
 
-  expect_true("v024" %in% names(cascade))
+  expect_s3_class(result, "tbl_df")
+  expect_true("v024" %in% names(result))
 
-  # Should have 5 steps x 3 regions = 15 rows
-  expect_equal(nrow(cascade), 15)
+  # Should have one row per region
+  expect_equal(nrow(result), 3)
+  expect_setequal(result$v024, c("REGION1", "REGION2", "REGION3"))
 
-  # Each region should have all 5 steps
-  for (region in c("REGION1", "REGION2", "REGION3")) {
-    region_cascade <- cascade[cascade$v024 == region, ]
-    expect_equal(nrow(region_cascade), 5)
-    expect_equal(region_cascade$step, 0:4)
-  }
+  # All estimates valid
+  expect_true(all(result$dhs_eff_cm_any >= 0 & result$dhs_eff_cm_any <= 1))
+  expect_true(all(result$dhs_eff_cm_public >= 0 & result$dhs_eff_cm_public <= 1))
 
-  # Wide data should have 3 rows (one per region)
-  expect_equal(nrow(result$data), 3)
+  # CI ordering for all rows
+  expect_true(all(result$dhs_eff_cm_any_low <= result$dhs_eff_cm_any))
+  expect_true(all(result$dhs_eff_cm_any_upp >= result$dhs_eff_cm_any))
 })
 
-test_that("calc_case_management_dhs supports subset of steps", {
+test_that("calc_case_management_dhs public <= any", {
   skip_if_not_installed("survey")
 
-  kr_data <- .make_cascade_kr_data()
+  kr_data <- .make_eff_cm_kr_data()
 
-  result <- calc_case_management_dhs(
-    kr_data,
-    region_var = "v024",
-    steps = c("fever", "received_act")
-  )
+  result <- calc_case_management_dhs(kr_data)
 
-  cascade <- result$cascade
-  # 2 steps x 3 regions = 6 rows
-  expect_equal(nrow(cascade), 6)
-  expect_equal(unique(cascade$indicator), c("fever", "received_act"))
+  # Public CSB is a subset of any CSB, so eff_cm_public <= eff_cm_any
+  expect_true(result$dhs_eff_cm_public <= result$dhs_eff_cm_any)
 })
 
-test_that("calc_case_management_dhs skips steps with missing variables", {
+test_that("calc_case_management_dhs handles h37e fallback", {
   skip_if_not_installed("survey")
 
   set.seed(42)
   n <- 200
 
-  # Create data without h47 (malaria_dx)
+  # Create data with h37 series instead of ml13
   kr_data <- data.frame(
     v021 = rep(1:20, each = 10),
     v005 = rep(1000000, n),
     v022 = rep(1:4, each = 50),
     hw1 = sample(0:59, n, replace = TRUE),
-    h22 = sample(c(0, 1), n, replace = TRUE, prob = c(0.65, 0.35)),
+    h22 = sample(c(0, 1), n, replace = TRUE, prob = c(0.6, 0.4)),
     b5 = rep(1, n),
-    ml13a = NA_real_,
-    ml13e = NA_real_,
+    h37a = NA_real_,
+    h37e = NA_real_,
     stringsAsFactors = FALSE
   )
 
   febrile <- kr_data$h22 == 1
   kr_data$h32a <- NA_real_
-  kr_data$h32j <- NA_real_
   kr_data$h32a[febrile] <- sample(c(0, 1), sum(febrile), replace = TRUE)
-  kr_data$h32j[febrile] <- sample(c(0, 1), sum(febrile), replace = TRUE)
-  kr_data$ml13a[febrile] <- sample(c(0, 1), sum(febrile), replace = TRUE)
-  kr_data$ml13e[febrile] <- sample(c(0, 1), sum(febrile), replace = TRUE)
+  kr_data$h37a[febrile] <- sample(
+    c(0, 1), sum(febrile), replace = TRUE, prob = c(0.8, 0.2)
+  )
+  kr_data$h37e[febrile] <- sample(
+    c(0, 1), sum(febrile), replace = TRUE, prob = c(0.7, 0.3)
+  )
 
-  # Should succeed but skip the "tested" step
   result <- calc_case_management_dhs(kr_data)
 
-  cascade <- result$cascade
-  # "tested" step should be missing since h47 is not in the data
-  expect_false("tested" %in% cascade$indicator)
-  # Other steps should still be present
-  expect_true("fever" %in% cascade$indicator)
-  expect_true("received_act" %in% cascade$indicator)
+  expect_s3_class(result, "tbl_df")
+  expect_true(!is.na(result$dhs_eff_cm_any))
+  expect_true(result$dhs_n_antimalarial > 0)
 })
 
-test_that("calc_case_management_dhs wide data has correct columns", {
+test_that("calc_case_management_dhs errors with no antimalarial data", {
   skip_if_not_installed("survey")
 
-  kr_data <- .make_cascade_kr_data()
+  set.seed(42)
+  n <- 100
 
-  result <- calc_case_management_dhs(kr_data)
-  wide <- result$data
+  kr_data <- data.frame(
+    v021 = rep(1:10, each = 10),
+    v005 = rep(1000000, n),
+    v022 = rep(1:2, each = 50),
+    hw1 = sample(0:59, n, replace = TRUE),
+    h22 = sample(c(0, 1), n, replace = TRUE, prob = c(0.6, 0.4)),
+    b5 = rep(1, n),
+    stringsAsFactors = FALSE
+  )
 
-  # Should have columns from all steps
+  febrile <- kr_data$h22 == 1
+  kr_data$h32a <- NA_real_
+  kr_data$h32a[febrile] <- sample(c(0, 1), sum(febrile), replace = TRUE)
 
-  expect_true("dhs_fever" %in% names(wide))
-  expect_true("dhs_csb_any" %in% names(wide))
-  expect_true("dhs_malaria_dx" %in% names(wide))
-  expect_true("dhs_antimalarial" %in% names(wide))
-  expect_true("dhs_act" %in% names(wide))
-})
-
-test_that("calc_case_management_dhs dict is valid", {
-  skip_if_not_installed("survey")
-
-  kr_data <- .make_cascade_kr_data()
-
-  result <- calc_case_management_dhs(kr_data)
-
-  expect_s3_class(result$dict, "data.frame")
-  expect_true(nrow(result$dict) > 0)
+  expect_error(
+    calc_case_management_dhs(kr_data),
+    "No antimalarial variables found"
+  )
 })

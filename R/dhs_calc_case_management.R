@@ -1,74 +1,66 @@
-#' Calculate Full Case Management Cascade from DHS Data
+#' Calculate Effective Coverage of Case Management from DHS Data
 #'
-#' Produces the complete WMR case management cascade by calling individual
-#' indicator functions and combining results into a single output.
+#' Computes the effective coverage of case management as the product of two
+#' survey-weighted proportions:
+#' \deqn{Effective\;CM = CSB\;rate \times P(ACT \mid antimalarial)}
 #'
-#' The cascade tracks febrile children through 5 steps:
-#' Fever -> Sought care (CSB) -> Tested (malaria_dx) -> Any antimalarial -> ACT
+#' where CSB rate is the care-seeking rate for fever among children under 5,
+#' and P(ACT | antimalarial) is the proportion receiving ACT among febrile
+#' children who received any antimalarial treatment.
+#'
+#' Two variants are produced:
+#' \itemize{
+#'   \item \code{dhs_eff_cm_any}: using any care-seeking (public or private)
+#'   \item \code{dhs_eff_cm_public}: using public sector care-seeking only
+#' }
 #'
 #' @param dhs_kr DHS children's recode (KR) dataset (data.frame or tibble).
 #' @param survey_vars Named list mapping DHS variable names. Required keys:
 #'   \itemize{
-#'     \item `cluster`: Cluster/PSU ID (default: "v021")
-#'     \item `weight`: Survey weight (default: "v005")
-#'     \item `stratum`: Stratum variable (default: "v022")
-#'     \item `age`: Child's age in months (default: "hw1")
-#'     \item `fever`: Had fever in last 2 weeks (default: "h22")
-#'     \item `alive`: Child survival status (default: "b5")
-#'     \item `malaria_dx`: Blood taken for malaria test (default: "h47")
-#'     \item `act`: Received ACT treatment (default: "ml13e")
-#'     \item `test`: Filter for act_tested denominator (default: "ml13a")
+#'     \item \code{cluster}: Cluster/PSU ID (default: "v021")
+#'     \item \code{weight}: Survey weight (default: "v005")
+#'     \item \code{stratum}: Stratum variable (default: "v022")
+#'     \item \code{age}: Child's age in months (default: "hw1")
+#'     \item \code{fever}: Had fever in last 2 weeks (default: "h22")
+#'     \item \code{alive}: Child survival status (default: "b5")
+#'     \item \code{act}: Received ACT treatment (default: "ml13e")
 #'   }
 #' @param csb_classification Data frame specifying h32 variable to CSB category
-#'   mapping (passed to calc_csb_dhs_core). If NULL, uses WMR default.
-#' @param region_var Optional column name in `dhs_kr` to use as grouping
+#'   mapping (passed to \code{.prepare_csb_data()}). Must have columns
+#'   \code{variable} and \code{csb}. If NULL, uses default WMR classification.
+#' @param region_var Optional column name in \code{dhs_kr} to use as grouping
 #'   variable (e.g., "v024" for region).
-#' @param steps Character vector of cascade steps to include. Default includes
-#'   all steps. Available: "fever", "sought_care", "tested", "any_antimalarial",
-#'   "received_act".
 #'
-#' @return List with:
+#' @return Tibble with effective coverage estimates by grouping level:
 #'   \itemize{
-#'     \item `cascade`: Long-format tibble with one row per step (per group),
-#'       columns: step, indicator, estimate, low, upp, n_eligible, n_positive
-#'     \item `data`: Wide-format tibble with all dhs_* columns merged
-#'     \item `dict`: Data dictionary from sntutils::build_dictionary()
-#'     \item `metadata`: List with survey metadata including cascade info
+#'     \item Grouping variable column (if \code{region_var} provided)
+#'     \item \code{dhs_eff_cm_any}: Effective CM using any care-seeking
+#'     \item \code{dhs_eff_cm_any_low}, \code{dhs_eff_cm_any_upp}: 95\% CI
+#'     \item \code{dhs_eff_cm_public}: Effective CM using public care-seeking
+#'     \item \code{dhs_eff_cm_public_low}, \code{dhs_eff_cm_public_upp}: 95\% CI
+#'     \item \code{dhs_n_fever}: Unweighted count of febrile U5 children
+#'     \item \code{dhs_n_antimalarial}: Unweighted count receiving any antimalarial
 #'   }
 #'
 #' @details
-#' Each step uses its own core function internally:
-#' \itemize{
-#'   \item Step 0 (fever): calc_fever_dhs_core() - denominator: all alive U5
-#'   \item Step 1 (sought_care): calc_csb_dhs_core() - denominator: febrile U5
-#'   \item Step 2 (tested): calc_malaria_dx_dhs_core() - denominator: febrile U5
-#'   \item Step 3 (any_antimalarial): calc_antimalarial_dhs_core() - denominator: febrile U5
-#'   \item Step 4 (received_act): calc_act_dhs() - denominator: febrile U5
-#' }
+#' The effective coverage indicator captures the probability that a febrile
+#' child both seeks care AND receives ACT (given they receive any antimalarial).
+#' CIs are approximated using the delta method assuming independence:
+#' \deqn{SE(A \times B) \approx \sqrt{A^2 \cdot SE(B)^2 + B^2 \cdot SE(A)^2}}
 #'
-#' Steps 2-4 are reported as proportions of FEBRILE children, consistent
-#' with WMR methodology. Step 0 (fever) uses all alive U5 as denominator.
-#'
-#' If a step's required variables are missing from the data, that step is
-#' skipped with a warning rather than failing the entire cascade.
+#' The antimalarial denominator includes any child receiving at least one drug
+#' from the \code{ml13} series (or \code{h37a-h} fallback for older surveys).
+#' ACT is identified by \code{ml13e} (or \code{h37e} fallback).
 #'
 #' @examples
 #' \dontrun{
-#' cascade <- calc_case_management_dhs(
+#' result <- calc_case_management_dhs(
 #'   dhs_kr = kr_data,
 #'   region_var = "v024"
 #' )
-#'
-#' # Long-format cascade table
-#' cascade$cascade
-#'
-#' # Wide-format data with all indicators
-#' cascade$data
 #' }
 #'
-#' @seealso [calc_fever_dhs_core()], [calc_csb_dhs_core()],
-#'   [calc_malaria_dx_dhs_core()], [calc_antimalarial_dhs_core()],
-#'   [calc_act_dhs()]
+#' @seealso [calc_csb_dhs_core()], [calc_act_dhs()]
 #' @export
 calc_case_management_dhs <- function(
   dhs_kr,
@@ -79,13 +71,10 @@ calc_case_management_dhs <- function(
     age = "hw1",
     fever = "h22",
     alive = "b5",
-    malaria_dx = "h47",
-    act = "ml13e",
-    test = "ml13a"
+    act = "ml13e"
   ),
   csb_classification = NULL,
-  region_var = NULL,
-  steps = c("fever", "sought_care", "tested", "any_antimalarial", "received_act")
+  region_var = NULL
 ) {
   # ---- 1. Input validation ----
 
@@ -96,367 +85,397 @@ calc_case_management_dhs <- function(
     cli::cli_abort("`dhs_kr` is empty.")
   }
 
-  valid_steps <- c("fever", "sought_care", "tested", "any_antimalarial", "received_act")
-  invalid_steps <- setdiff(steps, valid_steps)
-  if (length(invalid_steps) > 0) {
+  needed <- unlist(survey_vars[c("cluster", "weight", "stratum", "age", "fever")])
+  missing_vars <- setdiff(needed, names(dhs_kr))
+  if (length(missing_vars) > 0) {
     cli::cli_abort(c(
-      "Invalid cascade steps: {.val {invalid_steps}}",
-      "i" = "Valid steps: {.val {valid_steps}}"
+      "Required variables not found: {.var {missing_vars}}",
+      "i" = "Check your survey_vars mapping"
     ))
   }
 
-  cli::cli_alert_info("Calculating case management cascade ({length(steps)} steps)")
-
-  cascade_rows <- list()
-  wide_results <- list()
-
-  # ---- 2. Step 0: Fever prevalence ----
-
-  if ("fever" %in% steps) {
-    fever_result <- tryCatch({
-      cli::cli_alert_info("Step 0: Fever prevalence")
-      fever_vars <- survey_vars[c("cluster", "weight", "stratum", "age", "fever", "alive")]
-      res <- calc_fever_dhs_core(
-        dhs_kr = dhs_kr,
-        survey_vars = fever_vars,
-        region_var = region_var
-      )
-
-      cascade_rows[["fever"]] <- .build_cascade_row(
-        step = 0L,
-        indicator = "fever",
-        result = res,
-        est_col = "dhs_fever",
-        low_col = "dhs_fever_low",
-        upp_col = "dhs_fever_upp",
-        n_eligible_col = "dhs_n_children",
-        n_positive_col = "dhs_n_fever",
-        region_var = region_var
-      )
-
-      wide_results[["fever"]] <- res
-      cli::cli_alert_success("Step 0: Fever - done")
-      TRUE
-    }, error = function(e) {
-      cli::cli_alert_warning("Step 0 (fever) skipped: {e$message}")
-      FALSE
-    })
-  }
-
-  # ---- 3. Step 1: Sought care (CSB) ----
-
-  if ("sought_care" %in% steps) {
-    csb_result <- tryCatch({
-      cli::cli_alert_info("Step 1: Care-seeking behavior (CSB)")
-      csb_vars <- survey_vars[c("cluster", "weight", "stratum", "age", "fever", "alive")]
-      res <- calc_csb_dhs_core(
-        dhs_kr = dhs_kr,
-        survey_vars = csb_vars,
-        csb_classification = csb_classification,
-        region_var = region_var
-      )
-
-      cascade_rows[["sought_care"]] <- .build_cascade_row(
-        step = 1L,
-        indicator = "sought_care",
-        result = res,
-        est_col = "dhs_csb_any",
-        low_col = "dhs_csb_any_low",
-        upp_col = "dhs_csb_any_upp",
-        n_eligible_col = "dhs_n_fever",
-        n_positive_col = NULL,
-        region_var = region_var
-      )
-
-      wide_results[["csb"]] <- res
-      cli::cli_alert_success("Step 1: CSB - done")
-      TRUE
-    }, error = function(e) {
-      cli::cli_alert_warning("Step 1 (sought_care) skipped: {e$message}")
-      FALSE
-    })
-  }
-
-  # ---- 4. Step 2: Tested (malaria diagnosis) ----
-
-  if ("tested" %in% steps) {
-    dx_result <- tryCatch({
-      cli::cli_alert_info("Step 2: Malaria diagnostic testing")
-      dx_vars <- survey_vars[c("cluster", "weight", "stratum", "age", "fever")]
-      dx_vars$malaria_dx <- survey_vars$malaria_dx
-      res <- calc_malaria_dx_dhs_core(
-        dhs_kr = dhs_kr,
-        survey_vars = dx_vars,
-        region_var = region_var
-      )
-
-      cascade_rows[["tested"]] <- .build_cascade_row(
-        step = 2L,
-        indicator = "tested",
-        result = res,
-        est_col = "dhs_malaria_dx",
-        low_col = "dhs_malaria_dx_low",
-        upp_col = "dhs_malaria_dx_upp",
-        n_eligible_col = "dhs_n_febrile",
-        n_positive_col = "dhs_n_tested",
-        region_var = region_var
-      )
-
-      wide_results[["malaria_dx"]] <- res
-      cli::cli_alert_success("Step 2: Malaria Dx - done")
-      TRUE
-    }, error = function(e) {
-      cli::cli_alert_warning("Step 2 (tested) skipped: {e$message}")
-      FALSE
-    })
-  }
-
-  # ---- 5. Step 3: Any antimalarial ----
-
-  if ("any_antimalarial" %in% steps) {
-    am_result <- tryCatch({
-      cli::cli_alert_info("Step 3: Any antimalarial treatment")
-      am_vars <- survey_vars[c("cluster", "weight", "stratum", "age", "fever")]
-      res <- calc_antimalarial_dhs_core(
-        dhs_kr = dhs_kr,
-        survey_vars = am_vars,
-        region_var = region_var
-      )
-
-      cascade_rows[["any_antimalarial"]] <- .build_cascade_row(
-        step = 3L,
-        indicator = "any_antimalarial",
-        result = res,
-        est_col = "dhs_antimalarial",
-        low_col = "dhs_antimalarial_low",
-        upp_col = "dhs_antimalarial_upp",
-        n_eligible_col = "dhs_n_febrile",
-        n_positive_col = "dhs_n_antimalarial",
-        region_var = region_var
-      )
-
-      wide_results[["antimalarial"]] <- res
-      cli::cli_alert_success("Step 3: Antimalarial - done")
-      TRUE
-    }, error = function(e) {
-      cli::cli_alert_warning("Step 3 (any_antimalarial) skipped: {e$message}")
-      FALSE
-    })
-  }
-
-  # ---- 6. Step 4: Received ACT ----
-
-  if ("received_act" %in% steps) {
-    act_result <- tryCatch({
-      cli::cli_alert_info("Step 4: ACT treatment")
-      act_vars <- survey_vars[c("cluster", "weight", "stratum", "age", "fever")]
-      act_vars$act <- survey_vars$act
-      act_vars$test <- survey_vars$test
-      res <- calc_act_dhs(
-        dhs_kr = dhs_kr,
-        survey_vars = act_vars,
-        region_var = region_var
-      )
-
-      cascade_rows[["received_act"]] <- .build_cascade_row(
-        step = 4L,
-        indicator = "received_act",
-        result = res,
-        est_col = "dhs_act",
-        low_col = "dhs_act_low",
-        upp_col = "dhs_act_upp",
-        n_eligible_col = "dhs_n_fever",
-        n_positive_col = "dhs_n_act",
-        region_var = region_var
-      )
-
-      wide_results[["act"]] <- res
-      cli::cli_alert_success("Step 4: ACT - done")
-      TRUE
-    }, error = function(e) {
-      cli::cli_alert_warning("Step 4 (received_act) skipped: {e$message}")
-      FALSE
-    })
-  }
-
-  # ---- 7. Build cascade table ----
-
-  if (length(cascade_rows) == 0) {
-    cli::cli_abort("No cascade steps could be computed.")
-  }
-
-  cascade <- dplyr::bind_rows(cascade_rows) |>
-    dplyr::arrange(step)
-
-  # ---- 8. Build wide-format summary ----
-
-  wide_data <- .merge_wide_results(wide_results, region_var)
-
-  # ---- 9. Build metadata ----
-
-  metadata <- list(
-    analysis_type = "Case Management Cascade",
-    methodology = "WHO World Malaria Report (WMR)",
-    steps_computed = names(cascade_rows),
-    n_steps = length(cascade_rows),
-    age_group = "0-59 months",
-    processed_date = Sys.Date()
-  )
-
-  if ("v000" %in% names(dhs_kr)) {
-    metadata$country_code <- unique(dhs_kr$v000)[1]
-  }
-  if ("v007" %in% names(dhs_kr)) {
-    metadata$survey_year <- unique(dhs_kr$v007)[1]
-  }
-
-  cli::cli_alert_success(
-    "Case management cascade complete: {length(cascade_rows)} of {length(steps)} steps computed"
-  )
-
-  # Combine labels from all cascade steps
-  cascade_labels <- tibble::tribble(
-    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~dhs_recode, ~indicator_category, ~wmr_cascade_step, ~age_group, ~units, ~notes,
-    "dhs_fever", "Fever prevalence in children under 5", "Prevalence de la fievre chez les enfants de moins de 5 ans", "h22", "Children with fever", "Alive children 0-59 months", "h22", "b5, hw1", "KR", "Malaria", 0L, "0-59 months", "proportion (0-1)", "Step 0 of WMR cascade",
-    "dhs_fever_low", "Fever - lower 95% CI", "Fievre - IC 95% inferieur", "h22", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 0L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_fever_upp", "Fever - upper 95% CI", "Fievre - IC 95% superieur", "h22", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 0L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_n_children", "Number of children under 5 (denominator)", "Nombre d'enfants de moins de 5 ans (denominateur)", "b5, hw1", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 0L, "0-59 months", "count", "Unweighted count",
-    "dhs_n_fever", "Number with fever (numerator)", "Nombre avec fievre (numerateur)", "h22", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 0L, "0-59 months", "count", "Unweighted count",
-    "dhs_csb_any", "Any care-seeking", "Recherche de soins (tout type)", "h32 series", "Febrile children seeking care at any", "Febrile children under 5", "h32 series", "h22", "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Step 1 of WMR cascade",
-    "dhs_csb_any_low", "Any care-seeking - lower 95% CI", "Recherche de soins - IC 95% inferieur", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_csb_any_upp", "Any care-seeking - upper 95% CI", "Recherche de soins - IC 95% superieur", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_csb_public", "Public sector care-seeking", "Recherche de soins au secteur public", "h32a-i", "Febrile children seeking care at public", "Febrile children under 5", "h32 series", "h22", "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Step 1 of WMR cascade; includes CHW",
-    "dhs_csb_public_low", "Public CSB - lower 95% CI", "CSB public - IC 95% inferieur", "h32a-i", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_csb_public_upp", "Public CSB - upper 95% CI", "CSB public - IC 95% superieur", "h32a-i", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_csb_private", "Private sector care-seeking", "Recherche de soins au secteur prive", "h32j-u", "Febrile children seeking care at private", "Febrile children under 5", "h32 series", "h22", "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Step 1 of WMR cascade",
-    "dhs_csb_private_low", "Private CSB - lower 95% CI", "CSB prive - IC 95% inferieur", "h32j-u", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_csb_private_upp", "Private CSB - upper 95% CI", "CSB prive - IC 95% superieur", "h32j-u", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_csb_trained", "Trained provider care-seeking", "Recherche de soins aupres d'un prestataire forme", "h32 series", "Febrile children seeking care at trained", "Febrile children under 5", "h32 series", "h22", "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Step 1 of WMR cascade",
-    "dhs_csb_trained_low", "Trained provider CSB - lower 95% CI", "CSB prestataire forme - IC 95% inferieur", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_csb_trained_upp", "Trained provider CSB - upper 95% CI", "CSB prestataire forme - IC 95% superieur", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_csb_none", "No care-seeking", "Pas de recherche de soins", "h32 series", "Febrile children seeking care at none", "Febrile children under 5", "h32 series", "h22", "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Step 1 of WMR cascade; complement of dhs_csb_any",
-    "dhs_csb_none_low", "No care-seeking - lower 95% CI", "Pas de soins - IC 95% inferieur", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_csb_none_upp", "No care-seeking - upper 95% CI", "Pas de soins - IC 95% superieur", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_malaria_dx", "Malaria diagnostic testing prevalence", "Prevalence du diagnostic du paludisme", "h47 (or ml1)", "Febrile children with blood taken", "Febrile children under 5", "h47/ml1", "h22", "KR", "Malaria", 2L, "0-59 months", "proportion (0-1)", "Step 2 of WMR cascade; h47 preferred, ml1 fallback",
-    "dhs_malaria_dx_low", "Malaria Dx - lower 95% CI", "Diagnostic paludisme - IC 95% inferieur", "h47 (or ml1)", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 2L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_malaria_dx_upp", "Malaria Dx - upper 95% CI", "Diagnostic paludisme - IC 95% superieur", "h47 (or ml1)", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 2L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_n_febrile", "Number of febrile children (denominator)", "Nombre d'enfants febriles (denominateur)", "h22", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", NA_integer_, "0-59 months", "count", "Unweighted count",
-    "dhs_n_tested", "Number tested for malaria", "Nombre testes pour le paludisme", "h47 (or ml1)", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 2L, "0-59 months", "count", "Unweighted count",
-    "dhs_antimalarial", "Any antimalarial treatment", "Traitement antipaludique (tout type)", "ml13a-ml13h", "Febrile children with antimalarial", "Febrile children under 5", "ml13a-ml13h", "h22", "KR", "Malaria", 3L, "0-59 months", "proportion (0-1)", "Step 3 of WMR cascade",
-    "dhs_antimalarial_low", "Antimalarial - lower 95% CI", "Antipaludique - IC 95% inferieur", "ml13a-ml13h", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 3L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_antimalarial_upp", "Antimalarial - upper 95% CI", "Antipaludique - IC 95% superieur", "ml13a-ml13h", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 3L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_n_antimalarial", "Number receiving antimalarial", "Nombre recevant un antipaludique", "ml13a-h", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 3L, "0-59 months", "count", "Unweighted count",
-    "dhs_act", "ACT treatment coverage", "Couverture de traitement par CTA", "ml13e", "Febrile children with ACT", "Febrile children under 5", "ml13e", "h22", "KR", "Malaria", 4L, "0-59 months", "proportion (0-1)", "Step 4 of WMR cascade; ACT-specific treatment",
-    "dhs_act_low", "ACT - lower 95% CI", "CTA - IC 95% inferieur", "ml13e", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 4L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_act_upp", "ACT - upper 95% CI", "CTA - IC 95% superieur", "ml13e", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 4L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_n_act", "Number receiving ACT", "Nombre recevant un CTA", "ml13e", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 4L, "0-59 months", "count", "Unweighted count",
-    "dhs_act_tested", "ACT among test-positive", "CTA parmi les testes positifs", "ml13e", "Test-positive children with ACT", "Test-positive febrile children", "ml13e", "h47/ml1", "KR", "Malaria", 4L, "0-59 months", "proportion (0-1)", "Step 4 secondary; denominator is test-positive subset",
-    "dhs_act_tested_low", "ACT tested - lower 95% CI", "CTA testes - IC 95% inferieur", "ml13e", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 4L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_act_tested_upp", "ACT tested - upper 95% CI", "CTA testes - IC 95% superieur", "ml13e", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 4L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_n_tested_act", "Number test-positive receiving ACT", "Nombre de positifs recevant un CTA", "ml13e", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 4L, "0-59 months", "count", "Unweighted count"
-  )
-
-  dict <- sntutils::build_dictionary(wide_data)
-  dict <- .enrich_dhs_dictionary(dict, cascade_labels)
-
-  list(
-    cascade = tibble::as_tibble(cascade),
-    data = wide_data,
-    dict = dict,
-    metadata = metadata
-  )
-}
-
-
-#' Build a single cascade row from indicator results
-#'
-#' @param step Integer step number.
-#' @param indicator Character name of the indicator.
-#' @param result Tibble with indicator results.
-#' @param est_col Column name for the estimate.
-#' @param low_col Column name for the lower CI.
-#' @param upp_col Column name for the upper CI.
-#' @param n_eligible_col Column name for denominator count.
-#' @param n_positive_col Column name for numerator count (can be NULL).
-#' @param region_var Region variable name (or NULL).
-#'
-#' @return Tibble with cascade row(s).
-#' @noRd
-.build_cascade_row <- function(
-  step, indicator, result,
-  est_col, low_col, upp_col,
-  n_eligible_col, n_positive_col,
-  region_var = NULL
-) {
-  rows <- tibble::tibble(
-    step = step,
-    indicator = indicator,
-    estimate = result[[est_col]],
-    low = result[[low_col]],
-    upp = result[[upp_col]],
-    n_eligible = result[[n_eligible_col]]
-  )
-
-  if (!is.null(n_positive_col) && n_positive_col %in% names(result)) {
-    rows$n_positive <- result[[n_positive_col]]
-  } else {
-    rows$n_positive <- as.integer(round(rows$estimate * rows$n_eligible))
-  }
-
-  # Add region if grouped
-  if (!is.null(region_var) && region_var %in% names(result)) {
-    rows <- dplyr::bind_cols(
-      result[, region_var, drop = FALSE],
-      rows
-    )
-  }
-
-  rows
-}
-
-
-#' Merge wide-format results from individual cascade steps
-#'
-#' @param wide_results Named list of tibbles from each step.
-#' @param region_var Region variable name (or NULL).
-#'
-#' @return Single merged tibble.
-#' @noRd
-.merge_wide_results <- function(wide_results, region_var = NULL) {
-  if (length(wide_results) == 0) {
-    return(tibble::tibble())
-  }
-
-  # Start with the first result
-  merged <- wide_results[[1]]
-
-  if (length(wide_results) > 1) {
-    for (i in 2:length(wide_results)) {
-      next_result <- wide_results[[i]]
-
-      if (!is.null(region_var) && region_var %in% names(merged) &&
-          region_var %in% names(next_result)) {
-        # Join on region_var, keeping only new columns
-        existing_cols <- names(merged)
-        new_cols <- setdiff(names(next_result), existing_cols)
-        new_cols <- c(region_var, new_cols)
-        merged <- merged |>
-          dplyr::left_join(
-            next_result[, new_cols, drop = FALSE],
-            by = region_var
-          )
-      } else {
-        # National level - just bind columns (same single row)
-        new_cols <- setdiff(names(next_result), names(merged))
-        if (length(new_cols) > 0) {
-          merged <- dplyr::bind_cols(
-            merged,
-            next_result[, new_cols, drop = FALSE]
-          )
-        }
-      }
+  if (!is.null(region_var)) {
+    if (!is.character(region_var) || length(region_var) != 1) {
+      cli::cli_abort("`region_var` must be a single character string.")
+    }
+    if (!region_var %in% names(dhs_kr)) {
+      cli::cli_abort(c(
+        "Column {.var {region_var}} not found in `dhs_kr`.",
+        "i" = "Available columns: {.var {head(names(dhs_kr), 10)}}..."
+      ))
     }
   }
 
-  tibble::as_tibble(merged)
+  # ---- 2. Prepare CSB data (febrile U5 with care-seeking indicators) ----
+
+  csb_vars <- survey_vars[c("cluster", "weight", "stratum", "age", "fever", "alive")]
+  kr_fever <- .prepare_csb_data(
+    dhs_kr = dhs_kr,
+    survey_vars = csb_vars,
+    csb_classification = csb_classification,
+    include_survey_vars = TRUE
+  )
+
+  # Preserve region_var from original data
+  if (!is.null(region_var)) {
+    # Match rows back via cluster_id + row position
+    kr_fever[[region_var]] <- dhs_kr[[region_var]][
+      which(
+        dhs_kr[[survey_vars$fever]] == 1 &
+        dhs_kr[[survey_vars$age]] >= 0 &
+        dhs_kr[[survey_vars$age]] <= 59
+      )
+    ]
+  }
+
+  # ---- 3. Add antimalarial variable ----
+
+  # Detect ml13 series or h37 fallback
+  ml13_vars <- grep("^ml13[a-z]+$", names(dhs_kr), value = TRUE)
+  h37_vars <- grep("^h37[a-h]$", names(dhs_kr), value = TRUE)
+
+  if (length(ml13_vars) > 0) {
+    drug_series <- ml13_vars
+    cli::cli_alert_info("Detected {length(ml13_vars)} ml13 antimalarial variables")
+  } else if (length(h37_vars) > 0) {
+    drug_series <- h37_vars
+    cli::cli_alert_info(
+      "ml13 series not found; using {length(h37_vars)} h37 fallback variables"
+    )
+  } else {
+    cli::cli_abort(
+      "No antimalarial variables found (ml13* or h37a-h)."
+    )
+  }
+
+  # Get the drug columns from the original data, aligned to febrile U5 rows
+  febrile_idx <- which(
+    dhs_kr[[survey_vars$fever]] == 1 &
+    dhs_kr[[survey_vars$age]] >= 0 &
+    dhs_kr[[survey_vars$age]] <= 59
+  )
+
+  for (dvar in drug_series) {
+    kr_fever[[dvar]] <- haven::zap_labels(dhs_kr[[dvar]][febrile_idx])
+    kr_fever[[dvar]] <- as.vector(kr_fever[[dvar]])
+  }
+
+  # Create received_antimalarial: 1 if any drug variable == 1
+  kr_fever$received_antimalarial <- as.integer(
+    rowSums(kr_fever[, drug_series, drop = FALSE] == 1, na.rm = TRUE) > 0
+  )
+
+  n_am <- sum(kr_fever$received_antimalarial == 1, na.rm = TRUE)
+  cli::cli_alert_info(
+    "{format(n_am, big.mark = ',')} of {format(nrow(kr_fever), big.mark = ',')} febrile children received any antimalarial"
+  )
+
+  if (n_am == 0) {
+    cli::cli_abort("No children received any antimalarial treatment.")
+  }
+
+  # ---- 4. Add ACT variable ----
+
+  act_var <- survey_vars$act %||% "ml13e"
+  if (act_var %in% names(dhs_kr)) {
+    kr_fever$received_act <- as.integer(
+      haven::zap_labels(dhs_kr[[act_var]][febrile_idx])
+    )
+    kr_fever$received_act <- as.vector(kr_fever$received_act)
+  } else if ("h37e" %in% names(dhs_kr)) {
+    cli::cli_alert_info(
+      "ACT variable {.var {act_var}} not found; using {.var h37e} fallback"
+    )
+    kr_fever$received_act <- as.integer(
+      haven::zap_labels(dhs_kr[["h37e"]][febrile_idx])
+    )
+    kr_fever$received_act <- as.vector(kr_fever$received_act)
+  } else {
+    cli::cli_abort(c(
+      "ACT variable {.var {act_var}} not found (also tried {.var h37e}).",
+      "i" = "Check your survey_vars$act mapping"
+    ))
+  }
+
+  # Binary indicator for ACT among antimalarial recipients
+  kr_fever$has_act <- dplyr::if_else(
+    kr_fever$received_act == 1, 1, 0,
+    missing = NA_real_
+  )
+
+  # ---- 5. Set up survey design ----
+
+  use_strata <- dplyr::n_distinct(kr_fever$stratum_id) > 1
+
+  if (use_strata) {
+    survey_options <- options(survey.lonely.psu = "certainty")
+    on.exit(options(survey_options), add = TRUE)
+
+    des <- survey::svydesign(
+      ids = ~cluster_id,
+      strata = ~stratum_id,
+      weights = ~survey_weight,
+      data = kr_fever,
+      nest = TRUE
+    )
+  } else {
+    des <- survey::svydesign(
+      ids = ~cluster_id,
+      weights = ~survey_weight,
+      data = kr_fever,
+      nest = TRUE
+    )
+  }
+
+  # ---- 6. Compute estimates ----
+
+  if (!is.null(region_var)) {
+    result <- .compute_eff_cm_grouped(
+      kr_fever = kr_fever,
+      des = des,
+      region_var = region_var
+    )
+  } else {
+    result <- .compute_eff_cm_national(
+      kr_fever = kr_fever,
+      des = des
+    )
+  }
+
+  # ---- 7. Format output ----
+
+  result <- result |>
+    dplyr::mutate(
+      dplyr::across(dplyr::matches("^dhs_eff_cm_"), ~ round(.x, 4)),
+      dplyr::across(dplyr::matches("_low$"), ~ pmax(0, .)),
+      dplyr::across(dplyr::matches("_upp$"), ~ pmin(1, .))
+    )
+
+  count_cols <- intersect(
+    c("dhs_n_fever", "dhs_n_antimalarial"),
+    names(result)
+  )
+  result <- result |>
+    dplyr::mutate(
+      dplyr::across(dplyr::all_of(count_cols), ~ as.integer(round(.x)))
+    )
+
+  cli::cli_alert_success("Effective coverage of case management computed")
+
+  tibble::as_tibble(result)
+}
+
+
+#' Compute effective CM at national level (no grouping)
+#'
+#' @param kr_fever Prepared febrile U5 dataset with CSB, antimalarial, ACT cols.
+#' @param des Survey design object for all febrile U5.
+#' @return Single-row tibble with effective CM estimates.
+#' @noRd
+.compute_eff_cm_national <- function(kr_fever, des) {
+  # CSB rates among all febrile U5
+  csb_means <- survey::svymean(
+    ~ csb_any_treatment + csb_public,
+    design = des,
+    na.rm = TRUE
+  )
+
+  csb_se <- sqrt(diag(stats::vcov(csb_means)))
+  csb_any_est <- as.numeric(csb_means["csb_any_treatment"])
+  csb_any_se <- as.numeric(csb_se["csb_any_treatment"])
+  csb_pub_est <- as.numeric(csb_means["csb_public"])
+  csb_pub_se <- as.numeric(csb_se["csb_public"])
+
+  # ACT rate among antimalarial recipients
+  act_am <- .compute_act_among_am(kr_fever)
+
+  # Compute products with delta method CIs
+  eff_any <- .delta_product(csb_any_est, csb_any_se, act_am$est, act_am$se)
+  eff_pub <- .delta_product(csb_pub_est, csb_pub_se, act_am$est, act_am$se)
+
+  tibble::tibble(
+    dhs_eff_cm_any = eff_any$est,
+    dhs_eff_cm_any_low = eff_any$low,
+    dhs_eff_cm_any_upp = eff_any$upp,
+    dhs_eff_cm_public = eff_pub$est,
+    dhs_eff_cm_public_low = eff_pub$low,
+    dhs_eff_cm_public_upp = eff_pub$upp,
+    dhs_n_fever = nrow(kr_fever),
+    dhs_n_antimalarial = sum(kr_fever$received_antimalarial == 1, na.rm = TRUE)
+  )
+}
+
+
+#' Compute effective CM by region group
+#'
+#' @param kr_fever Prepared febrile U5 dataset.
+#' @param des Survey design object for all febrile U5.
+#' @param region_var Character name of grouping column.
+#' @return Tibble with one row per region.
+#' @noRd
+.compute_eff_cm_grouped <- function(kr_fever, des, region_var) {
+  group_formula <- stats::as.formula(paste("~", region_var))
+
+  # CSB rates by group
+  csb_by <- tryCatch({
+    survey::svyby(
+      ~ csb_any_treatment + csb_public,
+      by = group_formula,
+      design = des,
+      FUN = survey::svymean,
+      vartype = c("se"),
+      na.rm = TRUE,
+      keep.names = FALSE
+    ) |>
+      tibble::as_tibble()
+  }, error = function(e) {
+    if (grepl("has only one PSU", e$message)) {
+      cli::cli_alert_warning("Single PSU issue; trying without strata")
+      des_ns <- survey::svydesign(
+        ids = ~cluster_id, weights = ~survey_weight,
+        data = kr_fever, nest = TRUE
+      )
+      survey::svyby(
+        ~ csb_any_treatment + csb_public,
+        by = group_formula,
+        design = des_ns,
+        FUN = survey::svymean,
+        vartype = c("se"),
+        na.rm = TRUE,
+        keep.names = FALSE
+      ) |>
+        tibble::as_tibble()
+    } else {
+      stop(e)
+    }
+  })
+
+  # Sample sizes by group
+  sample_sizes <- kr_fever |>
+    dplyr::group_by(.data[[region_var]]) |>
+    dplyr::summarise(
+      dhs_n_fever = dplyr::n(),
+      dhs_n_antimalarial = sum(received_antimalarial == 1, na.rm = TRUE),
+      .groups = "drop"
+    )
+
+  # ACT among antimalarial recipients, by group
+  groups <- unique(kr_fever[[region_var]])
+  group_results <- list()
+
+  for (grp in groups) {
+    kr_grp <- kr_fever[kr_fever[[region_var]] == grp, ]
+    act_am <- .compute_act_among_am(kr_grp)
+
+    # Get CSB estimates for this group
+    grp_row <- csb_by[csb_by[[region_var]] == grp, ]
+    csb_any_est <- grp_row$csb_any_treatment
+    csb_any_se <- grp_row$`se.csb_any_treatment`
+    csb_pub_est <- grp_row$csb_public
+    csb_pub_se <- grp_row$`se.csb_public`
+
+    eff_any <- .delta_product(csb_any_est, csb_any_se, act_am$est, act_am$se)
+    eff_pub <- .delta_product(csb_pub_est, csb_pub_se, act_am$est, act_am$se)
+
+    group_results[[as.character(grp)]] <- tibble::tibble(
+      !!region_var := grp,
+      dhs_eff_cm_any = eff_any$est,
+      dhs_eff_cm_any_low = eff_any$low,
+      dhs_eff_cm_any_upp = eff_any$upp,
+      dhs_eff_cm_public = eff_pub$est,
+      dhs_eff_cm_public_low = eff_pub$low,
+      dhs_eff_cm_public_upp = eff_pub$upp
+    )
+  }
+
+  result <- dplyr::bind_rows(group_results) |>
+    dplyr::left_join(sample_sizes, by = region_var)
+
+  result
+}
+
+
+#' Compute ACT rate among antimalarial recipients
+#'
+#' Builds a survey design on the subset of febrile children who received
+#' any antimalarial and estimates the proportion who received ACT.
+#'
+#' @param kr_data Data frame with received_antimalarial, has_act, cluster_id,
+#'   stratum_id, survey_weight columns.
+#' @return List with est (point estimate) and se (standard error).
+#' @noRd
+.compute_act_among_am <- function(kr_data) {
+  kr_am <- kr_data |>
+    dplyr::filter(received_antimalarial == 1, !is.na(has_act))
+
+  if (nrow(kr_am) == 0 || dplyr::n_distinct(kr_am$cluster_id) < 2) {
+    cli::cli_alert_warning(
+      "Too few antimalarial recipients for ACT rate estimation"
+    )
+    return(list(est = NA_real_, se = NA_real_))
+  }
+
+  use_strata_am <- dplyr::n_distinct(kr_am$stratum_id) > 1
+
+  if (use_strata_am) {
+    des_am <- survey::svydesign(
+      ids = ~cluster_id, strata = ~stratum_id,
+      weights = ~survey_weight, data = kr_am, nest = TRUE
+    )
+  } else {
+    des_am <- survey::svydesign(
+      ids = ~cluster_id, weights = ~survey_weight,
+      data = kr_am, nest = TRUE
+    )
+  }
+
+  act_mean <- tryCatch(
+    survey::svymean(~has_act, design = des_am, na.rm = TRUE),
+    error = function(e) {
+      if (grepl("has only one PSU", e$message)) {
+        des_ns <- survey::svydesign(
+          ids = ~cluster_id, weights = ~survey_weight,
+          data = kr_am, nest = TRUE
+        )
+        survey::svymean(~has_act, design = des_ns, na.rm = TRUE)
+      } else {
+        stop(e)
+      }
+    }
+  )
+
+  act_se <- sqrt(diag(stats::vcov(act_mean)))
+  list(
+    est = as.numeric(act_mean["has_act"]),
+    se = as.numeric(act_se["has_act"])
+  )
+}
+
+
+#' Delta method for product of two independent proportions
+#'
+#' Computes point estimate and approximate 95% CI for A * B using:
+#' SE(A*B) = sqrt(A^2 * SE(B)^2 + B^2 * SE(A)^2)
+#'
+#' @param a_est Point estimate of A.
+#' @param a_se Standard error of A.
+#' @param b_est Point estimate of B.
+#' @param b_se Standard error of B.
+#' @return List with est, se, low, upp.
+#' @noRd
+.delta_product <- function(a_est, a_se, b_est, b_se) {
+  if (is.na(a_est) || is.na(b_est)) {
+    return(list(est = NA_real_, se = NA_real_,
+                low = NA_real_, upp = NA_real_))
+  }
+
+  product <- a_est * b_est
+  se <- sqrt(a_est^2 * b_se^2 + b_est^2 * a_se^2)
+
+  list(
+    est = product,
+    se = se,
+    low = product - 1.96 * se,
+    upp = product + 1.96 * se
+  )
 }

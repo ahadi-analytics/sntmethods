@@ -77,6 +77,8 @@ NULL
 #'     \item "smc": SMC receipt
 #'     \item "fever": Fever prevalence (U5)
 #'     \item "antimalarial": Any antimalarial treatment (febrile U5)
+#'     \item "eff_cm": Effective coverage of case management (derived;
+#'       auto-adds "csb" and "act" as dependencies)
 #'   }
 #' @param aggregation_level Primary aggregation level for MBG outputs. One of:
 #'   \itemize{
@@ -245,7 +247,9 @@ run_mbg_indicator_pipeline <- function(
     "u5mr", "smc", "fever", "antimalarial",
     # ITN sub-indicators (selectable individually for faster pipelines)
     "itn_ownership", "itn_access", "itn_use_all", "itn_use_u5",
-    "itn_use_pregnant", "itn_use_if_access"
+    "itn_use_pregnant", "itn_use_if_access",
+    # Derived indicators (auto-expand to required dependencies)
+    "eff_cm"
   )
   invalid_indicators <- setdiff(indicators, valid_indicators)
   if (length(invalid_indicators) > 0) {
@@ -253,6 +257,18 @@ run_mbg_indicator_pipeline <- function(
       "Invalid indicator(s): {.val {invalid_indicators}}",
       "i" = "Valid indicators: {.val {valid_indicators}}"
     ))
+  }
+
+  # Expand derived indicators to include their dependencies
+  if ("eff_cm" %in% indicators) {
+    deps <- c("csb", "act")
+    new_deps <- setdiff(deps, indicators)
+    if (length(new_deps) > 0) {
+      cli::cli_alert_info(
+        "Adding {.val {new_deps}} (required by {.val eff_cm})"
+      )
+      indicators <- unique(c(indicators, new_deps))
+    }
   }
 
   # Validate DHS parquet path exists
@@ -623,7 +639,11 @@ run_mbg_indicator_pipeline <- function(
     skipped_indicators <- list()
     processed_indicators <- character()
 
-    for (ind_category in indicators) {
+    # Derived indicators are computed after primary processing
+    derived_indicators <- c("eff_cm")
+    primary_indicators <- setdiff(indicators, derived_indicators)
+
+    for (ind_category in primary_indicators) {
       cli::cli_h3("Processing: {ind_category}")
 
       tryCatch({
