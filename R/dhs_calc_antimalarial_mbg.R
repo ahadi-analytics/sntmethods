@@ -12,6 +12,8 @@
 #' @param indicators Character vector of indicators to calculate:
 #'   \itemize{
 #'     \item "antimalarial": Received any antimalarial among febrile U5
+#'     \item "antimalarial_public": Received any antimalarial among febrile U5
+#'       who sought public care
 #'   }
 #'   Default: "antimalarial".
 #' @param survey_vars Named list mapping DHS variable names:
@@ -66,7 +68,7 @@ calc_antimalarial_mbg <- function(
     cli::cli_abort("`gps_data` must be a data.frame or tibble")
   }
 
-  valid_indicators <- "antimalarial"
+  valid_indicators <- c("antimalarial", "antimalarial_public")
   invalid <- setdiff(indicators, valid_indicators)
   if (length(invalid) > 0) {
     cli::cli_abort("Invalid indicators: {.val {invalid}}")
@@ -113,6 +115,42 @@ calc_antimalarial_mbg <- function(
 
     if (!is.null(dt)) {
       results[["antimalarial"]] <- dt
+    }
+  }
+
+  if ("antimalarial_public" %in% indicators) {
+    # Apply CSB classification to identify public care seekers
+    kr_fever_csb <- tryCatch(
+      .classify_csb_from_h32(kr_fever),
+      error = function(e) {
+        cli::cli_alert_warning(
+          "Cannot compute antimalarial_public: {conditionMessage(e)}"
+        )
+        NULL
+      }
+    )
+
+    if (!is.null(kr_fever_csb)) {
+      am_public_data <- kr_fever_csb |>
+        dplyr::filter(csb_public == 1, !is.na(has_antimalarial)) |>
+        dplyr::mutate(am_binary = as.integer(has_antimalarial == 1))
+
+      if (nrow(am_public_data) > 0) {
+        dt <- .aggregate_to_mbg_clusters(
+          individual_data = am_public_data,
+          indicator_col = "am_binary",
+          gps_clean = gps_clean,
+          result_name = "antimalarial_public"
+        )
+
+        if (!is.null(dt)) {
+          results[["antimalarial_public"]] <- dt
+        }
+      } else {
+        cli::cli_alert_warning(
+          "No febrile children who sought public care - skipping antimalarial_public"
+        )
+      }
     }
   }
 

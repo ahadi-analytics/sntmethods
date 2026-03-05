@@ -314,6 +314,63 @@ test_that("calc_act_mbg with dhs_pr = NULL for febrile_rdt_pos skips that indica
 })
 
 
+# ---- act_public indicator ----
+
+# Helper: mock KR data with h32 columns for CSB classification
+.mock_kr_act_with_csb <- function(n = 200, n_clusters = 20, seed = 42) {
+  set.seed(seed)
+  kr <- data.frame(
+    v001 = rep(seq_len(n_clusters), length.out = n),
+    hw1 = sample(0:59, n, replace = TRUE),
+    h22 = sample(c(0, 1), n, replace = TRUE, prob = c(0.6, 0.4)),
+    ml13e = sample(c(0, 1, NA), n, replace = TRUE, prob = c(0.4, 0.3, 0.3)),
+    ml13a = sample(c(0, 1, NA), n, replace = TRUE, prob = c(0.5, 0.3, 0.2)),
+    h32a = NA_real_,
+    h32j = NA_real_,
+    stringsAsFactors = FALSE
+  )
+  febrile <- kr$h22 == 1
+  # h32a = public (60% of febrile), h32j = private formal (30%)
+  kr$h32a[febrile] <- sample(c(0, 1), sum(febrile), replace = TRUE, prob = c(0.4, 0.6))
+  kr$h32j[febrile] <- sample(c(0, 1), sum(febrile), replace = TRUE, prob = c(0.7, 0.3))
+  kr
+}
+
+test_that("calc_act_mbg computes act_public with h32 variables", {
+  kr <- .mock_kr_act_with_csb()
+  gps <- .mock_gps()
+
+  result <- calc_act_mbg(kr, gps, indicators = c("act", "act_public"))
+
+  expect_type(result, "list")
+  expect_true("act" %in% names(result))
+  expect_true("act_public" %in% names(result))
+
+  dt <- result[["act_public"]]
+  expect_s3_class(dt, "tbl_df")
+  expect_true(all(c("cluster_id", "indicator", "samplesize", "x", "y") %in% names(dt)))
+
+  # Numerator <= denominator
+  expect_true(all(dt$indicator <= dt$samplesize))
+
+  # Public sample size <= overall sample size (public is a subset)
+  act_dt <- result[["act"]]
+  expect_true(sum(dt$samplesize) <= sum(act_dt$samplesize))
+})
+
+test_that("calc_act_mbg skips act_public when no h32 variables", {
+  kr <- .mock_kr_act()  # No h32 columns
+  gps <- .mock_gps()
+
+  result <- suppressWarnings(
+    calc_act_mbg(kr, gps, indicators = c("act", "act_public"))
+  )
+
+  expect_true("act" %in% names(result))
+  expect_false("act_public" %in% names(result))
+})
+
+
 # ---- Both indicators together ----
 
 test_that("calc_act_mbg computes both indicators together", {

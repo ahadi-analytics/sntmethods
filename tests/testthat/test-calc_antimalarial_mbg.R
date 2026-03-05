@@ -142,6 +142,70 @@ test_that("calc_antimalarial_mbg composite indicator counts any ml13", {
 })
 
 
+# ---- antimalarial_public indicator ----
+
+# Helper: mock KR data with h32 columns for CSB classification
+.mock_kr_antimalarial_with_csb <- function(n = 200, n_clusters = 20, seed = 42) {
+  set.seed(seed)
+  kr <- data.frame(
+    v001 = rep(seq_len(n_clusters), length.out = n),
+    hw1 = sample(0:59, n, replace = TRUE),
+    h22 = sample(c(0, 1), n, replace = TRUE, prob = c(0.6, 0.4)),
+    ml13a = NA_real_,
+    ml13b = NA_real_,
+    ml13e = NA_real_,
+    h32a = NA_real_,
+    h32j = NA_real_,
+    stringsAsFactors = FALSE
+  )
+  febrile <- kr$h22 == 1
+  kr$ml13a[febrile] <- sample(c(0, 1), sum(febrile), replace = TRUE, prob = c(0.8, 0.2))
+  kr$ml13b[febrile] <- sample(c(0, 1), sum(febrile), replace = TRUE, prob = c(0.9, 0.1))
+  kr$ml13e[febrile] <- sample(c(0, 1), sum(febrile), replace = TRUE, prob = c(0.7, 0.3))
+  kr$h32a[febrile] <- sample(c(0, 1), sum(febrile), replace = TRUE, prob = c(0.4, 0.6))
+  kr$h32j[febrile] <- sample(c(0, 1), sum(febrile), replace = TRUE, prob = c(0.7, 0.3))
+  kr
+}
+
+test_that("calc_antimalarial_mbg computes antimalarial_public with h32 variables", {
+  kr <- .mock_kr_antimalarial_with_csb()
+  gps <- .mock_gps_antimalarial()
+
+  result <- calc_antimalarial_mbg(
+    kr, gps, indicators = c("antimalarial", "antimalarial_public")
+  )
+
+  expect_type(result, "list")
+  expect_true("antimalarial" %in% names(result))
+  expect_true("antimalarial_public" %in% names(result))
+
+  dt <- result[["antimalarial_public"]]
+  expect_s3_class(dt, "tbl_df")
+  expect_true(all(c("cluster_id", "indicator", "samplesize", "x", "y") %in% names(dt)))
+
+  # Numerator <= denominator
+  expect_true(all(dt$indicator <= dt$samplesize))
+
+  # Public sample size <= overall sample size
+  am_dt <- result[["antimalarial"]]
+  expect_true(sum(dt$samplesize) <= sum(am_dt$samplesize))
+})
+
+test_that("calc_antimalarial_mbg skips antimalarial_public when no h32 variables", {
+  kr <- .mock_kr_antimalarial()  # No h32 columns
+  gps <- .mock_gps_antimalarial()
+
+  result <- suppressWarnings(
+    calc_antimalarial_mbg(
+      kr, gps, indicators = c("antimalarial", "antimalarial_public")
+    )
+  )
+
+  expect_true("antimalarial" %in% names(result))
+  expect_false("antimalarial_public" %in% names(result))
+})
+
+
 # ---- Output format ----
 
 test_that("calc_antimalarial_mbg output has correct column types", {

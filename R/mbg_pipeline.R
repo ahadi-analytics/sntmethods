@@ -1135,7 +1135,7 @@ run_mbg_indicator_pipeline <- function(
         calc_csb_mbg(
           dhs_kr = survey_data$KR,
           gps_data = gps_data,
-          indicators = c("public", "private", "none")
+          indicators = c("any", "public", "private", "none")
         )
       }, error = function(e) {
         results$skipped <<- glue::glue("Calculation error: {e$message}")
@@ -1151,7 +1151,7 @@ run_mbg_indicator_pipeline <- function(
         calc_act_mbg(
           dhs_kr = survey_data$KR,
           gps_data = gps_data,
-          indicators = c("act")
+          indicators = c("act", "act_public")
         )
       }, error = function(e) {
         results$skipped <<- glue::glue("Calculation error: {e$message}")
@@ -1265,7 +1265,8 @@ run_mbg_indicator_pipeline <- function(
       tryCatch({
         calc_antimalarial_mbg(
           dhs_kr = survey_data$KR,
-          gps_data = gps_data
+          gps_data = gps_data,
+          indicators = c("antimalarial", "antimalarial_public")
         )
       }, error = function(e) {
         results$skipped <<- glue::glue("Calculation error: {e$message}")
@@ -1736,7 +1737,7 @@ run_mbg_indicator_pipeline <- function(
 #' of case management indicators. Produces two derived indicators:
 #' \itemize{
 #'   \item \code{eff_cm_any}: CSB(any) x ACT
-#'   \item \code{eff_cm_public}: CSB(public) x ACT
+#'   \item \code{eff_cm_public}: CSB(public) x ACT(public care seekers)
 #' }
 #'
 #' @param raster_paths Named list of raster paths from the indicator loop.
@@ -1770,7 +1771,7 @@ run_mbg_indicator_pipeline <- function(
   # Define pairs: derived_name = list(csb_indicator, act_indicator)
   pairs <- list(
     eff_cm_any    = list(csb = "csb_any",    act = "act"),
-    eff_cm_public = list(csb = "csb_public", act = "act")
+    eff_cm_public = list(csb = "csb_public", act = "act_public")
   )
 
   for (derived_name in names(pairs)) {

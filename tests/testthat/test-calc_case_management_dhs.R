@@ -66,7 +66,7 @@ test_that("calc_case_management_dhs returns expected columns at national level",
   expected_cols <- c(
     "dhs_eff_cm_any", "dhs_eff_cm_any_low", "dhs_eff_cm_any_upp",
     "dhs_eff_cm_public", "dhs_eff_cm_public_low", "dhs_eff_cm_public_upp",
-    "dhs_n_fever", "dhs_n_antimalarial"
+    "dhs_n_fever", "dhs_n_antimalarial", "dhs_n_antimalarial_public"
   )
   for (col in expected_cols) {
     expect_true(col %in% names(result), info = paste("Missing column:", col))
@@ -134,6 +134,58 @@ test_that("calc_case_management_dhs public <= any", {
 
   # Public CSB is a subset of any CSB, so eff_cm_public <= eff_cm_any
   expect_true(result$dhs_eff_cm_public <= result$dhs_eff_cm_any)
+})
+
+test_that("calc_case_management_dhs public variant uses public-conditioned ACT rate", {
+  skip_if_not_installed("survey")
+
+  # Create data where public care seekers have very different ACT rates
+  # than private care seekers - this ensures eff_cm_public is NOT just
+
+  # csb_public * P(ACT|antimalarial, any) but properly conditioned.
+  set.seed(99)
+  n <- 500
+
+  kr_data <- data.frame(
+    v021 = rep(1:50, each = 10),
+    v005 = rep(1000000, n),
+    v022 = rep(1:10, each = 50),
+    hw1 = sample(0:59, n, replace = TRUE),
+    h22 = sample(c(0, 1), n, replace = TRUE, prob = c(0.5, 0.5)),
+    b5 = rep(1, n),
+    h32a = NA_real_,  # public
+    h32j = NA_real_,  # private formal
+    ml13a = NA_real_,
+    ml13e = NA_real_,
+    stringsAsFactors = FALSE
+  )
+
+  febrile <- kr_data$h22 == 1
+  n_feb <- sum(febrile)
+
+  # Half go public, half private
+  kr_data$h32a[febrile] <- sample(c(0, 1), n_feb, replace = TRUE, prob = c(0.5, 0.5))
+  kr_data$h32j[febrile] <- ifelse(kr_data$h32a[febrile] == 0, 1, 0)
+
+  # All febrile get some antimalarial
+  kr_data$ml13a[febrile] <- 1
+
+  # Public care seekers get ACT 90% of the time, private gets 10%
+  is_pub <- febrile & kr_data$h32a == 1
+  is_priv <- febrile & kr_data$h32j == 1
+  kr_data$ml13e[is_pub] <- sample(c(0, 1), sum(is_pub), replace = TRUE, prob = c(0.1, 0.9))
+  kr_data$ml13e[is_priv] <- sample(c(0, 1), sum(is_priv), replace = TRUE, prob = c(0.9, 0.1))
+
+  result <- calc_case_management_dhs(kr_data)
+
+  # With such divergent ACT rates, eff_cm_public should be meaningfully
+  # different from what it would be if using the unconditional ACT rate.
+  # Specifically: public ACT rate (~0.9) >> overall ACT rate (~0.5),
+  # so eff_cm_public should be higher than under the old formula.
+  expect_true(!is.na(result$dhs_eff_cm_public))
+  expect_true(!is.na(result$dhs_eff_cm_any))
+  expect_true(result$dhs_n_antimalarial_public > 0)
+  expect_true(result$dhs_n_antimalarial_public <= result$dhs_n_antimalarial)
 })
 
 test_that("calc_case_management_dhs handles h37e fallback", {

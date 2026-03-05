@@ -14,6 +14,7 @@
 #' @param indicators Character vector of indicators to calculate:
 #'   \itemize{
 #'     \item "act": Received ACT among febrile children under 5
+#'     \item "act_public": Received ACT among febrile U5 who sought public care
 #'     \item "act_tested": Received ACT among children who tested positive
 #'       (RDT or microscopy)
 #'     \item "febrile_rdt_pos": RDT positivity rate among febrile U5 children
@@ -81,7 +82,7 @@ calc_act_mbg <- function(
     cli::cli_abort("`gps_data` must be a data.frame or tibble")
   }
 
-  valid_indicators <- c("act", "act_tested", "febrile_rdt_pos", "febrile_rdt_pos_act")
+  valid_indicators <- c("act", "act_public", "act_tested", "febrile_rdt_pos", "febrile_rdt_pos_act")
   invalid <- setdiff(indicators, valid_indicators)
   if (length(invalid) > 0) {
     cli::cli_abort("Invalid indicators: {.val {invalid}}")
@@ -139,6 +140,42 @@ calc_act_mbg <- function(
 
     if (!is.null(dt)) {
       results[["act"]] <- dt
+    }
+  }
+
+  if ("act_public" %in% indicators) {
+    # Apply CSB classification to identify public care seekers
+    kr_fever_csb <- tryCatch(
+      .classify_csb_from_h32(kr_fever),
+      error = function(e) {
+        cli::cli_alert_warning(
+          "Cannot compute act_public: {conditionMessage(e)}"
+        )
+        NULL
+      }
+    )
+
+    if (!is.null(kr_fever_csb)) {
+      act_public_data <- kr_fever_csb |>
+        dplyr::filter(csb_public == 1, !is.na(received_act)) |>
+        dplyr::mutate(act_binary = as.integer(received_act == 1))
+
+      if (nrow(act_public_data) > 0) {
+        dt <- .aggregate_to_mbg_clusters(
+          individual_data = act_public_data,
+          indicator_col = "act_binary",
+          gps_clean = gps_clean,
+          result_name = "act_public"
+        )
+
+        if (!is.null(dt)) {
+          results[["act_public"]] <- dt
+        }
+      } else {
+        cli::cli_alert_warning(
+          "No febrile children who sought public care - skipping act_public"
+        )
+      }
     }
   }
 

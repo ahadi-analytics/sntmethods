@@ -286,12 +286,15 @@ calc_case_management_dhs <- function(
   csb_pub_est <- as.numeric(csb_means["csb_public"])
   csb_pub_se <- as.numeric(csb_se["csb_public"])
 
-  # ACT rate among antimalarial recipients
-  act_am <- .compute_act_among_am(kr_fever)
+  # ACT rate among ALL antimalarial recipients (for eff_cm_any)
+  act_am_any <- .compute_act_among_am(kr_fever)
+
+  # ACT rate among PUBLIC-CARE antimalarial recipients (for eff_cm_public)
+  act_am_public <- .compute_act_among_am(kr_fever, csb_filter = "csb_public")
 
   # Compute products with delta method CIs
-  eff_any <- .delta_product(csb_any_est, csb_any_se, act_am$est, act_am$se)
-  eff_pub <- .delta_product(csb_pub_est, csb_pub_se, act_am$est, act_am$se)
+  eff_any <- .delta_product(csb_any_est, csb_any_se, act_am_any$est, act_am_any$se)
+  eff_pub <- .delta_product(csb_pub_est, csb_pub_se, act_am_public$est, act_am_public$se)
 
   tibble::tibble(
     dhs_eff_cm_any = eff_any$est,
@@ -301,7 +304,11 @@ calc_case_management_dhs <- function(
     dhs_eff_cm_public_low = eff_pub$low,
     dhs_eff_cm_public_upp = eff_pub$upp,
     dhs_n_fever = nrow(kr_fever),
-    dhs_n_antimalarial = sum(kr_fever$received_antimalarial == 1, na.rm = TRUE)
+    dhs_n_antimalarial = sum(kr_fever$received_antimalarial == 1, na.rm = TRUE),
+    dhs_n_antimalarial_public = sum(
+      kr_fever$received_antimalarial == 1 & kr_fever$csb_public == 1,
+      na.rm = TRUE
+    )
   )
 }
 
@@ -356,6 +363,10 @@ calc_case_management_dhs <- function(
     dplyr::summarise(
       dhs_n_fever = dplyr::n(),
       dhs_n_antimalarial = sum(received_antimalarial == 1, na.rm = TRUE),
+      dhs_n_antimalarial_public = sum(
+        received_antimalarial == 1 & csb_public == 1,
+        na.rm = TRUE
+      ),
       .groups = "drop"
     )
 
@@ -365,7 +376,8 @@ calc_case_management_dhs <- function(
 
   for (grp in groups) {
     kr_grp <- kr_fever[kr_fever[[region_var]] == grp, ]
-    act_am <- .compute_act_among_am(kr_grp)
+    act_am_any <- .compute_act_among_am(kr_grp)
+    act_am_public <- .compute_act_among_am(kr_grp, csb_filter = "csb_public")
 
     # Get CSB estimates for this group
     grp_row <- csb_by[csb_by[[region_var]] == grp, ]
@@ -374,8 +386,8 @@ calc_case_management_dhs <- function(
     csb_pub_est <- grp_row$csb_public
     csb_pub_se <- grp_row$`se.csb_public`
 
-    eff_any <- .delta_product(csb_any_est, csb_any_se, act_am$est, act_am$se)
-    eff_pub <- .delta_product(csb_pub_est, csb_pub_se, act_am$est, act_am$se)
+    eff_any <- .delta_product(csb_any_est, csb_any_se, act_am_any$est, act_am_any$se)
+    eff_pub <- .delta_product(csb_pub_est, csb_pub_se, act_am_public$est, act_am_public$se)
 
     group_results[[as.character(grp)]] <- tibble::tibble(
       !!region_var := grp,
@@ -402,11 +414,26 @@ calc_case_management_dhs <- function(
 #'
 #' @param kr_data Data frame with received_antimalarial, has_act, cluster_id,
 #'   stratum_id, survey_weight columns.
+#' @param csb_filter Optional column name to filter by care-seeking source.
+#'   When set (e.g. "csb_public"), only antimalarial recipients where that
+#'   column == 1 are included. Used to condition ACT rate on public care-seeking.
 #' @return List with est (point estimate) and se (standard error).
 #' @noRd
-.compute_act_among_am <- function(kr_data) {
+.compute_act_among_am <- function(kr_data, csb_filter = NULL) {
   kr_am <- kr_data |>
     dplyr::filter(received_antimalarial == 1, !is.na(has_act))
+
+  # Apply optional care-seeking filter
+  if (!is.null(csb_filter)) {
+    if (!csb_filter %in% names(kr_am)) {
+      cli::cli_alert_warning(
+        "Column {.var {csb_filter}} not found - returning NA"
+      )
+      return(list(est = NA_real_, se = NA_real_))
+    }
+    kr_am <- kr_am |>
+      dplyr::filter(.data[[csb_filter]] == 1)
+  }
 
   if (nrow(kr_am) == 0 || dplyr::n_distinct(kr_am$cluster_id) < 2) {
     cli::cli_alert_warning(

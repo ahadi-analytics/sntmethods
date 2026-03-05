@@ -191,12 +191,28 @@
       den = "Febrile children under 5",
       dhs_num = "ml13a-h (or h37a-h)", dhs_den = "h22"
     ),
+    antimalarial_public = list(
+      en = "Received any antimalarial (public care-seeking)",
+      fr = "A recu un antipaludique (soins publics)",
+      dhs_var = "ml13a-h (or h37a-h), h32a-i",
+      num = "Febrile U5 receiving antimalarial among public care seekers",
+      den = "Febrile U5 who sought public care",
+      dhs_num = "ml13a-h (or h37a-h)", dhs_den = "h22 + h32a-i"
+    ),
     act = list(
       en = "Received ACT", fr = "A recu un CTA",
       dhs_var = "ml13e (or h37e)",
       num = "Febrile children receiving ACT",
       den = "Febrile children under 5",
       dhs_num = "ml13e (or h37e)", dhs_den = "h22"
+    ),
+    act_public = list(
+      en = "Received ACT (public care-seeking)",
+      fr = "A recu un CTA (soins publics)",
+      dhs_var = "ml13e (or h37e), h32a-i",
+      num = "Febrile U5 receiving ACT among public care seekers",
+      den = "Febrile U5 who sought public care",
+      dhs_num = "ml13e (or h37e)", dhs_den = "h22 + h32a-i"
     ),
     act_tested = list(
       en = "Received ACT (test-positive)",
@@ -618,10 +634,10 @@
     eff_cm_public = list(
       en = "Effective coverage of case management (public care-seeking)",
       fr = "Couverture effective de la prise en charge (secteur public)",
-      dhs_var = "h32a-i x ml13e",
-      num = "CSB(public) x P(ACT | antimalarial)",
+      dhs_var = "h32a-i x ml13e|h32a-i",
+      num = "CSB(public) x P(ACT | antimalarial, sought public care)",
       den = "Derived: product of two MBG surfaces",
-      dhs_num = "h32a-i x ml13e", dhs_den = "h22 x ml13a-h"
+      dhs_num = "h32a-i x ml13e", dhs_den = "h22+h32a-i x ml13a-h+h32a-i"
     )
   )
 
@@ -776,7 +792,9 @@
     csb_trained       = list(recode = "KR", category = "Malaria",       cascade = 1L, age = "0-59 months"),
     malaria_dx        = list(recode = "KR", category = "Malaria",       cascade = 2L, age = "0-59 months"),
     antimalarial      = list(recode = "KR", category = "Malaria",       cascade = 3L, age = "0-59 months"),
+    antimalarial_public = list(recode = "KR", category = "Malaria",   cascade = 3L, age = "0-59 months"),
     act               = list(recode = "KR",    category = "Malaria", cascade = 4L,      age = "0-59 months"),
+    act_public        = list(recode = "KR",    category = "Malaria", cascade = 4L,      age = "0-59 months"),
     act_tested        = list(recode = "KR",    category = "Malaria", cascade = 4L,      age = "0-59 months"),
     febrile_rdt_pos   = list(recode = "KR+PR", category = "Malaria", cascade = 2L,      age = "0-59 months"),
     febrile_rdt_pos_act = list(recode = "KR+PR", category = "Malaria", cascade = 4L,    age = "0-59 months"),

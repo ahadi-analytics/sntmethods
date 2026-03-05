@@ -229,6 +229,7 @@ globalVariables(
     "dhs_antimalarial_low",
     "dhs_antimalarial_upp",
     "dhs_n_antimalarial",
+    "dhs_n_antimalarial_public",
     "ci_l.has_antimalarial",
     "ci_u.has_antimalarial",
 
