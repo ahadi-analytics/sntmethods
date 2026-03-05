@@ -248,6 +248,8 @@ run_mbg_indicator_pipeline <- function(
     # ITN sub-indicators (selectable individually for faster pipelines)
     "itn_ownership", "itn_access", "itn_use_all", "itn_use_u5",
     "itn_use_pregnant", "itn_use_if_access",
+    # Public care-seeking sub-indicators
+    "act_public", "antimalarial_public",
     # Derived indicators (auto-expand to required dependencies)
     "eff_cm"
   )
@@ -257,6 +259,18 @@ run_mbg_indicator_pipeline <- function(
       "Invalid indicator(s): {.val {invalid_indicators}}",
       "i" = "Valid indicators: {.val {valid_indicators}}"
     ))
+  }
+
+  # Collapse sub-indicators into parent categories (they are produced together)
+  sub_to_parent <- c(act_public = "act", antimalarial_public = "antimalarial")
+  for (sub in names(sub_to_parent)) {
+    if (sub %in% indicators) {
+      parent <- sub_to_parent[[sub]]
+      if (!parent %in% indicators) {
+        indicators <- c(indicators, parent)
+      }
+      indicators <- setdiff(indicators, sub)
+    }
   }
 
   # Expand derived indicators to include their dependencies
@@ -1143,6 +1157,7 @@ run_mbg_indicator_pipeline <- function(
       })
     },
 
+    act_public = ,
     act = {
       if (!"KR" %in% names(survey_data)) {
         return(skip_indicator("Missing KR data (Children Recode)"))
@@ -1258,6 +1273,7 @@ run_mbg_indicator_pipeline <- function(
       })
     },
 
+    antimalarial_public = ,
     antimalarial = {
       if (!"KR" %in% names(survey_data)) {
         return(skip_indicator("Missing KR data (Children Recode)"))
