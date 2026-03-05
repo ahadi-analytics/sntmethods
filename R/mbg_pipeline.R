@@ -726,7 +726,8 @@ run_mbg_indicator_pipeline <- function(
         country_iso3 = country_iso3,
         survey_year = current_year,
         survey_type = current_survey_type,
-        save_rasters = save_rasters
+        save_rasters = save_rasters,
+        cache = cache
       )
       for (name in names(derived$mbg_estimates)) {
         year_results$mbg_estimates[[name]] <- derived$mbg_estimates[[name]]
@@ -1780,7 +1781,8 @@ run_mbg_indicator_pipeline <- function(
   survey_year,
 
   survey_type,
-  save_rasters = TRUE
+  save_rasters = TRUE,
+  cache = FALSE
 ) {
   result <- list(mbg_estimates = list(), raster_paths = list())
 
@@ -1795,7 +1797,65 @@ run_mbg_indicator_pipeline <- function(
     csb_key <- pair$csb
     act_key <- pair$act
 
-    # Check both component indicators exist
+    # Build expected paths for the derived raster (used for cache check)
+    raster_base <- glue::glue(
+      "{tolower(country_iso3)}_{derived_name}_mbg_{tolower(survey_type)}_{survey_year}"
+    )
+    expected_paths <- list(
+      mean  = fs::path(output_dirs$rasters, paste0(raster_base, "_mean.tif")),
+      lower = fs::path(output_dirs$rasters, paste0(raster_base, "_lower.tif")),
+      upper = fs::path(output_dirs$rasters, paste0(raster_base, "_upper.tif"))
+    )
+
+    # ---- Cache: use existing derived rasters if available ----
+    all_cached <- isTRUE(cache) && all(vapply(
+      expected_paths, fs::file_exists, logical(1)
+    ))
+
+    if (all_cached) {
+      cli::cli_alert_info(
+        "Using cached derived rasters for {.val {derived_name}}"
+      )
+
+      tryCatch({
+        prod_mean  <- terra::rast(expected_paths$mean)
+        prod_lower <- terra::rast(expected_paths$lower)
+        prod_upper <- terra::rast(expected_paths$upper)
+
+        mean_col  <- paste0(derived_name, "_mean")
+        lower_col <- paste0(derived_name, "_lower")
+        upper_col <- paste0(derived_name, "_upper")
+
+        adm_estimates <- primary_sf |>
+          sf::st_drop_geometry() |>
+          dplyr::mutate(
+            !!mean_col := terra::extract(
+              prod_mean, primary_sf, fun = mean, na.rm = TRUE
+            )[[2]] * 100,
+            !!lower_col := terra::extract(
+              prod_lower, primary_sf, fun = mean, na.rm = TRUE
+            )[[2]] * 100,
+            !!upper_col := terra::extract(
+              prod_upper, primary_sf, fun = mean, na.rm = TRUE
+            )[[2]] * 100
+          )
+
+        result$mbg_estimates[[derived_name]] <- adm_estimates
+        result$raster_paths[[derived_name]] <- expected_paths
+        cli::cli_alert_success(
+          "Derived indicator {.val {derived_name}} loaded from cache"
+        )
+        next
+      }, error = function(e) {
+        cli::cli_alert_warning(
+          "Cache load failed for {derived_name}, recomputing: {e$message}"
+        )
+      })
+    }
+
+    # ---- Compute from component rasters ----
+
+    # Check both component indicators exist in current run
     if (is.null(raster_paths[[csb_key]]) || is.null(raster_paths[[act_key]])) {
       next
     }
@@ -1829,14 +1889,7 @@ run_mbg_indicator_pipeline <- function(
       derived_raster_paths <- NULL
       if (isTRUE(save_rasters)) {
         fs::dir_create(output_dirs$rasters)
-        raster_base <- glue::glue(
-          "{tolower(country_iso3)}_{derived_name}_mbg_{tolower(survey_type)}_{survey_year}"
-        )
-        derived_raster_paths <- list(
-          mean  = fs::path(output_dirs$rasters, paste0(raster_base, "_mean.tif")),
-          lower = fs::path(output_dirs$rasters, paste0(raster_base, "_lower.tif")),
-          upper = fs::path(output_dirs$rasters, paste0(raster_base, "_upper.tif"))
-        )
+        derived_raster_paths <- expected_paths
 
         terra::writeRaster(prod_mean, derived_raster_paths$mean, overwrite = TRUE)
         terra::writeRaster(prod_lower, derived_raster_paths$lower, overwrite = TRUE)
