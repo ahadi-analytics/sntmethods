@@ -11,11 +11,17 @@
 #' @param indicators Character vector of vaccines to calculate:
 #'   \itemize{
 #'     \item "bcg": BCG vaccine
-#'     \item "dpt1", "dpt2", "dpt3": DPT doses 1-3
+#'     \item "dpt1", "dpt2", "dpt3": DPT doses 1-3 (falls back to pentavalent)
 #'     \item "polio1", "polio2", "polio3": Polio doses 1-3
 #'     \item "measles1", "measles2": Measles doses 1-2
 #'     \item "vita1", "vita2": Vitamin A doses 1-2
 #'     \item "malaria": Malaria vaccine (RTS,S/R21)
+#'     \item "penta1", "penta2", "penta3": Pentavalent doses 1-3
+#'     \item "pneumo1", "pneumo2", "pneumo3": Pneumococcal doses 1-3
+#'     \item "rota1", "rota2", "rota3": Rotavirus doses 1-3
+#'     \item "ipv": Inactivated Polio Vaccine
+#'     \item "hepb0": Hepatitis B birth dose
+#'     \item "yellowfever": Yellow Fever vaccine
 #'     \item "fully_vaccinated": Basic fully vaccinated
 #'   }
 #'   Default: c("bcg", "dpt3", "measles1").
@@ -55,7 +61,11 @@ calc_epi_mbg <- function(
     polio1 = "h6", polio2 = "h7", polio3 = "h8",
     measles1 = "h9", measles2 = "h9a",
     vita1 = "h33", vita2 = "h33a",
-    malaria = "h68"
+    malaria = "h68",
+    penta1 = "h51", penta2 = "h52", penta3 = "h53",
+    pneumo1 = "h54", pneumo2 = "h55", pneumo3 = "h56",
+    rota1 = "h57", rota2 = "h58", rota3 = "h59",
+    ipv = "h60", hepb0 = "h50", yellowfever = "h61"
   ),
   gps_vars = list(
     cluster = "DHSCLUST",
@@ -70,7 +80,12 @@ calc_epi_mbg <- function(
     "polio1", "polio2", "polio3",
     "measles1", "measles2",
     "vita1", "vita2",
-    "malaria", "fully_vaccinated"
+    "malaria",
+    "penta1", "penta2", "penta3",
+    "pneumo1", "pneumo2", "pneumo3",
+    "rota1", "rota2", "rota3",
+    "ipv", "hepb0", "yellowfever",
+    "fully_vaccinated"
   )
   invalid <- setdiff(indicators, valid_indicators)
   if (length(invalid) > 0) {
@@ -153,7 +168,11 @@ prep_epi_mbg <- function(
     polio1 = "h6", polio2 = "h7", polio3 = "h8",
     measles1 = "h9", measles2 = "h9a",
     vita1 = "h33", vita2 = "h33a",
-    malaria = "h68"
+    malaria = "h68",
+    penta1 = "h51", penta2 = "h52", penta3 = "h53",
+    pneumo1 = "h54", pneumo2 = "h55", pneumo3 = "h56",
+    rota1 = "h57", rota2 = "h58", rota3 = "h59",
+    ipv = "h60", hepb0 = "h50", yellowfever = "h61"
   ),
   gps_vars = list(
     cluster = "DHSCLUST",

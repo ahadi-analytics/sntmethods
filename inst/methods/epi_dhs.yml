@@ -71,6 +71,67 @@ indicators:
     numerator: "Children with BCG + DPT3 + Polio3 + Measles1"
     denominator: "Children 12-23 months"
 
+  epi_penta1:
+    name: "Pentavalent dose 1"
+    numerator: "Children who received Pentavalent dose 1"
+    denominator: "Children 12-23 months"
+    note: "DHS-7+ variable h51. DPT indicators fall back to pentavalent when h3-h5 are missing."
+
+  epi_penta2:
+    name: "Pentavalent dose 2"
+    numerator: "Children who received Pentavalent dose 2"
+    denominator: "Children 12-23 months"
+
+  epi_penta3:
+    name: "Pentavalent dose 3"
+    numerator: "Children who received Pentavalent dose 3"
+    denominator: "Children 12-23 months"
+
+  epi_pneumo1:
+    name: "Pneumococcal dose 1"
+    numerator: "Children who received Pneumococcal dose 1"
+    denominator: "Children 12-23 months"
+
+  epi_pneumo2:
+    name: "Pneumococcal dose 2"
+    numerator: "Children who received Pneumococcal dose 2"
+    denominator: "Children 12-23 months"
+
+  epi_pneumo3:
+    name: "Pneumococcal dose 3"
+    numerator: "Children who received Pneumococcal dose 3"
+    denominator: "Children 12-23 months"
+
+  epi_rota1:
+    name: "Rotavirus dose 1"
+    numerator: "Children who received Rotavirus dose 1"
+    denominator: "Children 12-23 months"
+
+  epi_rota2:
+    name: "Rotavirus dose 2"
+    numerator: "Children who received Rotavirus dose 2"
+    denominator: "Children 12-23 months"
+
+  epi_rota3:
+    name: "Rotavirus dose 3"
+    numerator: "Children who received Rotavirus dose 3"
+    denominator: "Children 12-23 months"
+
+  epi_ipv:
+    name: "Inactivated Polio Vaccine"
+    numerator: "Children who received IPV"
+    denominator: "Children 12-23 months"
+
+  epi_hepb0:
+    name: "Hepatitis B birth dose"
+    numerator: "Children who received HepB birth dose"
+    denominator: "Children 12-23 months"
+
+  epi_yellowfever:
+    name: "Yellow Fever vaccine"
+    numerator: "Children who received Yellow Fever vaccine"
+    denominator: "Children 12-23 months"
+
 data_sources:
   primary: "KR (Children's Recode)"
   gps: "GE (Geographic)"
@@ -147,6 +208,67 @@ variables:
   malaria:
     dhs_name: "h68"
     description: "Malaria vaccine (RTS,S/R21)"
+
+  penta1:
+    dhs_name: "h51"
+    description: "Pentavalent dose 1 (DHS-7+, circa 2015+)"
+
+  penta2:
+    dhs_name: "h52"
+    description: "Pentavalent dose 2"
+
+  penta3:
+    dhs_name: "h53"
+    description: "Pentavalent dose 3"
+
+  pneumo1:
+    dhs_name: "h54"
+    description: "Pneumococcal dose 1"
+
+  pneumo2:
+    dhs_name: "h55"
+    description: "Pneumococcal dose 2"
+
+  pneumo3:
+    dhs_name: "h56"
+    description: "Pneumococcal dose 3"
+
+  rota1:
+    dhs_name: "h57"
+    description: "Rotavirus dose 1"
+
+  rota2:
+    dhs_name: "h58"
+    description: "Rotavirus dose 2"
+
+  rota3:
+    dhs_name: "h59"
+    description: "Rotavirus dose 3"
+
+  ipv:
+    dhs_name: "h60"
+    description: "Inactivated Polio Vaccine"
+
+  hepb0:
+    dhs_name: "h50"
+    description: "Hepatitis B birth dose"
+
+  yellowfever:
+    dhs_name: "h61"
+    description: "Yellow Fever vaccine"
+
+fallback_logic:
+  dpt_to_pentavalent:
+    description: >
+      When DPT variables (h3, h4, h5) are missing from the survey but
+      pentavalent variables (h51, h52, h53) are present, the system
+      automatically falls back to pentavalent as the DPT equivalent.
+      Output columns remain named dpt1/dpt2/dpt3 regardless of source.
+    mapping:
+      dpt1: "h3 -> h51 (pentavalent)"
+      dpt2: "h4 -> h52 (pentavalent)"
+      dpt3: "h5 -> h53 (pentavalent)"
+    note: "Fallback is logged via cli::cli_alert_info()"
 
 vaccination_coding:
   values:

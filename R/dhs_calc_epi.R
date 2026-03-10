@@ -38,7 +38,11 @@ calc_epi_dhs_core <- function(
     polio1 = "h6", polio2 = "h7", polio3 = "h8",
     measles1 = "h9", measles2 = "h9a",
     vita1 = "h33", vita2 = "h33a",
-    malaria = "h68"
+    malaria = "h68",
+    penta1 = "h51", penta2 = "h52", penta3 = "h53",
+    pneumo1 = "h54", pneumo2 = "h55", pneumo3 = "h56",
+    rota1 = "h57", rota2 = "h58", rota3 = "h59",
+    ipv = "h60", hepb0 = "h50", yellowfever = "h61"
   ),
   region_var = NULL,
   gps_data = NULL,
@@ -191,7 +195,11 @@ calc_epi_dhs <- function(
     polio1 = "h6", polio2 = "h7", polio3 = "h8",
     measles1 = "h9", measles2 = "h9a",
     vita1 = "h33", vita2 = "h33a",
-    malaria = "h68"
+    malaria = "h68",
+    penta1 = "h51", penta2 = "h52", penta3 = "h53",
+    pneumo1 = "h54", pneumo2 = "h55", pneumo3 = "h56",
+    rota1 = "h57", rota2 = "h58", rota3 = "h59",
+    ipv = "h60", hepb0 = "h50", yellowfever = "h61"
   ),
   region_var = NULL,
   gps_data = NULL,
@@ -226,10 +234,29 @@ calc_epi_dhs <- function(
   # Add dynamic labels for each vaccine indicator
   vaccine_labels_list <- list(
     bcg = list(en = "BCG vaccination coverage", fr = "Couverture vaccinale BCG", dhs_var = "h2", name = "BCG"),
-    dpt1 = list(en = "DPT1 vaccination coverage", fr = "Couverture vaccinale DTC1", dhs_var = "h3", name = "DPT1"),
-    dpt2 = list(en = "DPT2 vaccination coverage", fr = "Couverture vaccinale DTC2", dhs_var = "h5", name = "DPT2"),
-    dpt3 = list(en = "DPT3 vaccination coverage", fr = "Couverture vaccinale DTC3", dhs_var = "h7", name = "DPT3"),
-    measles1 = list(en = "Measles 1 vaccination coverage", fr = "Couverture vaccinale rougeole 1", dhs_var = "h9", name = "Measles 1"),
+    dpt1 = list(en = "DPT/Penta dose 1 coverage", fr = "Couverture DTC/Penta dose 1", dhs_var = "h3/h51", name = "DPT/Penta 1"),
+    dpt2 = list(en = "DPT/Penta dose 2 coverage", fr = "Couverture DTC/Penta dose 2", dhs_var = "h4/h52", name = "DPT/Penta 2"),
+    dpt3 = list(en = "DPT/Penta dose 3 coverage", fr = "Couverture DTC/Penta dose 3", dhs_var = "h5/h53", name = "DPT/Penta 3"),
+    polio1 = list(en = "Polio dose 1 coverage", fr = "Couverture polio dose 1", dhs_var = "h6", name = "Polio 1"),
+    polio2 = list(en = "Polio dose 2 coverage", fr = "Couverture polio dose 2", dhs_var = "h7", name = "Polio 2"),
+    polio3 = list(en = "Polio dose 3 coverage", fr = "Couverture polio dose 3", dhs_var = "h8", name = "Polio 3"),
+    measles1 = list(en = "Measles dose 1 coverage", fr = "Couverture rougeole dose 1", dhs_var = "h9", name = "Measles 1"),
+    measles2 = list(en = "Measles dose 2 coverage", fr = "Couverture rougeole dose 2", dhs_var = "h9a", name = "Measles 2"),
+    vita1 = list(en = "Vitamin A dose 1 coverage", fr = "Couverture vitamine A dose 1", dhs_var = "h33", name = "Vitamin A 1"),
+    vita2 = list(en = "Vitamin A dose 2 coverage", fr = "Couverture vitamine A dose 2", dhs_var = "h33a", name = "Vitamin A 2"),
+    malaria = list(en = "Malaria vaccine (RTS,S/R21) coverage", fr = "Couverture vaccin antipaludique", dhs_var = "h68", name = "Malaria vaccine"),
+    penta1 = list(en = "Pentavalent dose 1 coverage", fr = "Couverture pentavalent dose 1", dhs_var = "h51", name = "Penta 1"),
+    penta2 = list(en = "Pentavalent dose 2 coverage", fr = "Couverture pentavalent dose 2", dhs_var = "h52", name = "Penta 2"),
+    penta3 = list(en = "Pentavalent dose 3 coverage", fr = "Couverture pentavalent dose 3", dhs_var = "h53", name = "Penta 3"),
+    pneumo1 = list(en = "Pneumococcal dose 1 coverage", fr = "Couverture pneumocoque dose 1", dhs_var = "h54", name = "Pneumo 1"),
+    pneumo2 = list(en = "Pneumococcal dose 2 coverage", fr = "Couverture pneumocoque dose 2", dhs_var = "h55", name = "Pneumo 2"),
+    pneumo3 = list(en = "Pneumococcal dose 3 coverage", fr = "Couverture pneumocoque dose 3", dhs_var = "h56", name = "Pneumo 3"),
+    rota1 = list(en = "Rotavirus dose 1 coverage", fr = "Couverture rotavirus dose 1", dhs_var = "h57", name = "Rota 1"),
+    rota2 = list(en = "Rotavirus dose 2 coverage", fr = "Couverture rotavirus dose 2", dhs_var = "h58", name = "Rota 2"),
+    rota3 = list(en = "Rotavirus dose 3 coverage", fr = "Couverture rotavirus dose 3", dhs_var = "h59", name = "Rota 3"),
+    ipv = list(en = "IPV coverage", fr = "Couverture VPI", dhs_var = "h60", name = "IPV"),
+    hepb0 = list(en = "Hepatitis B birth dose coverage", fr = "Couverture hepatite B dose naissance", dhs_var = "h50", name = "HepB birth"),
+    yellowfever = list(en = "Yellow Fever vaccine coverage", fr = "Couverture vaccin fievre jaune", dhs_var = "h61", name = "Yellow Fever"),
     fully_vaccinated = list(en = "Fully vaccinated", fr = "Completement vaccine", dhs_var = "h2-h9", name = "all vaccines")
   )
   for (vax in names(vaccine_labels_list)) {

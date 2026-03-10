@@ -83,7 +83,12 @@ NULL
 #' @param epi_indicators Character vector of EPI vaccine indicators to process
 #'   when "epi" is included in `indicators`. Passed to `calc_epi_mbg()`.
 #'   Valid values: "bcg", "dpt1", "dpt2", "dpt3", "polio1", "polio2", "polio3",
-#'   "measles1", "measles2", "vita1", "vita2", "malaria", "fully_vaccinated".
+#'   "measles1", "measles2", "vita1", "vita2", "malaria",
+#'   "penta1", "penta2", "penta3", "pneumo1", "pneumo2", "pneumo3",
+#'   "rota1", "rota2", "rota3", "ipv", "hepb0", "yellowfever",
+#'   "fully_vaccinated".
+#'   DPT indicators automatically fall back to pentavalent variables when the
+#'   primary DHS variables are absent.
 #'   Default: c("bcg", "dpt2", "dpt3", "measles1", "measles2").
 #' @param aggregation_level Primary aggregation level for MBG outputs. One of:
 #'   \itemize{
@@ -298,7 +303,12 @@ run_mbg_indicator_pipeline <- function(
       "polio1", "polio2", "polio3",
       "measles1", "measles2",
       "vita1", "vita2",
-      "malaria", "fully_vaccinated"
+      "malaria",
+      "penta1", "penta2", "penta3",
+      "pneumo1", "pneumo2", "pneumo3",
+      "rota1", "rota2", "rota3",
+      "ipv", "hepb0", "yellowfever",
+      "fully_vaccinated"
     )
     invalid_epi <- setdiff(epi_indicators, valid_epi)
     if (length(invalid_epi) > 0) {

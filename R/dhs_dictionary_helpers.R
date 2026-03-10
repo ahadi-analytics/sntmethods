@@ -524,27 +524,27 @@
     ),
     epi_dpt2 = list(
       en = "DPT dose 2", fr = "DTC dose 2",
-      dhs_var = "h5",
+      dhs_var = "h4",
       num = "Children 12-23m with DPT2", den = "Children 12-23 months",
-      dhs_num = "h5", dhs_den = "hw1"
+      dhs_num = "h4", dhs_den = "hw1"
     ),
     epi_dpt3 = list(
       en = "DPT dose 3", fr = "DTC dose 3",
-      dhs_var = "h7",
+      dhs_var = "h5",
       num = "Children 12-23m with DPT3", den = "Children 12-23 months",
-      dhs_num = "h7", dhs_den = "hw1"
+      dhs_num = "h5", dhs_den = "hw1"
     ),
     epi_polio1 = list(
       en = "Polio dose 1", fr = "Polio dose 1",
-      dhs_var = "h4",
+      dhs_var = "h6",
       num = "Children 12-23m with Polio1", den = "Children 12-23 months",
-      dhs_num = "h4", dhs_den = "hw1"
+      dhs_num = "h6", dhs_den = "hw1"
     ),
     epi_polio2 = list(
       en = "Polio dose 2", fr = "Polio dose 2",
-      dhs_var = "h6",
+      dhs_var = "h7",
       num = "Children 12-23m with Polio2", den = "Children 12-23 months",
-      dhs_num = "h6", dhs_den = "hw1"
+      dhs_num = "h7", dhs_den = "hw1"
     ),
     epi_polio3 = list(
       en = "Polio dose 3", fr = "Polio dose 3",
@@ -593,6 +593,79 @@
       num = "Children 12-23m fully vaccinated",
       den = "Children 12-23 months",
       dhs_num = "h2-h9", dhs_den = "hw1"
+    ),
+    epi_penta1 = list(
+      en = "Pentavalent dose 1", fr = "Pentavalent dose 1",
+      dhs_var = "h51",
+      num = "Children 12-23m with Pentavalent 1", den = "Children 12-23 months",
+      dhs_num = "h51", dhs_den = "hw1"
+    ),
+    epi_penta2 = list(
+      en = "Pentavalent dose 2", fr = "Pentavalent dose 2",
+      dhs_var = "h52",
+      num = "Children 12-23m with Pentavalent 2", den = "Children 12-23 months",
+      dhs_num = "h52", dhs_den = "hw1"
+    ),
+    epi_penta3 = list(
+      en = "Pentavalent dose 3", fr = "Pentavalent dose 3",
+      dhs_var = "h53",
+      num = "Children 12-23m with Pentavalent 3", den = "Children 12-23 months",
+      dhs_num = "h53", dhs_den = "hw1"
+    ),
+    epi_pneumo1 = list(
+      en = "Pneumococcal dose 1", fr = "Pneumocoque dose 1",
+      dhs_var = "h54",
+      num = "Children 12-23m with Pneumococcal 1", den = "Children 12-23 months",
+      dhs_num = "h54", dhs_den = "hw1"
+    ),
+    epi_pneumo2 = list(
+      en = "Pneumococcal dose 2", fr = "Pneumocoque dose 2",
+      dhs_var = "h55",
+      num = "Children 12-23m with Pneumococcal 2", den = "Children 12-23 months",
+      dhs_num = "h55", dhs_den = "hw1"
+    ),
+    epi_pneumo3 = list(
+      en = "Pneumococcal dose 3", fr = "Pneumocoque dose 3",
+      dhs_var = "h56",
+      num = "Children 12-23m with Pneumococcal 3", den = "Children 12-23 months",
+      dhs_num = "h56", dhs_den = "hw1"
+    ),
+    epi_rota1 = list(
+      en = "Rotavirus dose 1", fr = "Rotavirus dose 1",
+      dhs_var = "h57",
+      num = "Children 12-23m with Rotavirus 1", den = "Children 12-23 months",
+      dhs_num = "h57", dhs_den = "hw1"
+    ),
+    epi_rota2 = list(
+      en = "Rotavirus dose 2", fr = "Rotavirus dose 2",
+      dhs_var = "h58",
+      num = "Children 12-23m with Rotavirus 2", den = "Children 12-23 months",
+      dhs_num = "h58", dhs_den = "hw1"
+    ),
+    epi_rota3 = list(
+      en = "Rotavirus dose 3", fr = "Rotavirus dose 3",
+      dhs_var = "h59",
+      num = "Children 12-23m with Rotavirus 3", den = "Children 12-23 months",
+      dhs_num = "h59", dhs_den = "hw1"
+    ),
+    epi_ipv = list(
+      en = "Inactivated Polio Vaccine", fr = "Vaccin polio inactif",
+      dhs_var = "h60",
+      num = "Children 12-23m with IPV", den = "Children 12-23 months",
+      dhs_num = "h60", dhs_den = "hw1"
+    ),
+    epi_hepb0 = list(
+      en = "Hepatitis B birth dose", fr = "Hepatite B dose de naissance",
+      dhs_var = "h50",
+      num = "Children 12-23m with HepB birth dose", den = "Children 12-23 months",
+      dhs_num = "h50", dhs_den = "hw1"
+    ),
+    epi_yellowfever = list(
+      en = "Yellow Fever vaccine", fr = "Vaccin fievre jaune",
+      dhs_var = "h61",
+      num = "Children 12-23m with Yellow Fever vaccine",
+      den = "Children 12-23 months",
+      dhs_num = "h61", dhs_den = "hw1"
     ),
     # U5MR
     u5mr = list(
@@ -853,6 +926,18 @@
     epi_vita2         = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months"),
     epi_malaria       = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months"),
     epi_fully_vaccinated = list(recode = "KR", category = "Immunization", cascade = na_int, age = "12-23 months"),
+    epi_penta1        = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months"),
+    epi_penta2        = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months"),
+    epi_penta3        = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months"),
+    epi_pneumo1       = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months"),
+    epi_pneumo2       = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months"),
+    epi_pneumo3       = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months"),
+    epi_rota1         = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months"),
+    epi_rota2         = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months"),
+    epi_rota3         = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months"),
+    epi_ipv           = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months"),
+    epi_hepb0         = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months"),
+    epi_yellowfever   = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months"),
     # U5MR — KR module (special unit)
     u5mr              = list(recode = "KR", category = "Mortality",     cascade = na_int, age = "0-59 months",
                              base_unit = "per 1000 live births"),
