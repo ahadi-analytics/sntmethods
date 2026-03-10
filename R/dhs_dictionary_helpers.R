@@ -765,7 +765,8 @@
     "adm2",        "Administrative level 2 (district/zone)",       "Niveau administratif 2 (district/zone de sante)",    na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      "Key info",          na_int,            na_chr,     na_chr,    na_chr,
     "adm3",        "Administrative level 3 (commune/subdistrict)", "Niveau administratif 3 (commune/sous-district)",     na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      "Key info",          na_int,            na_chr,     na_chr,    na_chr,
     "survey_year", "Survey year",                                  "Annee de l'enquete",                                 na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      "Key info",          na_int,            na_chr,     na_chr,    na_chr,
-    "survey_type", "Survey type (DHS, MIS, etc.)",                 "Type d'enquete (EDS, EIP, etc.)",                    na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      "Key info",          na_int,            na_chr,     na_chr,    na_chr
+    "survey_type", "Survey type (DHS, MIS, etc.)",                 "Type d'enquete (EDS, EIP, etc.)",                    na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      "Key info",          na_int,            na_chr,     na_chr,    na_chr,
+    "median_survey_month", "Median survey interview month (1-12)",    "Mois median d'entretien de l'enquete (1-12)",        "v006/hv006",  na_chr,     na_chr,       na_chr,             na_chr,               "KR/PR/HR/IR", "Key info",       na_int,            na_chr,     "month (1-12)", "Median of interview months across clusters within admin unit"
   )
 }
 

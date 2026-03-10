@@ -41,6 +41,7 @@ globalVariables(
     "date_raw",
     "interview_cmc",
     "interview_date",
+    "interview_month",
     "median_date",
     "birth_cmc",
 

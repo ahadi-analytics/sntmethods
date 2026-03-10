@@ -72,7 +72,7 @@ NULL
 #'     \item "act": ACT treatment (case management)
 #'     \item "anemia": Anemia prevalence
 #'     \item "iptp": IPTp doses
-#'     \item "epi": EPI vaccination
+#'     \item "epi": EPI vaccination (see `epi_indicators` for vaccine selection)
 #'     \item "u5mr": Under-5 mortality
 #'     \item "smc": SMC receipt
 #'     \item "fever": Fever prevalence (U5)
@@ -80,6 +80,11 @@ NULL
 #'     \item "eff_cm": Effective coverage of case management (derived;
 #'       auto-adds "csb" and "act" as dependencies)
 #'   }
+#' @param epi_indicators Character vector of EPI vaccine indicators to process
+#'   when "epi" is included in `indicators`. Passed to `calc_epi_mbg()`.
+#'   Valid values: "bcg", "dpt1", "dpt2", "dpt3", "polio1", "polio2", "polio3",
+#'   "measles1", "measles2", "vita1", "vita2", "malaria", "fully_vaccinated".
+#'   Default: c("bcg", "dpt2", "dpt3", "measles1", "measles2").
 #' @param aggregation_level Primary aggregation level for MBG outputs. One of:
 #'   \itemize{
 #'     \item "adm2": Aggregate to ADM2 level (default)
@@ -148,6 +153,7 @@ run_mbg_indicator_pipeline <- function(
     "pfpr", "itn", "irs", "anc", "csb", "anemia", "iptp",
     "fever", "antimalarial"
   ),
+  epi_indicators = c("bcg", "dpt2", "dpt3", "measles1", "measles2"),
   aggregation_level = c("adm2", "adm3"),
   run_mbg = TRUE,
   save_rasters = TRUE,
@@ -282,6 +288,24 @@ run_mbg_indicator_pipeline <- function(
         "Adding {.val {new_deps}} (required by {.val eff_cm})"
       )
       indicators <- unique(c(indicators, new_deps))
+    }
+  }
+
+  # Validate epi_indicators if "epi" is requested
+  if ("epi" %in% indicators) {
+    valid_epi <- c(
+      "bcg", "dpt1", "dpt2", "dpt3",
+      "polio1", "polio2", "polio3",
+      "measles1", "measles2",
+      "vita1", "vita2",
+      "malaria", "fully_vaccinated"
+    )
+    invalid_epi <- setdiff(epi_indicators, valid_epi)
+    if (length(invalid_epi) > 0) {
+      cli::cli_abort(c(
+        "Invalid epi_indicators: {.val {invalid_epi}}",
+        "i" = "Valid values: {.val {valid_epi}}"
+      ))
     }
   }
 
@@ -643,6 +667,13 @@ run_mbg_indicator_pipeline <- function(
       next
     }
 
+    # Extract interview month per cluster for survey timing metadata
+    gps_clean_for_month <- .prepare_gps_data(gps_data)
+    cluster_interview_months <- .extract_cluster_interview_month(
+      survey_data = survey_data,
+      gps_clean = gps_clean_for_month
+    )
+
     year_results <- list(
       cluster_data = list(),
       mbg_estimates = list(),
@@ -681,7 +712,8 @@ run_mbg_indicator_pipeline <- function(
           generate_maps = generate_maps,
           cache = cache,
           verbose = verbose,
-          debug = debug
+          debug = debug,
+          epi_indicators = epi_indicators
         )
 
         # Check if indicator was skipped
@@ -780,7 +812,8 @@ run_mbg_indicator_pipeline <- function(
       country_iso3 = country_iso3,
       country_iso2 = country_iso2,
       adm3_sf = adm3_aligned,
-      aggregation_level = aggregation_level
+      aggregation_level = aggregation_level,
+      cluster_interview_months = cluster_interview_months
     )
 
     # Apply smart rounding
@@ -997,7 +1030,8 @@ run_mbg_indicator_pipeline <- function(
   generate_maps,
   cache,
   verbose,
-  debug = FALSE
+  debug = FALSE,
+  epi_indicators = c("bcg", "dpt2", "dpt3", "measles1", "measles2")
 ) {
   # Use u5 population raster for u5-specific indicators, fall back to total
   use_u5 <- category %in% c("pfpr", "itn") && !is.null(pop_rast_u5)
@@ -1215,7 +1249,7 @@ run_mbg_indicator_pipeline <- function(
         calc_epi_mbg(
           dhs_kr = survey_data$KR,
           gps_data = gps_data,
-          indicators = c("bcg", "dpt3", "measles1")
+          indicators = epi_indicators
         )
       }, error = function(e) {
         results$skipped <<- glue::glue("Calculation error: {e$message}")
@@ -2093,7 +2127,8 @@ run_mbg_indicator_pipeline <- function(
   country_iso3 = NULL,
   country_iso2 = NULL,
   adm3_sf = NULL,
-  aggregation_level = "adm2"
+  aggregation_level = "adm2",
+  cluster_interview_months = NULL
 ) {
   # Determine base sf object based on aggregation level
   base_sf <- if (aggregation_level == "adm3") adm3_sf else adm2_sf
@@ -2174,10 +2209,23 @@ run_mbg_indicator_pipeline <- function(
   final$survey_year <- survey_year
   final$survey_type <- survey_type
 
-  # ---- Merge MBG estimates ----
-
   # Determine merge key based on aggregation level
   merge_key <- if (aggregation_level == "adm3") "adm3" else "adm2"
+
+  # ---- Add median survey month per admin unit ----
+  if (!is.null(cluster_interview_months) && nrow(cluster_interview_months) > 0) {
+    month_agg <- .aggregate_interview_month_to_admin(
+      cluster_months = cluster_interview_months,
+      admin_sf = base_sf,
+      admin_col = merge_key
+    )
+    if (!is.null(month_agg) && nrow(month_agg) > 0) {
+      final <- final |>
+        dplyr::left_join(month_agg, by = merge_key)
+    }
+  }
+
+  # ---- Merge MBG estimates ----
 
   # Warn if merge key column not found in final dataset
   if (!merge_key %in% names(final)) {
@@ -2242,9 +2290,9 @@ run_mbg_indicator_pipeline <- function(
 
   # Define required identifier columns (include adm3 if aggregation_level is adm3)
   if (aggregation_level == "adm3") {
-    id_cols <- c("iso3_code", "dhs_code", "adm0", "adm1", "adm2", "adm3", "survey_year", "survey_type")
+    id_cols <- c("iso3_code", "dhs_code", "adm0", "adm1", "adm2", "adm3", "survey_year", "survey_type", "median_survey_month")
   } else {
-    id_cols <- c("iso3_code", "dhs_code", "adm0", "adm1", "adm2", "survey_year", "survey_type")
+    id_cols <- c("iso3_code", "dhs_code", "adm0", "adm1", "adm2", "survey_year", "survey_type", "median_survey_month")
   }
   id_cols_present <- intersect(id_cols, names(final))
 
@@ -2549,7 +2597,8 @@ run_mbg_indicator_pipeline <- function(
     "n_tested", "n_pos", "n_households", "n_births", "n_deaths",
     "n_fever", "n_sought", "n_women", "n_recent", "n_iptp",
     "n_public", "n_private", "n_none", "n_trained", "n_individuals",
-    "n_with_access", "positive", "pop", "cluster_id", "_id$"
+    "n_with_access", "positive", "pop", "cluster_id", "_id$",
+    "median_survey_month"
   )
 
   # Indicator columns (percentages 0-100, or rates like u5mr per 1,000) → 2 decimal places

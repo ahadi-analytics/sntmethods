@@ -81,3 +81,114 @@
 
   cluster_data
 }
+
+
+#' Extract Interview Month per Cluster
+#'
+#' Extracts the median interview month for each DHS cluster from any
+#' available recode file (KR > PR > HR > IR preference order).
+#'
+#' @param survey_data Named list of loaded survey data frames.
+#' @param gps_clean Cleaned GPS data from `.prepare_gps_data()`.
+#'
+#' @return A tibble with columns: cluster_id, interview_month, x, y.
+#'   Returns NULL if no interview month data could be extracted.
+#'
+#' @noRd
+.extract_cluster_interview_month <- function(survey_data, gps_clean) {
+  recode_vars <- list(
+    KR = list(cluster = "v001", month = "v006"),
+    PR = list(cluster = "hv001", month = "hv006"),
+    HR = list(cluster = "hv001", month = "hv006"),
+    IR = list(cluster = "v001", month = "v006")
+  )
+
+  for (recode in c("KR", "PR", "HR", "IR")) {
+    if (!recode %in% names(survey_data)) next
+
+    df <- survey_data[[recode]]
+    vars <- recode_vars[[recode]]
+
+    if (!all(c(vars$cluster, vars$month) %in% names(df))) next
+
+    cluster_months <- df |>
+      dplyr::transmute(
+        cluster_id = as.integer(haven::zap_labels(.data[[vars$cluster]])),
+        interview_month = as.integer(haven::zap_labels(.data[[vars$month]]))
+      ) |>
+      dplyr::filter(!is.na(interview_month), !is.na(cluster_id)) |>
+      dplyr::group_by(cluster_id) |>
+      dplyr::summarise(
+        interview_month = as.integer(stats::median(interview_month, na.rm = TRUE)),
+        .groups = "drop"
+      )
+
+    if (nrow(cluster_months) > 0) {
+      cluster_months <- cluster_months |>
+        dplyr::inner_join(gps_clean, by = "cluster_id")
+
+      cli::cli_alert_info(
+        "Interview month extracted from {recode}: {nrow(cluster_months)} clusters"
+      )
+      return(cluster_months)
+    }
+  }
+
+  cli::cli_alert_warning("Could not extract interview month from any recode file")
+  NULL
+}
+
+
+#' Aggregate Interview Month to Administrative Level
+#'
+#' Spatially joins cluster-level interview months to admin polygons and
+#' computes the median month per administrative unit.
+#'
+#' @param cluster_months Tibble from `.extract_cluster_interview_month()`.
+#' @param admin_sf sf object with administrative boundaries.
+#' @param admin_col Column name for admin identifier (e.g., "adm2").
+#'
+#' @return A tibble with columns: `admin_col` and `median_survey_month`.
+#'   Returns NULL if no valid data.
+#'
+#' @noRd
+.aggregate_interview_month_to_admin <- function(
+  cluster_months,
+  admin_sf,
+  admin_col = "adm2"
+) {
+  if (is.null(cluster_months) || nrow(cluster_months) == 0) return(NULL)
+
+  cluster_sf <- cluster_months |>
+    sf::st_as_sf(coords = c("x", "y"), crs = 4326, remove = FALSE)
+
+  admin_crs <- sf::st_crs(admin_sf)
+  if (!is.na(admin_crs)) {
+    cluster_sf <- sf::st_transform(cluster_sf, admin_crs)
+  }
+
+  joined <- sf::st_join(
+    cluster_sf,
+    admin_sf |> dplyr::select(dplyr::all_of(admin_col)),
+    join = sf::st_within,
+    left = TRUE
+  )
+
+  unmatched <- is.na(joined[[admin_col]])
+  if (any(unmatched)) {
+    nearest_idx <- sf::st_nearest_feature(joined[unmatched, ], admin_sf)
+    joined[[admin_col]][unmatched] <- admin_sf[[admin_col]][nearest_idx]
+  }
+
+  result <- sf::st_drop_geometry(joined) |>
+    dplyr::filter(!is.na(.data[[admin_col]])) |>
+    dplyr::group_by(dplyr::across(dplyr::all_of(admin_col))) |>
+    dplyr::summarise(
+      median_survey_month = as.integer(
+        round(stats::median(interview_month, na.rm = TRUE))
+      ),
+      .groups = "drop"
+    )
+
+  result
+}
