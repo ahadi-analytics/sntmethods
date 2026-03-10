@@ -605,13 +605,14 @@ results_dhs$skipped_indicators
 | `u5mr` | `u5mr` | BR | Under 5 |
 | `smc` | `smc_receipt` | KR | Under 5 |
 | `fever` | `fever` | KR | Under 5 |
-| `antimalarial` | `antimalarial` | KR | Febrile U5 |
-| `act` | `act_coverage` | KR | Febrile U5 |
+| `antimalarial` | `antimalarial`, `antimalarial_public` | KR | Febrile U5 |
+| `act` | `act`, `act_public`, `act_among_am` | KR | Febrile U5 |
 | `csb` | `csb` (care-seeking) | KR | Febrile U5 |
 | `irs` | `irs_coverage` | HR | Household |
 
 Individual ITN sub-indicators can be passed directly (e.g. `indicators = c("itn_access", "itn_use_u5")`)
-for faster runs when you only need specific sub-indicators.
+for faster runs when you only need specific sub-indicators. Similarly, `act_public`, `act_among_am`,
+and `antimalarial_public` can be requested as top-level pipeline indicators.
 
 ---
 

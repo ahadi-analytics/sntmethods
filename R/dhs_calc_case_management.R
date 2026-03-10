@@ -116,16 +116,24 @@ calc_case_management_dhs <- function(
     include_survey_vars = TRUE
   )
 
+  # Build row index matching .prepare_csb_data() filtering (fever + age + alive)
+  has_alive_var <- !is.null(survey_vars$alive) &&
+    survey_vars$alive %in% names(dhs_kr)
+
+  febrile_condition <- dhs_kr[[survey_vars$fever]] == 1 &
+    dhs_kr[[survey_vars$age]] >= 0 &
+    dhs_kr[[survey_vars$age]] <= 59
+
+  if (has_alive_var) {
+    febrile_condition <- febrile_condition &
+      dhs_kr[[survey_vars$alive]] == 1
+  }
+
+  febrile_idx <- which(febrile_condition)
+
   # Preserve region_var from original data
   if (!is.null(region_var)) {
-    # Match rows back via cluster_id + row position
-    kr_fever[[region_var]] <- dhs_kr[[region_var]][
-      which(
-        dhs_kr[[survey_vars$fever]] == 1 &
-        dhs_kr[[survey_vars$age]] >= 0 &
-        dhs_kr[[survey_vars$age]] <= 59
-      )
-    ]
+    kr_fever[[region_var]] <- dhs_kr[[region_var]][febrile_idx]
   }
 
   # ---- 3. Add antimalarial variable ----
@@ -148,22 +156,20 @@ calc_case_management_dhs <- function(
     )
   }
 
-  # Get the drug columns from the original data, aligned to febrile U5 rows
-  febrile_idx <- which(
-    dhs_kr[[survey_vars$fever]] == 1 &
-    dhs_kr[[survey_vars$age]] >= 0 &
-    dhs_kr[[survey_vars$age]] <= 59
-  )
-
   for (dvar in drug_series) {
     kr_fever[[dvar]] <- haven::zap_labels(dhs_kr[[dvar]][febrile_idx])
     kr_fever[[dvar]] <- as.vector(kr_fever[[dvar]])
+    # Recode "don't know" (8) and coded-missing (9) to NA
+    kr_fever[[dvar]][!kr_fever[[dvar]] %in% c(0, 1)] <- NA
   }
 
-  # Create received_antimalarial: 1 if any drug variable == 1
-  kr_fever$received_antimalarial <- as.integer(
-    rowSums(kr_fever[, drug_series, drop = FALSE] == 1, na.rm = TRUE) > 0
-  )
+  # Create received_antimalarial: 1 if any drug variable == 1, NA if all NA
+  drug_matrix <- as.matrix(kr_fever[, drug_series, drop = FALSE])
+  kr_fever$received_antimalarial <- apply(drug_matrix, 1, function(row) {
+    if (all(is.na(row))) return(NA_real_)
+    if (any(row == 1, na.rm = TRUE)) return(1)
+    return(0)
+  })
 
   n_am <- sum(kr_fever$received_antimalarial == 1, na.rm = TRUE)
   cli::cli_alert_info(
@@ -178,18 +184,14 @@ calc_case_management_dhs <- function(
 
   act_var <- survey_vars$act %||% "ml13e"
   if (act_var %in% names(dhs_kr)) {
-    kr_fever$received_act <- as.integer(
-      haven::zap_labels(dhs_kr[[act_var]][febrile_idx])
-    )
-    kr_fever$received_act <- as.vector(kr_fever$received_act)
+    raw_act <- as.vector(haven::zap_labels(dhs_kr[[act_var]][febrile_idx]))
+    kr_fever$received_act <- dplyr::if_else(raw_act %in% c(0, 1), raw_act, NA_real_)
   } else if ("h37e" %in% names(dhs_kr)) {
     cli::cli_alert_info(
       "ACT variable {.var {act_var}} not found; using {.var h37e} fallback"
     )
-    kr_fever$received_act <- as.integer(
-      haven::zap_labels(dhs_kr[["h37e"]][febrile_idx])
-    )
-    kr_fever$received_act <- as.vector(kr_fever$received_act)
+    raw_act <- as.vector(haven::zap_labels(dhs_kr[["h37e"]][febrile_idx]))
+    kr_fever$received_act <- dplyr::if_else(raw_act %in% c(0, 1), raw_act, NA_real_)
   } else {
     cli::cli_abort(c(
       "ACT variable {.var {act_var}} not found (also tried {.var h37e}).",
@@ -286,8 +288,8 @@ calc_case_management_dhs <- function(
   csb_pub_est <- as.numeric(csb_means["csb_public"])
   csb_pub_se <- as.numeric(csb_se["csb_public"])
 
-  # ACT rate among ALL antimalarial recipients (for eff_cm_any)
-  act_am_any <- .compute_act_among_am(kr_fever)
+  # ACT rate among antimalarial recipients who sought ANY care (for eff_cm_any)
+  act_am_any <- .compute_act_among_am(kr_fever, csb_filter = "csb_any_treatment")
 
   # ACT rate among PUBLIC-CARE antimalarial recipients (for eff_cm_public)
   act_am_public <- .compute_act_among_am(kr_fever, csb_filter = "csb_public")
@@ -376,7 +378,7 @@ calc_case_management_dhs <- function(
 
   for (grp in groups) {
     kr_grp <- kr_fever[kr_fever[[region_var]] == grp, ]
-    act_am_any <- .compute_act_among_am(kr_grp)
+    act_am_any <- .compute_act_among_am(kr_grp, csb_filter = "csb_any_treatment")
     act_am_public <- .compute_act_among_am(kr_grp, csb_filter = "csb_public")
 
     # Get CSB estimates for this group

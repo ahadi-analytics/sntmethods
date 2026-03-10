@@ -75,6 +75,7 @@ calc_act_dhs <- function(
     stratum = "v022",
     age = "hw1",
     fever = "h22",
+    alive = "b5",
     act = "ml13e",
     test = "ml13a"
   ),
@@ -159,6 +160,57 @@ calc_act_dhs <- function(
           missing = NA_real_
         )
       )
+  }
+
+  # ---- 2b. Enrich with antimalarial + CSB for act_among_am indicator ----
+
+  # Build febrile_idx matching .prepare_act_data() filtering
+  has_alive_var <- !is.null(survey_vars$alive) &&
+    survey_vars$alive %in% names(dhs_kr)
+
+  febrile_cond <- dhs_kr[[survey_vars$fever]] == 1 &
+    dhs_kr[[survey_vars$age]] >= 0 &
+    dhs_kr[[survey_vars$age]] <= 59
+  if (has_alive_var) {
+    febrile_cond <- febrile_cond & dhs_kr[[survey_vars$alive]] == 1
+  }
+  febrile_idx <- which(febrile_cond)
+
+  # Add antimalarial composite
+  ml13_vars <- grep("^ml13[a-z]+$", names(dhs_kr), value = TRUE)
+  h37_vars_am <- grep("^h37[a-h]$", names(dhs_kr), value = TRUE)
+
+  if (length(ml13_vars) > 0) {
+    drug_series <- ml13_vars
+  } else if (length(h37_vars_am) > 0) {
+    drug_series <- h37_vars_am
+  } else {
+    drug_series <- character(0)
+  }
+
+  has_am_data <- length(drug_series) > 0
+  if (has_am_data) {
+    for (dvar in drug_series) {
+      kr_fever[[dvar]] <- as.vector(haven::zap_labels(dhs_kr[[dvar]][febrile_idx]))
+      kr_fever[[dvar]][!kr_fever[[dvar]] %in% c(0, 1)] <- NA
+    }
+    drug_matrix <- as.matrix(kr_fever[, drug_series, drop = FALSE])
+    kr_fever$received_antimalarial <- apply(drug_matrix, 1, function(row) {
+      if (all(is.na(row))) return(NA_real_)
+      if (any(row == 1, na.rm = TRUE)) return(1)
+      return(0)
+    })
+  }
+
+  # Add CSB indicators
+  has_csb_data <- FALSE
+  kr_fever_csb <- tryCatch(
+    .classify_csb_from_h32(kr_fever),
+    error = function(e) NULL
+  )
+  if (!is.null(kr_fever_csb)) {
+    kr_fever <- kr_fever_csb
+    has_csb_data <- "csb_any" %in% names(kr_fever)
   }
 
   # ---- 3. Spatial join if GPS + shapefile provided ----
@@ -421,6 +473,84 @@ calc_act_dhs <- function(
     }
   }
 
+  # ---- 5b. ACT among antimalarial recipients who sought care ----
+
+  if (has_am_data && has_csb_data) {
+    kr_am_csb <- kr_fever |>
+      dplyr::filter(
+        received_antimalarial == 1,
+        csb_any == 1,
+        !is.na(has_act)
+      )
+
+    if (nrow(kr_am_csb) > 0 && dplyr::n_distinct(kr_am_csb$cluster_id) > 1) {
+      use_strata_am <- dplyr::n_distinct(kr_am_csb$stratum_id) > 1
+
+      if (use_strata_am) {
+        des_am <- survey::svydesign(
+          ids = ~cluster_id, strata = ~stratum_id,
+          weights = ~survey_weight, data = kr_am_csb, nest = TRUE
+        )
+      } else {
+        des_am <- survey::svydesign(
+          ids = ~cluster_id, weights = ~survey_weight,
+          data = kr_am_csb, nest = TRUE
+        )
+      }
+
+      if (!is.null(class_var) && class_var %in% names(kr_am_csb)) {
+        am_results <- tryCatch({
+          survey::svyby(
+            ~has_act, by = group_formula, design = des_am,
+            FUN = survey::svymean, vartype = "ci", na.rm = TRUE,
+            keep.names = FALSE
+          ) |> tibble::as_tibble()
+        }, error = function(e) {
+          cli::cli_alert_warning(
+            "Could not calculate act_among_am by group: {e$message}"
+          )
+          NULL
+        })
+      } else {
+        am_mean <- survey::svymean(~has_act, design = des_am, na.rm = TRUE)
+        am_ci <- stats::confint(am_mean)
+
+        am_results <- tibble::tibble(
+          level = "National",
+          has_act = as.numeric(am_mean["has_act"]),
+          `ci_l.has_act` = am_ci["has_act", 1],
+          `ci_u.has_act` = am_ci["has_act", 2]
+        )
+      }
+
+      if (!is.null(am_results)) {
+        names(am_results)[names(am_results) == "ci_l"] <- "ci_l.has_act"
+        names(am_results)[names(am_results) == "ci_u"] <- "ci_u.has_act"
+
+        am_results <- am_results |>
+          dplyr::rename(
+            dhs_act_among_am = has_act,
+            dhs_act_among_am_low = `ci_l.has_act`,
+            dhs_act_among_am_upp = `ci_u.has_act`
+          )
+
+        join_by_am <- if (!is.null(class_var)) class_var else "level"
+        act_results <- act_results |>
+          dplyr::left_join(
+            am_results |> dplyr::select(
+              dplyr::all_of(join_by_am),
+              dhs_act_among_am, dhs_act_among_am_low, dhs_act_among_am_upp
+            ),
+            by = join_by_am
+          )
+      }
+    } else {
+      cli::cli_alert_warning(
+        "Too few antimalarial recipients who sought care for act_among_am estimates"
+      )
+    }
+  }
+
   # ---- 6. Calculate sample sizes ----
 
   if (!is.null(class_var)) {
@@ -430,6 +560,8 @@ calc_act_dhs <- function(
         dhs_n_fever = dplyr::n(),
         dhs_n_act = sum(has_act == 1, na.rm = TRUE),
         dhs_n_tested = sum(test_positive == 1, na.rm = TRUE),
+        dhs_n_antimalarial = if (has_am_data)
+          sum(received_antimalarial == 1, na.rm = TRUE) else NA_integer_,
         .groups = "drop"
       )
 
@@ -439,6 +571,11 @@ calc_act_dhs <- function(
     act_results$dhs_n_fever <- nrow(kr_fever)
     act_results$dhs_n_act <- sum(kr_fever$has_act == 1, na.rm = TRUE)
     act_results$dhs_n_tested <- sum(kr_fever$test_positive == 1, na.rm = TRUE)
+    if (has_am_data) {
+      act_results$dhs_n_antimalarial <- sum(
+        kr_fever$received_antimalarial == 1, na.rm = TRUE
+      )
+    }
   }
 
   # ---- 6.5. Febrile RDT indicators (if dhs_pr provided) ----
@@ -619,7 +756,8 @@ calc_act_dhs <- function(
 
   # Ensure count columns are integers
   count_cols <- intersect(
-    c("dhs_n_fever", "dhs_n_act", "dhs_n_tested", "dhs_n_febrile_rdt", "dhs_n_febrile_rdt_pos"),
+    c("dhs_n_fever", "dhs_n_act", "dhs_n_tested", "dhs_n_antimalarial",
+      "dhs_n_febrile_rdt", "dhs_n_febrile_rdt_pos"),
     names(act_results)
   )
   act_results <- act_results |>

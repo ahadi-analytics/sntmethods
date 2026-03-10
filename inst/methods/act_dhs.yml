@@ -31,6 +31,27 @@ indicators:
       More restrictive denominator than act. This is a secondary/exploratory
       indicator; the primary act indicator uses all febrile children as denominator.
 
+  act_public:
+    name: "Received ACT among febrile children who sought public care"
+    numerator: "Febrile children who sought public care and received ACT"
+    denominator: "Children under 5 with fever who sought public care (csb_public == 1)"
+    description: >
+      Proportion of U5 children with fever in last 2 weeks who sought care
+      from a public health facility or CHW and received ACT. Denominator is
+      restricted to public care seekers.
+
+  act_among_am:
+    name: "Received ACT among antimalarial recipients who sought care"
+    numerator: "Febrile children who sought care, received an antimalarial, and received ACT"
+    denominator: "Children under 5 with fever who sought any care (csb_any == 1) AND received any antimalarial"
+    description: >
+      Proportion receiving ACT among febrile U5 children
+      who sought care and received any antimalarial treatment. This is the
+      standard WMR headline indicator "Use of ACTs among those for whom care
+      was sought and who were treated with an antimalarial". This indicator
+      is also used as the ACT component in the effective case management
+      (eff_cm) composite calculation.
+
   febrile_rdt_pos:
     name: "RDT positivity rate among febrile children under 5"
     numerator: "Febrile U5 children with positive RDT (hml35 == 1)"
@@ -142,10 +163,13 @@ variables:
       more appropriate test-positive denominator aligned with WMR methodology.
 
 eligibility:
+  - "Child is alive (b5 == 1)"
   - "Child age 0-59 months (hw1 >= 0 and hw1 <= 59)"
   - "Child had fever in last 2 weeks (h22 == 1)"
   - "Non-missing ACT response (received_act not NA) for act indicator"
+  - "'Don't know' responses (value 8) and coded-missing (value 9) are recoded to NA and excluded from both numerator and denominator"
   - "survey_vars$test == 1 for act_tested indicator (default: ml13a == 1; see test_filter variable note)"
+  - "act_among_am: csb_any == 1 AND received_antimalarial == 1 AND non-missing ACT"
   - "Valid GPS coordinates required only for calc_act_mbg() output"
   - "febrile_rdt_pos: febrile child matched to PR via v001+v002+b16_01 with hml35 in {0, 1}"
   - "febrile_rdt_pos_act: same as above, restricted to hml35 == 1 (RDT-positive)"
@@ -175,9 +199,13 @@ methodology:
     WMR computes ACT receipt at multiple levels:
     (1) among all febrile children (denominator: fever==yes),
     (2) among those who sought any treatment (denominator: csb_any==1),
-    (3) among those who received any antimalarial (denominator: receive_antimalarial==1),
+    (3) among those who received any antimalarial and sought care
+        (denominator: csb_any==1 & received_antimalarial==1),
     (4) among those diagnosed with malaria (denominator: csb_any==1 & malaria_dx==yes).
-    sntmethods implements level (1) as the act indicator.
+    sntmethods implements level (1) as the act indicator and level (3) as
+    act_among_am. The act_among_am indicator matches the WMR headline
+    "Use of ACTs among those for whom care was sought and who were treated
+    with an antimalarial".
     The act_tested indicator uses a configurable proxy variable (default: ml13a)
     as a denominator filter — this does NOT replicate WMR level (4). To align
     with WMR level (4), set survey_vars$test = "h47" (blood taken for testing).
@@ -211,9 +239,13 @@ output_format:
       dhs_act_tested: "Proportion receiving ACT among test-filtered children (if available)"
       dhs_act_tested_low: "Lower 95% CI for act_tested (clamped to [0,1])"
       dhs_act_tested_upp: "Upper 95% CI for act_tested (clamped to [0,1])"
+      dhs_act_among_am: "Proportion receiving ACT among antimalarial recipients who sought care"
+      dhs_act_among_am_low: "Lower 95% CI for act_among_am (clamped to [0,1])"
+      dhs_act_among_am_upp: "Upper 95% CI for act_among_am (clamped to [0,1])"
       dhs_n_fever: "Unweighted count of febrile children (denominator for act)"
       dhs_n_act: "Unweighted count receiving ACT (numerator)"
       dhs_n_tested: "Unweighted count where test variable == 1 (denominator for act_tested)"
+      dhs_n_antimalarial: "Unweighted count who received any antimalarial (denominator context for act_among_am)"
       dhs_febrile_rdt_pos: "RDT positivity rate among febrile children with valid test (if dhs_pr provided)"
       dhs_febrile_rdt_pos_low: "Lower 95% CI for febrile_rdt_pos"
       dhs_febrile_rdt_pos_upp: "Upper 95% CI for febrile_rdt_pos"

@@ -259,8 +259,8 @@ run_mbg_indicator_pipeline <- function(
     # ITN sub-indicators (selectable individually for faster pipelines)
     "itn_ownership", "itn_access", "itn_use_all", "itn_use_u5",
     "itn_use_pregnant", "itn_use_if_access",
-    # Public care-seeking sub-indicators
-    "act_public", "antimalarial_public",
+    # Public care-seeking and WMR sub-indicators
+    "act_public", "act_among_am", "antimalarial_public",
     # Derived indicators (auto-expand to required dependencies)
     "eff_cm"
   )
@@ -273,7 +273,8 @@ run_mbg_indicator_pipeline <- function(
   }
 
   # Collapse sub-indicators into parent categories (they are produced together)
-  sub_to_parent <- c(act_public = "act", antimalarial_public = "antimalarial")
+  sub_to_parent <- c(act_public = "act", act_among_am = "act",
+                     antimalarial_public = "antimalarial")
   for (sub in names(sub_to_parent)) {
     if (sub %in% indicators) {
       parent <- sub_to_parent[[sub]]
@@ -1203,6 +1204,7 @@ run_mbg_indicator_pipeline <- function(
     },
 
     act_public = ,
+    act_among_am = ,
     act = {
       if (!"KR" %in% names(survey_data)) {
         return(skip_indicator("Missing KR data (Children Recode)"))
@@ -1211,7 +1213,7 @@ run_mbg_indicator_pipeline <- function(
         calc_act_mbg(
           dhs_kr = survey_data$KR,
           gps_data = gps_data,
-          indicators = c("act", "act_public")
+          indicators = c("act", "act_public", "act_among_am")
         )
       }, error = function(e) {
         results$skipped <<- glue::glue("Calculation error: {e$message}")

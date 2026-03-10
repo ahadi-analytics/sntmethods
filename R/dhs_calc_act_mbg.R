@@ -64,6 +64,7 @@ calc_act_mbg <- function(
     cluster = "v001",
     age = "hw1",
     fever = "h22",
+    alive = "b5",
     act = "ml13e",
     test = "ml13a"
   ),
@@ -82,7 +83,7 @@ calc_act_mbg <- function(
     cli::cli_abort("`gps_data` must be a data.frame or tibble")
   }
 
-  valid_indicators <- c("act", "act_public", "act_tested", "febrile_rdt_pos", "febrile_rdt_pos_act")
+  valid_indicators <- c("act", "act_public", "act_among_am", "act_tested", "febrile_rdt_pos", "febrile_rdt_pos_act")
   invalid <- setdiff(indicators, valid_indicators)
   if (length(invalid) > 0) {
     cli::cli_abort("Invalid indicators: {.val {invalid}}")
@@ -179,6 +180,80 @@ calc_act_mbg <- function(
     }
   }
 
+  if ("act_among_am" %in% indicators) {
+    # Enrich with CSB + antimalarial for act_among_am indicator
+    kr_fever_enriched <- tryCatch(
+      .classify_csb_from_h32(kr_fever),
+      error = function(e) {
+        cli::cli_alert_warning(
+          "Cannot compute act_among_am (CSB): {conditionMessage(e)}"
+        )
+        NULL
+      }
+    )
+
+    if (!is.null(kr_fever_enriched)) {
+      # Add antimalarial composite
+      ml13_vars <- grep("^ml13[a-z]+$", names(dhs_kr), value = TRUE)
+      h37_vars_am <- grep("^h37[a-h]$", names(dhs_kr), value = TRUE)
+      drug_series <- if (length(ml13_vars) > 0) ml13_vars else h37_vars_am
+
+      if (length(drug_series) > 0) {
+        # Build febrile index matching .prepare_act_data() filtering
+        has_alive_var <- !is.null(survey_vars$alive) &&
+          survey_vars$alive %in% names(dhs_kr)
+        febrile_cond <- dhs_kr[[survey_vars$fever]] == 1 &
+          dhs_kr[[survey_vars$age]] >= 0 &
+          dhs_kr[[survey_vars$age]] <= 59
+        if (has_alive_var) {
+          febrile_cond <- febrile_cond & dhs_kr[[survey_vars$alive]] == 1
+        }
+        febrile_idx <- which(febrile_cond)
+
+        for (dvar in drug_series) {
+          kr_fever_enriched[[dvar]] <- as.vector(
+            haven::zap_labels(dhs_kr[[dvar]][febrile_idx])
+          )
+          kr_fever_enriched[[dvar]][!kr_fever_enriched[[dvar]] %in% c(0, 1)] <- NA
+        }
+        drug_matrix <- as.matrix(kr_fever_enriched[, drug_series, drop = FALSE])
+        kr_fever_enriched$received_antimalarial <- apply(
+          drug_matrix, 1, function(row) {
+            if (all(is.na(row))) return(NA_real_)
+            if (any(row == 1, na.rm = TRUE)) return(1)
+            return(0)
+          }
+        )
+
+        act_am_data <- kr_fever_enriched |>
+          dplyr::filter(
+            csb_any == 1,
+            received_antimalarial == 1,
+            !is.na(received_act)
+          ) |>
+          dplyr::mutate(act_binary = as.integer(received_act == 1))
+
+        if (nrow(act_am_data) > 0) {
+          dt <- .aggregate_to_mbg_clusters(
+            individual_data = act_am_data,
+            indicator_col = "act_binary",
+            gps_clean = gps_clean,
+            result_name = "act_among_am"
+          )
+          if (!is.null(dt)) results[["act_among_am"]] <- dt
+        } else {
+          cli::cli_alert_warning(
+            "No antimalarial recipients who sought care - skipping act_among_am"
+          )
+        }
+      } else {
+        cli::cli_alert_warning(
+          "No antimalarial variables found - skipping act_among_am"
+        )
+      }
+    }
+  }
+
   if ("act_tested" %in% indicators) {
     if (!has_test_var) {
       cli::cli_alert_warning(
@@ -269,6 +344,7 @@ prep_act_mbg <- function(
     cluster = "v001",
     age = "hw1",
     fever = "h22",
+    alive = "b5",
     act = "ml13e",
     test = "ml13a"
   ),

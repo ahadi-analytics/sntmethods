@@ -59,7 +59,8 @@ calc_antimalarial_dhs_core <- function(
     weight = "v005",
     stratum = "v022",
     age = "hw1",
-    fever = "h22"
+    fever = "h22",
+    alive = "b5"
   ),
   region_var = NULL,
   gps_data = NULL,
@@ -386,7 +387,8 @@ calc_antimalarial_dhs <- function(
     weight = "v005",
     stratum = "v022",
     age = "hw1",
-    fever = "h22"
+    fever = "h22",
+    alive = "b5"
   ),
   region_var = NULL,
   gps_data = NULL,

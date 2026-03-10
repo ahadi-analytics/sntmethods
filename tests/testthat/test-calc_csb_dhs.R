@@ -110,7 +110,7 @@ test_that("calc_csb_dhs_core works with multiple h32 sources", {
   expect_true(all(abs(result$dhs_csb_any + result$dhs_csb_none - 1) < 0.01, na.rm = TRUE))
 })
 
-test_that("calc_csb_dhs_core includes all children with fever (no survival filter)", {
+test_that("calc_csb_dhs_core excludes deceased children (b5 == 0)", {
   skip_if_not_installed("survey")
 
   set.seed(456)
@@ -133,13 +133,12 @@ test_that("calc_csb_dhs_core includes all children with fever (no survival filte
   kr_data$h32j <- ifelse(kr_data$h22 == 1,
     sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE), NA)
 
-  # Count ALL children with fever (no survival filter per standard DHS methodology)
-  expected_fever <- sum(kr_data$h22 == 1)
+  # Count alive children with fever (alive filter now applied)
+  expected_fever <- sum(kr_data$h22 == 1 & kr_data$b5 == 1)
 
   result <- calc_csb_dhs_core(kr_data)
 
-  # The sample size should include all children with fever
-  # (fever in last 2 weeks implies child was alive recently)
+  # The sample size should only include alive children with fever
   expect_equal(result$dhs_n_fever, expected_fever)
 })
 

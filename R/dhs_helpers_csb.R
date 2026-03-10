@@ -108,6 +108,11 @@
       had_fever == 1
     )
 
+  if (has_alive) {
+    kr_fever <- kr_fever |>
+      dplyr::filter(child_alive == 1)
+  }
+
   if (nrow(kr_fever) == 0) {
     cli::cli_abort("No children with fever in the last 2 weeks found.")
   }

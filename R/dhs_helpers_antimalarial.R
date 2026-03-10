@@ -88,6 +88,14 @@
       )
   }
 
+  # Check alive variable if present
+  has_alive <- !is.null(survey_vars$alive) &&
+    survey_vars$alive %in% names(dhs_kr)
+  if (has_alive) {
+    kr <- kr |>
+      dplyr::mutate(child_alive = .data[[survey_vars$alive]])
+  }
+
   # Filter to febrile U5 children
   kr_fever <- kr |>
     dplyr::filter(
@@ -95,6 +103,11 @@
       age_months <= 59,
       had_fever == 1
     )
+
+  if (has_alive) {
+    kr_fever <- kr_fever |>
+      dplyr::filter(child_alive == 1)
+  }
 
   if (nrow(kr_fever) == 0) {
     cli::cli_abort("No children with fever in the last 2 weeks found.")
@@ -105,6 +118,7 @@
     # h37* series: 1 if ANY drug variable == 1
     # Each h37x records whether a specific drug was taken for fever/cough
     h37_matrix <- as.matrix(kr_fever[, h37_vars, drop = FALSE])
+    h37_matrix[!h37_matrix %in% c(0, 1)] <- NA
     kr_fever$received_antimalarial <- apply(h37_matrix, 1, function(row) {
       if (all(is.na(row))) return(NA_real_)
       if (any(row == 1, na.rm = TRUE)) return(1)
@@ -114,6 +128,7 @@
   } else {
     # ml13* series: 1 if ANY drug variable == 1
     ml13_matrix <- as.matrix(kr_fever[, ml13_vars, drop = FALSE])
+    ml13_matrix[!ml13_matrix %in% c(0, 1)] <- NA
     kr_fever$received_antimalarial <- apply(ml13_matrix, 1, function(row) {
       if (all(is.na(row))) return(NA_real_)
       if (any(row == 1, na.rm = TRUE)) return(1)

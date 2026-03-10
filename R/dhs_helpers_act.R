@@ -65,7 +65,9 @@
       cluster_id = .data[[survey_vars$cluster]],
       age_months = .data[[survey_vars$age]],
       had_fever = .data[[survey_vars$fever]],
-      received_act = .data[[act_var]]
+      received_act = dplyr::if_else(
+        .data[[act_var]] %in% c(0, 1), .data[[act_var]], NA_real_
+      )
     )
 
   if (has_test_var) {
@@ -82,6 +84,14 @@
       )
   }
 
+  # Check alive variable if present
+  has_alive <- !is.null(survey_vars$alive) &&
+    survey_vars$alive %in% names(dhs_kr)
+  if (has_alive) {
+    kr <- kr |>
+      dplyr::mutate(child_alive = .data[[survey_vars$alive]])
+  }
+
   # Filter to febrile U5 children
   kr_fever <- kr |>
     dplyr::filter(
@@ -89,6 +99,11 @@
       age_months <= 59,
       had_fever == 1
     )
+
+  if (has_alive) {
+    kr_fever <- kr_fever |>
+      dplyr::filter(child_alive == 1)
+  }
 
   if (nrow(kr_fever) == 0) {
     cli::cli_abort("No children with fever in the last 2 weeks found.")
