@@ -69,7 +69,8 @@ calc_itn_dhs_core <- function(
     sex = "hv104",
     pregnant = "hml18",
     itn_use = "hml12",
-    itn_prefix = "hml10_"
+    itn_prefix = "hml10_",
+    itn_treated_prefix = "hml7_"
   ),
   gps_data = NULL,
   gps_vars = list(
@@ -148,27 +149,8 @@ calc_itn_dhs_core <- function(
     )
   }
 
-  # itn net variables in hr
-  itn_variable_names <- names(dhs_hr)[
-    grepl(
-      paste0("^", survey_vars$itn_prefix),
-      names(dhs_hr)
-    )
-  ]
-
-  if (length(itn_variable_names) == 0) {
-    cli::cli_abort(
-      c(
-        "No ITN variables found with prefix {.var {survey_vars$itn_prefix}}",
-        "i" = "Check that ITN net variables exist in HR data"
-      )
-    )
-  }
-
-  n_itn_vars <- length(itn_variable_names)
-  cli::cli_alert_info(
-    "Found {format(n_itn_vars, big.mark = ',')} ITN net variables in HR data"
-  )
+  # ITN net variable detection is handled by .prepare_itn_household_data()
+  # which implements the full fallback chain (hml10_* -> hml10 -> hml7_*)
 
   # ---- validate age stratification (if provided) ----------------------------
   age_strat_config <- .validate_age_stratification(
@@ -191,6 +173,13 @@ calc_itn_dhs_core <- function(
     survey_vars = survey_vars,
     include_survey_vars = TRUE
   )
+
+  if (is.null(household_core_data)) {
+    cli::cli_warn(
+      "ITN indicators skipped: no ITN variables found in HR data (checked hml10_*, hml10, hml7_*)"
+    )
+    return(NULL)
+  }
 
   # Rename helper columns to match downstream expectations
   household_core_data <- household_core_data |>
@@ -1707,7 +1696,8 @@ calc_itn_dhs <- function(
     sex = "hv104",
     pregnant = "hml18",
     itn_use = "hml12",
-    itn_prefix = "hml10_"
+    itn_prefix = "hml10_",
+    itn_treated_prefix = "hml7_"
   ),
   gps_data = NULL,
   gps_vars = list(
@@ -1766,6 +1756,10 @@ calc_itn_dhs <- function(
     age_labels = age_labels,
     min_sample_size = min_sample_size
   )
+
+  if (is.null(itn_results)) {
+    return(NULL)
+  }
 
   # update metadata with aggregation info
   if (!is.null(shapefile)) {

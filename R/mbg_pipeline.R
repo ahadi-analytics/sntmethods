@@ -1737,8 +1737,14 @@ run_mbg_indicator_pipeline <- function(
   model_runner$run_mbg_pipeline()
   cli::cli_alert_success("MBG model complete")
 
-  # Extract predictions
+  # Extract predictions and ensure they are SpatRaster objects
   cell_preds <- model_runner$grid_cell_predictions
+  for (.pred_name in c("cell_pred_mean", "cell_pred_lower", "cell_pred_upper")) {
+    .pred <- cell_preds[[.pred_name]]
+    if (!is.null(.pred) && !inherits(.pred, "SpatRaster")) {
+      cell_preds[[.pred_name]] <- terra::setValues(id_raster, as.vector(.pred))
+    }
+  }
 
   # Save rasters (mean, lower, upper)
   raster_path <- NULL

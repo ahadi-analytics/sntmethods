@@ -79,7 +79,8 @@ calc_itn_mbg <- function(
     sex = "hv104",
     pregnant = "hml18",
     itn_use = "hml12",
-    itn_prefix = "hml10_"
+    itn_prefix = "hml10_",
+    itn_treated_prefix = "hml7_"
   ),
   gps_vars = list(
     cluster = "DHSCLUST",
@@ -107,6 +108,10 @@ calc_itn_mbg <- function(
   # ---- Prepare HR data (household level) ----
 
   hr <- .prepare_itn_household_data(dhs_hr, survey_vars, include_survey_vars = FALSE)
+
+  if (is.null(hr)) {
+    return(NULL)
+  }
 
   # ---- Prepare PR data (individual level with deterministic access) ----
 
@@ -225,7 +230,8 @@ prep_itn_mbg <- function(
     sex = "hv104",
     pregnant = "hml18",
     itn_use = "hml12",
-    itn_prefix = "hml10_"
+    itn_prefix = "hml10_",
+    itn_treated_prefix = "hml7_"
   ),
   gps_vars = list(
     cluster = "DHSCLUST",

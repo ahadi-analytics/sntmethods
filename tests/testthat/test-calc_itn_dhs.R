@@ -281,10 +281,11 @@ test_that("calc_itn_dhs handles missing ITN variables gracefully", {
     hv007 = 2023
   )
 
-  expect_error(
-    calc_itn_dhs(dhs_hr = mock_hr, dhs_pr = mock_pr),
+  expect_warning(
+    result <- calc_itn_dhs(dhs_hr = mock_hr, dhs_pr = mock_pr),
     "No ITN variables found"
   )
+  expect_null(result)
 })
 
 test_that("calc_itn_dhs metadata includes aggregation info", {
