@@ -39,18 +39,30 @@
 
   # Detect ACT variable: prefer ml13e (newer surveys), fall back to h37e (older surveys).
   # h37e = "Combination with artemisinin taken for fever/cough" in older DHS surveys.
+  # Some surveys have ml13e as a placeholder column (all 0/NA) while actual data
+  # is in h37e — check for meaningful values before using ml13e.
   act_var <- survey_vars$act
-  if (!act_var %in% names(dhs_kr)) {
-    if ("h37e" %in% names(dhs_kr)) {
-      cli::cli_alert_info(
-        "ACT variable {.var {act_var}} not found; using {.var h37e} (artemisinin combination for fever/cough)"
-      )
-      act_var <- "h37e"
-    } else {
-      cli::cli_abort(
-        "ACT variable {.var {act_var}} not found in data (also tried {.var h37e})"
-      )
+  if (act_var %in% names(dhs_kr)) {
+    raw_vals <- as.vector(haven::zap_labels(dhs_kr[[act_var]]))
+    has_any_positive <- any(raw_vals == 1, na.rm = TRUE)
+    if (!has_any_positive && "h37e" %in% names(dhs_kr)) {
+      h37e_vals <- as.vector(haven::zap_labels(dhs_kr[["h37e"]]))
+      if (any(h37e_vals == 1, na.rm = TRUE)) {
+        cli::cli_alert_info(
+          "ACT variable {.var {act_var}} has no positive values; using {.var h37e} which has data"
+        )
+        act_var <- "h37e"
+      }
     }
+  } else if ("h37e" %in% names(dhs_kr)) {
+    cli::cli_alert_info(
+      "ACT variable {.var {act_var}} not found; using {.var h37e} (artemisinin combination for fever/cough)"
+    )
+    act_var <- "h37e"
+  } else {
+    cli::cli_abort(
+      "ACT variable {.var {act_var}} not found in data (also tried {.var h37e})"
+    )
   }
   has_test_var <- survey_vars$test %in% names(dhs_kr)
 

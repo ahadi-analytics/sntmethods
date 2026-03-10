@@ -177,11 +177,31 @@ calc_act_dhs <- function(
   febrile_idx <- which(febrile_cond)
 
   # Add antimalarial composite
+  # Check for positive values before choosing ml13 vs h37 series
   ml13_vars <- grep("^ml13[a-z]+$", names(dhs_kr), value = TRUE)
   h37_vars_am <- grep("^h37[a-h]$", names(dhs_kr), value = TRUE)
 
   if (length(ml13_vars) > 0) {
-    drug_series <- ml13_vars
+    ml13_has_data <- any(
+      sapply(ml13_vars, function(v) any(dhs_kr[[v]] == 1, na.rm = TRUE))
+    )
+    if (ml13_has_data) {
+      drug_series <- ml13_vars
+    } else if (length(h37_vars_am) > 0) {
+      h37_has_data <- any(
+        sapply(h37_vars_am, function(v) any(dhs_kr[[v]] == 1, na.rm = TRUE))
+      )
+      if (h37_has_data) {
+        cli::cli_alert_info(
+          "ml13 antimalarial variables have no positive values; using h37 series which has data"
+        )
+        drug_series <- h37_vars_am
+      } else {
+        drug_series <- ml13_vars
+      }
+    } else {
+      drug_series <- ml13_vars
+    }
   } else if (length(h37_vars_am) > 0) {
     drug_series <- h37_vars_am
   } else {

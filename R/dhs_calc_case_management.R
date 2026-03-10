@@ -138,13 +138,34 @@ calc_case_management_dhs <- function(
 
   # ---- 3. Add antimalarial variable ----
 
-  # Detect ml13 series or h37 fallback
+  # Detect ml13 series or h37 fallback (check for positive values)
   ml13_vars <- grep("^ml13[a-z]+$", names(dhs_kr), value = TRUE)
   h37_vars <- grep("^h37[a-h]$", names(dhs_kr), value = TRUE)
 
   if (length(ml13_vars) > 0) {
-    drug_series <- ml13_vars
-    cli::cli_alert_info("Detected {length(ml13_vars)} ml13 antimalarial variables")
+    ml13_has_data <- any(
+      sapply(ml13_vars, function(v) any(dhs_kr[[v]] == 1, na.rm = TRUE))
+    )
+    if (ml13_has_data) {
+      drug_series <- ml13_vars
+      cli::cli_alert_info("Detected {length(ml13_vars)} ml13 antimalarial variables")
+    } else if (length(h37_vars) > 0) {
+      h37_has_data <- any(
+        sapply(h37_vars, function(v) any(dhs_kr[[v]] == 1, na.rm = TRUE))
+      )
+      if (h37_has_data) {
+        drug_series <- h37_vars
+        cli::cli_alert_info(
+          "ml13 variables have no positive values; using {length(h37_vars)} h37 series which has data"
+        )
+      } else {
+        drug_series <- ml13_vars
+        cli::cli_alert_info("Detected {length(ml13_vars)} ml13 antimalarial variables (no positive values found)")
+      }
+    } else {
+      drug_series <- ml13_vars
+      cli::cli_alert_info("Detected {length(ml13_vars)} ml13 antimalarial variables (no positive values found)")
+    }
   } else if (length(h37_vars) > 0) {
     drug_series <- h37_vars
     cli::cli_alert_info(
@@ -185,6 +206,16 @@ calc_case_management_dhs <- function(
   act_var <- survey_vars$act %||% "ml13e"
   if (act_var %in% names(dhs_kr)) {
     raw_act <- as.vector(haven::zap_labels(dhs_kr[[act_var]][febrile_idx]))
+    # Check if act_var has any positive values; if not, try h37e fallback
+    if (!any(raw_act == 1, na.rm = TRUE) && "h37e" %in% names(dhs_kr)) {
+      h37e_vals <- as.vector(haven::zap_labels(dhs_kr[["h37e"]][febrile_idx]))
+      if (any(h37e_vals == 1, na.rm = TRUE)) {
+        cli::cli_alert_info(
+          "ACT variable {.var {act_var}} has no positive values; using {.var h37e} which has data"
+        )
+        raw_act <- h37e_vals
+      }
+    }
     kr_fever$received_act <- dplyr::if_else(raw_act %in% c(0, 1), raw_act, NA_real_)
   } else if ("h37e" %in% names(dhs_kr)) {
     cli::cli_alert_info(

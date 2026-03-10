@@ -43,28 +43,53 @@
   # NOTE: ml1 is NOT a safe fallback — in some surveys (e.g. BFA 2021) ml1 = "Times took
   #       Fansidar during pregnancy" (IPTp), not child fever treatment.
   ml13_vars <- grep("^ml13[a-z]*$", names(dhs_kr), value = TRUE)
-  h37_vars <- character(0)
+  h37_vars <- grep("^h37[a-h]$", names(dhs_kr), value = TRUE)
   use_h37_fallback <- FALSE
 
-  if (length(ml13_vars) == 0) {
-    # h37a-h = drug-specific treatment for child fever/cough in older DHS surveys
-    h37_vars <- grep("^h37[a-h]$", names(dhs_kr), value = TRUE)
-    if (length(h37_vars) > 0) {
-      cli::cli_alert_info(
-        "No ml13* variables found; using h37* series as fallback: {paste(h37_vars, collapse = ', ')}"
-      )
-      use_h37_fallback <- TRUE
-    } else {
-      cli::cli_abort(c(
-        "No antimalarial treatment variables found in data.",
-        "i" = "Checked for ml13a/ml13b/... (newer surveys) and h37a-h (older surveys).",
-        "i" = "Verify that this survey includes malaria treatment questions."
-      ))
-    }
-  } else {
-    cli::cli_alert_info(
-      "Detected {length(ml13_vars)} ml13 antimalarial variables: {paste(ml13_vars, collapse = ', ')}"
+  if (length(ml13_vars) > 0) {
+    # Check if ml13 series has any positive values
+    ml13_has_data <- any(
+      sapply(ml13_vars, function(v) any(dhs_kr[[v]] == 1, na.rm = TRUE))
     )
+    if (ml13_has_data) {
+      cli::cli_alert_info(
+        "Detected {length(ml13_vars)} ml13 antimalarial variables: {paste(ml13_vars, collapse = ', ')}"
+      )
+    } else if (length(h37_vars) > 0) {
+      h37_has_data <- any(
+        sapply(h37_vars, function(v) any(dhs_kr[[v]] == 1, na.rm = TRUE))
+      )
+      if (h37_has_data) {
+        cli::cli_alert_info(
+          "ml13* variables have no positive values; using h37* series which has data: {paste(h37_vars, collapse = ', ')}"
+        )
+        ml13_vars <- character(0)
+        use_h37_fallback <- TRUE
+      } else {
+        cli::cli_alert_info(
+          "Detected {length(ml13_vars)} ml13 antimalarial variables (no positive values found)"
+        )
+      }
+    } else {
+      cli::cli_alert_info(
+        "Detected {length(ml13_vars)} ml13 antimalarial variables (no positive values found)"
+      )
+    }
+  } else if (length(h37_vars) > 0) {
+    cli::cli_alert_info(
+      "No ml13* variables found; using h37* series as fallback: {paste(h37_vars, collapse = ', ')}"
+    )
+    use_h37_fallback <- TRUE
+  } else {
+    cli::cli_abort(c(
+      "No antimalarial treatment variables found in data.",
+      "i" = "Checked for ml13a/ml13b/... (newer surveys) and h37a-h (older surveys).",
+      "i" = "Verify that this survey includes malaria treatment questions."
+    ))
+  }
+
+  if (length(ml13_vars) == 0 && !use_h37_fallback) {
+    cli::cli_abort("No antimalarial treatment variables with data found.")
   }
 
   # Zap labels

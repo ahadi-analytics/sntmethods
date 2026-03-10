@@ -193,10 +193,29 @@ calc_act_mbg <- function(
     )
 
     if (!is.null(kr_fever_enriched)) {
-      # Add antimalarial composite
+      # Add antimalarial composite (check for positive values before choosing series)
       ml13_vars <- grep("^ml13[a-z]+$", names(dhs_kr), value = TRUE)
       h37_vars_am <- grep("^h37[a-h]$", names(dhs_kr), value = TRUE)
-      drug_series <- if (length(ml13_vars) > 0) ml13_vars else h37_vars_am
+
+      if (length(ml13_vars) > 0) {
+        ml13_has_data <- any(
+          sapply(ml13_vars, function(v) any(dhs_kr[[v]] == 1, na.rm = TRUE))
+        )
+        if (ml13_has_data) {
+          drug_series <- ml13_vars
+        } else if (length(h37_vars_am) > 0 && any(
+          sapply(h37_vars_am, function(v) any(dhs_kr[[v]] == 1, na.rm = TRUE))
+        )) {
+          cli::cli_alert_info(
+            "ml13 antimalarial variables have no positive values; using h37 series"
+          )
+          drug_series <- h37_vars_am
+        } else {
+          drug_series <- ml13_vars
+        }
+      } else {
+        drug_series <- h37_vars_am
+      }
 
       if (length(drug_series) > 0) {
         # Build febrile index matching .prepare_act_data() filtering
