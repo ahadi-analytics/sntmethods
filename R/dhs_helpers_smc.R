@@ -35,17 +35,7 @@
     # ml13g is part of the antimalarial treatment series, not SMC
     ml13_drug_vars <- names(dhs_kr)[grepl("^ml13[a-f]$", names(dhs_kr))]
     if (grepl("^ml13", survey_vars$smc_alt) && length(ml13_drug_vars) > 0) {
-      if (strict) {
-        cli::cli_abort(c(
-          "SMC alternative {.var {survey_vars$smc_alt}} appears to be part of the antimalarial drug series (found {.var {ml13_drug_vars}}), not SMC receipt.",
-          "i" = "Primary SMC variable {.var {survey_vars$smc_primary}} also not found."
-        ))
-      } else {
-        cli::cli_warn(
-          "SMC skipped: {.var {survey_vars$smc_alt}} appears to be an antimalarial drug variable, not SMC receipt"
-        )
-        return(NULL)
-      }
+      return(NULL)
     } else {
       smc_var <- survey_vars$smc_alt
       cli::cli_alert_info("Using SMC variable: {.var {smc_var}} (alternative)")
