@@ -43,7 +43,6 @@ NULL
 #'   `pop_raster` for all indicators.
 #' @param path_dhs_parquet Path to DHS parquet archive.
 #' @param table_out_path Output directory for tables (CSV, XLSX).
-#' @param fig_out_path Output directory for figures and maps.
 #' @param raster_out_path Output directory for prediction rasters.
 #' @param intermediate_out_path Output directory for cached intermediate outputs
 #'   (aggregation tables, ID rasters).
@@ -72,7 +71,7 @@ NULL
 #'     \item "act": ACT treatment (case management)
 #'     \item "anemia": Anemia prevalence
 #'     \item "iptp": IPTp doses
-#'     \item "epi": EPI vaccination (see `epi_indicators` for vaccine selection)
+#'     \item "epi": EPI vaccination
 #'     \item "u5mr": Under-5 mortality
 #'     \item "smc": SMC receipt
 #'     \item "fever": Fever prevalence (U5)
@@ -80,16 +79,6 @@ NULL
 #'     \item "eff_cm": Effective coverage of case management (derived;
 #'       auto-adds "csb" and "act" as dependencies)
 #'   }
-#' @param epi_indicators Character vector of EPI vaccine indicators to process
-#'   when "epi" is included in `indicators`. Passed to `calc_epi_mbg()`.
-#'   Valid values: "bcg", "dpt1", "dpt2", "dpt3", "polio1", "polio2", "polio3",
-#'   "measles1", "measles2", "vita1", "vita2", "malaria",
-#'   "penta1", "penta2", "penta3", "pneumo1", "pneumo2", "pneumo3",
-#'   "rota1", "rota2", "rota3", "ipv", "hepb0", "yellowfever",
-#'   "fully_vaccinated".
-#'   DPT indicators automatically fall back to pentavalent variables when the
-#'   primary DHS variables are absent.
-#'   Default: c("bcg", "dpt2", "dpt3", "measles1", "measles2").
 #' @param aggregation_level Primary aggregation level for MBG outputs. One of:
 #'   \itemize{
 #'     \item "adm2": Aggregate to ADM2 level (default)
@@ -97,7 +86,6 @@ NULL
 #'   }
 #' @param run_mbg Logical. If TRUE, runs MBG models. Default: TRUE.
 #' @param save_rasters Logical. If TRUE, saves output rasters. Default: TRUE.
-#' @param generate_maps Logical. If TRUE, generates maps. Default: TRUE.
 #' @param cache Logical. If TRUE (default), reuses cached intermediate outputs
 #'   (aggregation tables, ID rasters) when available. Set to FALSE to force
 #'   regeneration of all intermediate outputs.
@@ -105,14 +93,6 @@ NULL
 #' @param debug Logical. If TRUE, prints additional
 #'   diagnostic messages for troubleshooting.
 #'   Default: FALSE.
-#' @param derived_pairs Named list of derived indicator
-#'   pairs for raster multiplication (case management).
-#'   Each element is a list with \code{csb} and \code{act}
-#'   keys specifying the component indicator names.
-#'   Default (NULL) uses:
-#'   \code{eff_cm_any = csb_any * act_antimal} and
-#'   \code{eff_cm_public = csb_public * act_pub}.
-#'
 #' @return A list containing:
 #'   \itemize{
 #'     \item final_dataset: Combined dataset with all indicators at the specified
@@ -135,7 +115,6 @@ NULL
 #'   pop_raster = list("2016" = "/path/to/bdi_ppp_2016.tif"),
 #'   path_dhs_parquet = "path/to/parquet",
 #'   table_out_path = "path/to/output/tables",
-#'   fig_out_path = "path/to/output/plots",
 #'   raster_out_path = "path/to/output/rasters",
 #'   intermediate_out_path = "path/to/output/intermediate",
 #'   survey_year = 2016,
@@ -154,7 +133,6 @@ run_mbg_indicator_pipeline <- function(
   pop_raster,
   path_dhs_parquet,
   table_out_path,
-  fig_out_path,
   raster_out_path,
   intermediate_out_path,
   pop_raster_u5 = NULL,
@@ -166,15 +144,12 @@ run_mbg_indicator_pipeline <- function(
     "pfpr", "itn", "irs", "anc", "csb", "anemia", "iptp",
     "fever", "antimalarial"
   ),
-  epi_indicators = c("bcg", "dpt2", "dpt3", "measles1", "measles2"),
   aggregation_level = c("adm2", "adm3"),
   run_mbg = TRUE,
   save_rasters = TRUE,
-  generate_maps = TRUE,
   cache = TRUE,
   verbose = TRUE,
-  debug = FALSE,
-  derived_pairs = NULL
+  debug = FALSE
 ) {
 
   # Check for required spatial packages
@@ -260,38 +235,18 @@ run_mbg_indicator_pipeline <- function(
 
   # ---- Input Validation ----
 
-  # Validate indicator names
-  # antimalarial/act already filter to febrile U5 via KR helper
-  valid_indicators <- c(
-    "pfpr", "itn", "irs", "anc", "csb", "act", "anemia", "iptp", "epi",
-    "u5mr", "smc", "fever", "antimalarial",
-    # ITN sub-indicators (selectable individually for faster pipelines)
-    "itn_ownership", "itn_access", "itn_use_all", "itn_use_u5",
-    "itn_use_pregnant", "itn_use_if_access",
-    # Public care-seeking and sub-indicators
-    "act_public", "act_among_am", "antimalarial_public",
-    # Derived indicators (auto-expand to required dependencies)
-    "eff_cm"
-  )
+  # Validate indicator names against known codes.
+  # Category-level entries dispatch to calc_*_mbg() which computes all
+  # sub-indicators for that family. Individual indicator codes (from
+  # _conditions() / _mbg_dictionary()) are also accepted and dispatch
+  # to the same calc function via switch fall-through.
+  valid_indicators <- .valid_mbg_indicators()
   invalid_indicators <- setdiff(indicators, valid_indicators)
   if (length(invalid_indicators) > 0) {
     cli::cli_abort(c(
       "Invalid indicator(s): {.val {invalid_indicators}}",
       "i" = "Valid indicators: {.val {valid_indicators}}"
     ))
-  }
-
-  # Collapse sub-indicators into parent categories (they are produced together)
-  sub_to_parent <- c(act_public = "act", act_among_am = "act",
-                     antimalarial_public = "antimalarial")
-  for (sub in names(sub_to_parent)) {
-    if (sub %in% indicators) {
-      parent <- sub_to_parent[[sub]]
-      if (!parent %in% indicators) {
-        indicators <- c(indicators, parent)
-      }
-      indicators <- setdiff(indicators, sub)
-    }
   }
 
   # Expand derived indicators to include their dependencies
@@ -303,29 +258,6 @@ run_mbg_indicator_pipeline <- function(
         "Adding {.val {new_deps}} (required by {.val eff_cm})"
       )
       indicators <- unique(c(indicators, new_deps))
-    }
-  }
-
-  # Validate epi_indicators if "epi" is requested
-  if ("epi" %in% indicators) {
-    valid_epi <- c(
-      "bcg", "dpt1", "dpt2", "dpt3",
-      "polio1", "polio2", "polio3",
-      "measles1", "measles2",
-      "vita1", "vita2",
-      "malaria",
-      "penta1", "penta2", "penta3",
-      "pneumo1", "pneumo2", "pneumo3",
-      "rota1", "rota2", "rota3",
-      "ipv", "hepb0", "yellowfever",
-      "fully_vaccinated"
-    )
-    invalid_epi <- setdiff(epi_indicators, valid_epi)
-    if (length(invalid_epi) > 0) {
-      cli::cli_abort(c(
-        "Invalid epi_indicators: {.val {invalid_epi}}",
-        "i" = "Valid values: {.val {valid_epi}}"
-      ))
     }
   }
 
@@ -361,7 +293,7 @@ run_mbg_indicator_pipeline <- function(
   }
 
   # Validate/create output directories
-  output_paths <- c(table_out_path, fig_out_path, raster_out_path, intermediate_out_path)
+  output_paths <- c(table_out_path, raster_out_path, intermediate_out_path)
   output_paths <- output_paths[!is.null(output_paths) & output_paths != ""]
   for (out_path in output_paths) {
     tryCatch({
@@ -391,7 +323,6 @@ run_mbg_indicator_pipeline <- function(
   # Store output paths
   output_dirs <- list(
     tables = table_out_path,
-    plots = fig_out_path,
     rasters = raster_out_path,
     intermediate = intermediate_out_path
   )
@@ -400,7 +331,6 @@ run_mbg_indicator_pipeline <- function(
   if (isTRUE(debug)) {
     cli::cli_h3("Debug: Output Paths")
     cli::cli_alert_info("Tables: {.file {output_dirs$tables}}")
-    cli::cli_alert_info("Plots: {.file {output_dirs$plots}}")
     cli::cli_alert_info("Rasters: {.file {output_dirs$rasters}}")
     cli::cli_alert_info("Intermediate: {.file {output_dirs$intermediate}}")
   }
@@ -729,11 +659,9 @@ run_mbg_indicator_pipeline <- function(
           aggregation_level = aggregation_level,
           run_mbg = run_mbg,
           save_rasters = save_rasters,
-          generate_maps = generate_maps,
           cache = cache,
           verbose = verbose,
-          debug = debug,
-          epi_indicators = epi_indicators
+          debug = debug
         )
 
         # Check if indicator was skipped
@@ -781,9 +709,6 @@ run_mbg_indicator_pipeline <- function(
         save_rasters = save_rasters,
         cache = cache
       )
-      if (!is.null(derived_pairs)) {
-        derived_args$derived_pairs <- derived_pairs
-      }
       derived <- do.call(
         .compute_derived_rasters, derived_args
       )
@@ -873,17 +798,10 @@ run_mbg_indicator_pipeline <- function(
     # Coerce to plain character to avoid glue class issues
     output_basename <- as.character(output_basename)
 
-    # Build data dictionary with MBG-specific labels
+    # Build data dictionary
     year_data_dict <- sntutils::build_dictionary(
-      data = year_dataset,
-      language = "fr"
+      data = year_dataset
     )
-    mbg_labels <- dplyr::bind_rows(
-      .mbg_id_labels(),
-      .build_mbg_labels(processed_indicators)
-    ) |>
-      dplyr::filter(.data$variable %in% names(year_dataset))
-    year_data_dict <- .enrich_dhs_dictionary(year_data_dict, mbg_labels)
 
     # Write with data dictionary as second tab (versioned with date)
     sntutils::write_snt_data(
@@ -947,21 +865,9 @@ run_mbg_indicator_pipeline <- function(
       # Coerce to plain character to avoid glue class issues
       combined_basename <- as.character(combined_basename)
 
-      # Build data dictionary for combined dataset with MBG-specific labels
+      # Build data dictionary for combined dataset
       combined_data_dict <- sntutils::build_dictionary(
-        data = results$final_dataset,
-        language = "fr"
-      )
-      all_indicators <- unique(unlist(lapply(
-        all_survey_results, function(x) x$processed_indicators
-      )))
-      combined_mbg_labels <- dplyr::bind_rows(
-        .mbg_id_labels(),
-        .build_mbg_labels(all_indicators)
-      ) |>
-        dplyr::filter(.data$variable %in% names(results$final_dataset))
-      combined_data_dict <- .enrich_dhs_dictionary(
-        combined_data_dict, combined_mbg_labels
+        data = results$final_dataset
       )
 
       # Write with data dictionary as second tab (versioned with date)
@@ -1053,11 +959,9 @@ run_mbg_indicator_pipeline <- function(
   aggregation_level = "adm2",
   run_mbg,
   save_rasters,
-  generate_maps,
   cache,
   verbose,
-  debug = FALSE,
-  epi_indicators = c("bcg", "dpt2", "dpt3", "measles1", "measles2")
+  debug = FALSE
 ) {
   # Use u5 population raster for u5-specific indicators, fall back to total
   use_u5 <- category %in% c("pfpr", "itn") && !is.null(pop_rast_u5)
@@ -1089,6 +993,10 @@ run_mbg_indicator_pipeline <- function(
 
   # Call appropriate MBG prep function based on category
   cluster_data <- switch(category,
+    pfpr_rdt = , pfpr_mic = ,
+    pfpr_rdt_u5 = , pfpr_rdt_5_10 = , pfpr_rdt_u10 = , pfpr_rdt_2_10 = ,
+    pfpr_mic_u5 = , pfpr_mic_5_10 = , pfpr_mic_u10 = , pfpr_mic_2_10 = ,
+    pfpr_either_u5 = , pfpr_either_5_10 = , pfpr_either_u10 = , pfpr_either_2_10 = ,
     pfpr = {
       if (!"PR" %in% names(survey_data)) {
         return(skip_indicator("Missing PR data (Person Recode)"))
@@ -1123,15 +1031,16 @@ run_mbg_indicator_pipeline <- function(
           dhs_pr = survey_data$PR,
           gps_data = gps_data,
           indicators = c(
-            "itn_ownership",
-            "itn_access",
-            "itn_use_all",
-            "itn_use_u5",
-            "itn_use_pregnant",
-            "itn_use_5_10",
-            "itn_use_10_20",
-            "itn_use_20plus",
-            "itn_use_if_access"
+            "enough_itn",
+            "with_itn",
+            "access_itn",
+            "use_itn",
+            "use_itn_chu5",
+            "use_itn_preg",
+            "use_itn_5_10",
+            "use_itn_10_20",
+            "use_itn_20plus",
+            "use_itn_if_access"
           )
         )
       }, error = function(e) {
@@ -1140,12 +1049,16 @@ run_mbg_indicator_pipeline <- function(
       })
     },
 
-    itn_ownership = ,
-    itn_access = ,
-    itn_use_all = ,
-    itn_use_u5 = ,
-    itn_use_pregnant = ,
-    itn_use_if_access = {
+    enough_itn = ,
+    with_itn = ,
+    access_itn = ,
+    use_itn = ,
+    use_itn_chu5 = ,
+    use_itn_preg = ,
+    use_itn_if_access = ,
+    use_itn_5_10 = ,
+    use_itn_10_20 = ,
+    use_itn_20plus = {
       missing_ft <- setdiff(c("HR", "PR"), names(survey_data))
       if (length(missing_ft) > 0) {
         return(skip_indicator(
@@ -1165,6 +1078,7 @@ run_mbg_indicator_pipeline <- function(
       })
     },
 
+    irs_coverage = ,
     irs = {
       if (!"HR" %in% names(survey_data)) {
         return(skip_indicator("Missing HR data (Household Recode)"))
@@ -1186,6 +1100,7 @@ run_mbg_indicator_pipeline <- function(
       })
     },
 
+    anc_1plus = , anc_2plus = , anc_3plus = , anc_4plus = , anc_8plus = ,
     anc = {
       if (!"IR" %in% names(survey_data)) {
         return(skip_indicator("Missing IR data (Individual Recode)"))
@@ -1202,6 +1117,10 @@ run_mbg_indicator_pipeline <- function(
       })
     },
 
+    csb_any = , csb_public = , csb_pub_nochw = , csb_chw = ,
+    csb_private = , csb_priv_formal = , csb_pharmacy = ,
+    csb_priv_informal = , csb_priv_form_pha = ,
+    csb_trained = , csb_none = ,
     csb = {
       if (!"KR" %in% names(survey_data)) {
         return(skip_indicator("Missing KR data (Children Recode)"))
@@ -1211,9 +1130,9 @@ run_mbg_indicator_pipeline <- function(
           dhs_kr = survey_data$KR,
           gps_data = gps_data,
           indicators = c(
-            "any", "public", "public_nochw", "chw",
-            "private", "private_formal", "pharmacy",
-            "private_informal", "private_formal_pha",
+            "any", "public", "pub_nochw", "chw",
+            "private", "priv_formal", "pharmacy",
+            "priv_informal", "priv_form_pha",
             "trained", "none"
           )
         )
@@ -1228,11 +1147,16 @@ run_mbg_indicator_pipeline <- function(
     act_chw = , act_priv = , act_priv_formal = ,
     act_priv_pharm = , act_priv_informal = ,
     act_priv_form_pha = ,
+    act_tested = , act_public = ,
+    febrile_rdt_pos = , febrile_rdt_pos_act = ,
     antimal = , antimal_any_tx = , antimal_trained = ,
     antimal_pub = , antimal_pub_nochw = , antimal_chw = ,
     antimal_priv = , antimal_formal = , antimal_pharm = ,
     antimal_priv_informal = , antimal_form_pharm = ,
-    act_public = , act_among_am = ,
+    mal_dx_am = , mal_dx_pub_am = , mal_dx_pub_nochw_am = ,
+    mal_dx_chw_am = , mal_dx_priv_am = , mal_dx_priv_formal_am = ,
+    mal_dx_pharm_am = , mal_dx_priv_informal_am = ,
+    mal_dx_priv_form_pha_am = ,
     act = {
       if (!"KR" %in% names(survey_data)) {
         return(skip_indicator("Missing KR data (Children Recode)"))
@@ -1261,6 +1185,9 @@ run_mbg_indicator_pipeline <- function(
       })
     },
 
+    anemia_any = , anemia_moderate_plus = , anemia_severe = ,
+    anemia_mild_only = , anemia_moderate_only = , anemia_severe_only = ,
+    severe_anemia = ,
     anemia = {
       if (!"PR" %in% names(survey_data)) {
         return(skip_indicator("Missing PR data (Person Recode)"))
@@ -1277,6 +1204,8 @@ run_mbg_indicator_pipeline <- function(
       })
     },
 
+    iptp_1plus = , iptp_2plus = , iptp_3plus = , iptp_4plus = ,
+    iptp_1only = , iptp_2only = , iptp_3only = ,
     iptp = {
       if (!"IR" %in% names(survey_data)) {
         return(skip_indicator("Missing IR data (Individual Recode)"))
@@ -1293,6 +1222,15 @@ run_mbg_indicator_pipeline <- function(
       })
     },
 
+    epi_bcg = , epi_dpt1 = , epi_dpt2 = , epi_dpt3 = ,
+    epi_polio0 = , epi_polio1 = , epi_polio2 = , epi_polio3 = ,
+    epi_measles1 = , epi_measles2 = ,
+    epi_vita1 = , epi_vita2 = , epi_malaria = ,
+    epi_penta1 = , epi_penta2 = , epi_penta3 = ,
+    epi_pneumo1 = , epi_pneumo2 = , epi_pneumo3 = ,
+    epi_rota1 = , epi_rota2 = , epi_rota3 = ,
+    epi_ipv = , epi_hepb0 = , epi_yellowfever = ,
+    epi_any = , epi_never_vaccinated = , epi_fully_vaccinated = ,
     epi = {
       if (!"KR" %in% names(survey_data)) {
         return(skip_indicator("Missing KR data (Children Recode)"))
@@ -1301,7 +1239,7 @@ run_mbg_indicator_pipeline <- function(
         calc_epi_mbg(
           dhs_kr = survey_data$KR,
           gps_data = gps_data,
-          indicators = epi_indicators
+          indicators = c("bcg", "dpt2", "dpt3", "measles1", "measles2")
         )
       }, error = function(e) {
         results$skipped <<- glue::glue("Calculation error: {e$message}")
@@ -1324,6 +1262,7 @@ run_mbg_indicator_pipeline <- function(
       })
     },
 
+    smc_receipt = , smc_coverage = ,
     smc = {
       if (!"KR" %in% names(survey_data)) {
         return(skip_indicator("Missing KR data (Children Recode)"))
@@ -1471,11 +1410,11 @@ run_mbg_indicator_pipeline <- function(
 
   if (grepl("^pfpr_", ind_name)) {
     labels <- list(numerator = "n_positive", denominator = "n_tested")
-  } else if (grepl("^itn_ownership", ind_name)) {
+  } else if (grepl("^(enough_itn|with_itn)", ind_name)) {
     labels <- list(numerator = "n_hh_with_itn", denominator = "n_households")
-  } else if (grepl("^itn_access", ind_name)) {
+  } else if (grepl("^access_itn", ind_name)) {
     labels <- list(numerator = "n_with_access", denominator = "n_individuals")
-  } else if (grepl("^itn_use", ind_name)) {
+  } else if (grepl("^use_itn", ind_name)) {
     labels <- list(numerator = "n_used_itn", denominator = "n_eligible")
   } else if (grepl("^u5mr", ind_name)) {
     labels <- list(numerator = "n_deaths", denominator = "n_exposed")
