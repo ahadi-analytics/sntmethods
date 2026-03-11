@@ -31,11 +31,6 @@ Imports:
     survey (>= 4.4.8),
     ggplot2 (>= 4.0.0),
 Suggests:
-    mbg (>= 1.1.0),
-    INLA (>= 24.0.0),
-    fmesher (>= 0.1.0),
-    MatrixModels (>= 0.5.0),
-    sn (>= 2.0.0),
     here (>= 1.0.2),
     arrow (>= 22.0.0),
     countrycode (>= 1.5.0),
@@ -65,7 +60,5 @@ Suggests:
 Config/testthat/edition: 3
 Remotes:
     ahadi-analytics/sntutils
-Additional_repositories:
-    https://inla.r-inla-download.org/R/stable
 Depends:
     R (>= 4.2)
