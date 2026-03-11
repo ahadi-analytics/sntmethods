@@ -285,7 +285,8 @@
 #'
 #' @return A tibble with one row per indicator and columns:
 #'   \describe{
-#'     \item{domain}{Topic area (e.g., "act", "itn", "fever")}
+#'     \item{domain}{Topic area (e.g., "ACT", "ITN", "Fever")}
+#'     \item{observation_unit}{Unit of analysis (e.g., "Individual", "Household", "Person")}
 #'     \item{dhs_recode}{DHS file type needed (KR, IR, HR, PR, HR+PR)}
 #'     \item{calc_function}{R function to call}
 #'     \item{indicator_code}{Unique indicator identifier}
@@ -296,7 +297,6 @@
 #'     \item{denominator_code}{Short code for the denominator}
 #'     \item{denominator_description}{What the denominator counts}
 #'     \item{eligibility}{Who is eligible / inclusion criteria}
-#'     \item{data_level}{Default admin level (adm0, household, person)}
 #'     \item{dhs_variables}{Key DHS variables needed (per domain)}
 #'     \item{notes}{Additional context, caveats, or methodology notes}
 #'   }
@@ -308,7 +308,7 @@
 #' dhs_dictionary()
 #'
 #' # Filter to a specific domain
-#' dhs_dictionary() |> dplyr::filter(domain == "itn")
+#' dhs_dictionary() |> dplyr::filter(domain == "ITN")
 #'
 #' # Find which DHS recode files you need
 #' dhs_dictionary() |> dplyr::distinct(domain, dhs_recode, calc_function)
@@ -320,7 +320,7 @@ dhs_dictionary <- function() {
   domain_specs <- list(
     list(
       fn          = act_dictionary,
-      domain      = "act",
+      domain      = "ACT",
       dhs_recode  = "KR",
       calc_fn     = "calc_act_dhs",
       eligibility = "Children 0-59 months with fever (h22==1), alive (b5==1)",
@@ -329,7 +329,7 @@ dhs_dictionary <- function() {
     ),
     list(
       fn          = antimalarial_dictionary,
-      domain      = "antimalarial",
+      domain      = "Antimalarial",
       dhs_recode  = "KR",
       calc_fn     = "calc_antimalarial_dhs",
       eligibility = "Children 0-59 months with fever (h22==1), alive (b5==1)",
@@ -338,7 +338,7 @@ dhs_dictionary <- function() {
     ),
     list(
       fn          = anc_dictionary,
-      domain      = "anc",
+      domain      = "ANC",
       dhs_recode  = "IR",
       calc_fn     = "calc_anc_dhs",
       eligibility = "Women 15-49 with a birth in last 2-5 years",
@@ -347,7 +347,7 @@ dhs_dictionary <- function() {
     ),
     list(
       fn          = case_management_dictionary,
-      domain      = "case_management",
+      domain      = "Case Management",
       dhs_recode  = "KR",
       calc_fn     = "calc_case_management_dhs",
       eligibility = "Children 0-59 months with fever (h22==1), alive (b5==1)",
@@ -356,7 +356,7 @@ dhs_dictionary <- function() {
     ),
     list(
       fn          = csb_dictionary,
-      domain      = "csb",
+      domain      = "CSB",
       dhs_recode  = "KR",
       calc_fn     = "calc_csb_dhs",
       eligibility = "Children 0-59 months with fever (h22==1), alive (b5==1)",
@@ -365,7 +365,7 @@ dhs_dictionary <- function() {
     ),
     list(
       fn          = epi_dictionary,
-      domain      = "epi",
+      domain      = "EPI",
       dhs_recode  = "KR",
       calc_fn     = "calc_epi_dhs",
       eligibility = "Children 12-23 months",
@@ -374,7 +374,7 @@ dhs_dictionary <- function() {
     ),
     list(
       fn          = fever_dictionary,
-      domain      = "fever",
+      domain      = "Fever",
       dhs_recode  = "KR",
       calc_fn     = "calc_fever_dhs",
       eligibility = "Children 0-59 months, alive (b5==1)",
@@ -383,7 +383,7 @@ dhs_dictionary <- function() {
     ),
     list(
       fn          = iptp_dictionary,
-      domain      = "iptp",
+      domain      = "IPTp",
       dhs_recode  = "IR",
       calc_fn     = "calc_iptp_dhs",
       eligibility = "Women 15-49 with a birth in last 2-5 years",
@@ -392,7 +392,7 @@ dhs_dictionary <- function() {
     ),
     list(
       fn          = irs_dictionary,
-      domain      = "irs",
+      domain      = "IRS",
       dhs_recode  = "HR",
       calc_fn     = "calc_irs_dhs",
       eligibility = "All surveyed households",
@@ -401,16 +401,16 @@ dhs_dictionary <- function() {
     ),
     list(
       fn          = itn_dictionary,
-      domain      = "itn",
+      domain      = "ITN",
       dhs_recode  = "HR+PR",
       calc_fn     = "calc_itn_dhs",
       eligibility = "HH for ownership indicators; de facto persons for use indicators",
       dhs_vars    = "hml10_1-n, hml12, hv013, hv105, hv104, hml18, hv270, hv025",
-      notes       = "data_level distinguishes household vs person indicators"
+      notes       = "observation_unit distinguishes Household vs Person indicators"
     ),
     list(
       fn          = malaria_dx_dictionary,
-      domain      = "malaria_dx",
+      domain      = "Malaria Dx",
       dhs_recode  = "KR",
       calc_fn     = "calc_malaria_dx_dhs",
       eligibility = "Children 0-59 months with fever (h22==1), alive (b5==1)",
@@ -419,7 +419,7 @@ dhs_dictionary <- function() {
     ),
     list(
       fn          = pfpr_dictionary,
-      domain      = "pfpr",
+      domain      = "PfPR",
       dhs_recode  = "PR",
       calc_fn     = "calc_pfpr_dhs",
       eligibility = "Children tested for malaria (RDT or microscopy)",
@@ -428,7 +428,7 @@ dhs_dictionary <- function() {
     ),
     list(
       fn          = severe_anemia_dictionary,
-      domain      = "severe_anemia",
+      domain      = "Severe Anemia",
       dhs_recode  = "PR",
       calc_fn     = "calc_severe_anemia_dhs",
       eligibility = "Children 6-59 months tested for hemoglobin",
@@ -437,7 +437,7 @@ dhs_dictionary <- function() {
     ),
     list(
       fn          = smc_dictionary,
-      domain      = "smc",
+      domain      = "SMC",
       dhs_recode  = "KR",
       calc_fn     = "calc_smc_dhs",
       eligibility = "Children 3-59 months in SMC-eligible areas",
@@ -446,7 +446,7 @@ dhs_dictionary <- function() {
     ),
     list(
       fn          = u5mr_dictionary,
-      domain      = "u5mr",
+      domain      = "U5MR",
       dhs_recode  = "KR",
       calc_fn     = "calc_u5mr_dhs",
       eligibility = "Live births in recall period (last 5 years)",
@@ -455,13 +455,20 @@ dhs_dictionary <- function() {
     ),
     list(
       fn          = wealth_dictionary,
-      domain      = "wealth",
+      domain      = "Wealth",
       dhs_recode  = "HR",
       calc_fn     = "calc_wealth_dhs",
       eligibility = "All surveyed households",
       dhs_vars    = "hv270, hv271, hv012",
       notes       = NA_character_
     )
+  )
+
+  # Map data_level values to readable observation_unit labels
+  obs_unit_map <- c(
+    "adm0"      = "Country",
+    "household" = "Household",
+    "person"    = "Person"
   )
 
   # Build consolidated tibble
@@ -473,10 +480,16 @@ dhs_dictionary <- function() {
       dict$data_level <- "adm0"
     }
 
+    # Map to observation_unit
+    dict$observation_unit <- unname(
+      obs_unit_map[as.character(dict$data_level)]
+    )
+    dict$observation_unit[is.na(dict$observation_unit)] <- "Country"
+
     # Keep only the core columns from individual dictionaries
     core_cols <- c("indicator", "indicator_code", "indicator_title",
                    "numerator_description", "denominator_description",
-                   "denominator_code", "data_level")
+                   "denominator_code", "observation_unit")
     keep <- intersect(core_cols, names(dict))
     dict <- dict[, keep, drop = FALSE]
 
@@ -496,13 +509,13 @@ dhs_dictionary <- function() {
   # Derive numerator_code
   out$numerator_code <- paste0("n_", out$indicator_code)
 
-  # Reorder columns
+  # Reorder columns: observation_unit right after domain
   out <- out[, c(
-    "domain", "dhs_recode", "calc_function",
+    "domain", "observation_unit", "dhs_recode", "calc_function",
     "indicator_code", "indicator", "indicator_title",
     "numerator_code", "numerator_description",
     "denominator_code", "denominator_description",
-    "eligibility", "data_level", "dhs_variables", "notes"
+    "eligibility", "dhs_variables", "notes"
   ), drop = FALSE]
 
   tibble::as_tibble(out)

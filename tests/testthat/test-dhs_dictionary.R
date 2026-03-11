@@ -8,11 +8,11 @@ test_that("dhs_dictionary returns a tibble with correct columns", {
   expect_s3_class(dict, "tbl_df")
 
   expected_cols <- c(
-    "domain", "dhs_recode", "calc_function",
+    "domain", "observation_unit", "dhs_recode", "calc_function",
     "indicator_code", "indicator", "indicator_title",
     "numerator_code", "numerator_description",
     "denominator_code", "denominator_description",
-    "eligibility", "data_level", "dhs_variables", "notes"
+    "eligibility", "dhs_variables", "notes"
   )
   expect_true(all(expected_cols %in% names(dict)))
   expect_equal(names(dict), expected_cols)
@@ -31,9 +31,9 @@ test_that("all 16 domains are present", {
   dict <- dhs_dictionary()
 
   expected_domains <- c(
-    "act", "antimalarial", "anc", "case_management", "csb", "epi",
-    "fever", "iptp", "irs", "itn", "malaria_dx", "pfpr",
-    "severe_anemia", "smc", "u5mr", "wealth"
+    "ACT", "Antimalarial", "ANC", "Case Management", "CSB", "EPI",
+    "Fever", "IPTp", "IRS", "ITN", "Malaria Dx", "PfPR",
+    "Severe Anemia", "SMC", "U5MR", "Wealth"
   )
   actual_domains <- sort(unique(dict$domain))
   expect_equal(actual_domains, sort(expected_domains))
@@ -50,6 +50,7 @@ test_that("no NA in required columns", {
   expect_false(any(is.na(dict$numerator_code)))
   expect_false(any(is.na(dict$eligibility)))
   expect_false(any(is.na(dict$dhs_variables)))
+  expect_false(any(is.na(dict$observation_unit)))
 })
 
 
@@ -69,16 +70,33 @@ test_that("dhs_recode values are valid", {
 })
 
 
+test_that("observation_unit values are valid", {
+  dict <- dhs_dictionary()
+
+  valid_units <- c("Country", "Household", "Person")
+  expect_true(all(dict$observation_unit %in% valid_units))
+
+  # ITN should have mix of Household and Person
+  itn <- dict[dict$domain == "ITN", ]
+  expect_true("Household" %in% itn$observation_unit)
+  expect_true("Person" %in% itn$observation_unit)
+
+  # Non-ITN domains should be Country
+  non_itn <- dict[dict$domain != "ITN", ]
+  expect_true(all(non_itn$observation_unit == "Country"))
+})
+
+
 test_that("individual domain row counts match their dictionaries", {
   dict <- dhs_dictionary()
 
-  expect_equal(sum(dict$domain == "act"), nrow(act_dictionary()))
-  expect_equal(sum(dict$domain == "itn"), nrow(itn_dictionary()))
-  expect_equal(sum(dict$domain == "epi"), nrow(epi_dictionary()))
-  expect_equal(sum(dict$domain == "pfpr"), nrow(pfpr_dictionary()))
-  expect_equal(sum(dict$domain == "anc"), nrow(anc_dictionary()))
-  expect_equal(sum(dict$domain == "fever"), nrow(fever_dictionary()))
-  expect_equal(sum(dict$domain == "u5mr"), nrow(u5mr_dictionary()))
+  expect_equal(sum(dict$domain == "ACT"), nrow(act_dictionary()))
+  expect_equal(sum(dict$domain == "ITN"), nrow(itn_dictionary()))
+  expect_equal(sum(dict$domain == "EPI"), nrow(epi_dictionary()))
+  expect_equal(sum(dict$domain == "PfPR"), nrow(pfpr_dictionary()))
+  expect_equal(sum(dict$domain == "ANC"), nrow(anc_dictionary()))
+  expect_equal(sum(dict$domain == "Fever"), nrow(fever_dictionary()))
+  expect_equal(sum(dict$domain == "U5MR"), nrow(u5mr_dictionary()))
 })
 
 
