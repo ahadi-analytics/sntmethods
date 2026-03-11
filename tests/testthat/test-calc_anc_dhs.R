@@ -169,9 +169,8 @@ test_that("anc_3plus CIs satisfy low <= estimate <= upp and are clamped to [0, 1
   expect_lte(result$dhs_anc_3plus_upp, 1)
 })
 
-test_that("calc_anc_dhs returns list with metadata", {
+test_that("calc_anc_dhs returns named list with adm0", {
   skip_if_not_installed("survey")
-  skip_if_not_installed("sntutils")
 
   ir_data <- data.frame(
     v021 = rep(1:5, each = 10),
@@ -186,7 +185,107 @@ test_that("calc_anc_dhs returns list with metadata", {
   result <- calc_anc_dhs(ir_data)
 
   expect_type(result, "list")
-  expect_named(result, c("data", "dict", "metadata"))
-  expect_equal(result$metadata$analysis_type, "ANC (Antenatal Care)")
-  expect_equal(result$metadata$file_type, "IR")
+  expect_true("adm0" %in% names(result))
+  expect_s3_class(result$adm0, "tbl_df")
+})
+
+test_that("calc_anc_dhs adm0 has correct column structure", {
+  skip_if_not_installed("survey")
+
+  ir_data <- data.frame(
+    v021 = rep(1:5, each = 10),
+    v005 = rep(1000000, 50),
+    v022 = rep(1:2, each = 25),
+    v024 = rep("REGION1", 50),
+    v008 = rep(1440, 50),
+    b3_01 = rep(1425, 50),
+    m14_1 = sample(0:10, 50, replace = TRUE)
+  )
+
+  result <- calc_anc_dhs(ir_data)
+
+  expected_cols <- c(
+    "survey_id", "iso3", "iso2", "survey_type", "survey_year",
+    "adm0", "type", "geo_source",
+    "point", "ci_l", "ci_u", "numerator", "denominator",
+    "indicator", "indicator_code",
+    "numerator_description", "denominator_description", "denominator_code"
+  )
+  expect_true(all(expected_cols %in% names(result$adm0)))
+})
+
+test_that("calc_anc_dhs adm0 contains all ANC indicator codes", {
+  skip_if_not_installed("survey")
+
+  ir_data <- data.frame(
+    v021 = rep(1:5, each = 10),
+    v005 = rep(1000000, 50),
+    v022 = rep(1:2, each = 25),
+    v024 = rep("REGION1", 50),
+    v008 = rep(1440, 50),
+    b3_01 = rep(1425, 50),
+    m14_1 = sample(0:10, 50, replace = TRUE)
+  )
+
+  result <- calc_anc_dhs(ir_data)
+  codes <- unique(result$adm0$indicator_code)
+
+  expect_true("anc_1plus" %in% codes)
+  expect_true("anc_2plus" %in% codes)
+  expect_true("anc_3plus" %in% codes)
+  expect_true("anc_4plus" %in% codes)
+  expect_true("anc_8plus" %in% codes)
+})
+
+test_that("calc_anc_dhs point estimates are between 0 and 1", {
+  skip_if_not_installed("survey")
+
+  ir_data <- data.frame(
+    v021 = rep(1:5, each = 10),
+    v005 = rep(1000000, 50),
+    v022 = rep(1:2, each = 25),
+    v024 = rep("REGION1", 50),
+    v008 = rep(1440, 50),
+    b3_01 = rep(1425, 50),
+    m14_1 = sample(0:10, 50, replace = TRUE)
+  )
+
+  result <- calc_anc_dhs(ir_data)
+  adm0 <- result$adm0
+
+  valid <- !is.na(adm0$point)
+  expect_true(all(adm0$point[valid] >= 0))
+  expect_true(all(adm0$point[valid] <= 1))
+})
+
+test_that("calc_anc_dhs CI bounds are ordered correctly", {
+  skip_if_not_installed("survey")
+
+  ir_data <- data.frame(
+    v021 = rep(1:5, each = 10),
+    v005 = rep(1000000, 50),
+    v022 = rep(1:2, each = 25),
+    v024 = rep("REGION1", 50),
+    v008 = rep(1440, 50),
+    b3_01 = rep(1425, 50),
+    m14_1 = sample(0:10, 50, replace = TRUE)
+  )
+
+  result <- calc_anc_dhs(ir_data)
+  adm0 <- result$adm0
+
+  valid <- !is.na(adm0$point) & !is.na(adm0$ci_l) & !is.na(adm0$ci_u)
+  expect_true(all(adm0$ci_l[valid] <= adm0$point[valid]))
+  expect_true(all(adm0$point[valid] <= adm0$ci_u[valid]))
+})
+
+test_that("anc_dictionary returns correct structure", {
+  dict <- anc_dictionary()
+
+  expect_s3_class(dict, "tbl_df")
+  expect_true("indicator" %in% names(dict))
+  expect_true("indicator_code" %in% names(dict))
+  expect_true("numerator_description" %in% names(dict))
+  expect_true("denominator_description" %in% names(dict))
+  expect_equal(nrow(dict), 5)
 })

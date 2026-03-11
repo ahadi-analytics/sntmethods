@@ -180,10 +180,16 @@ calc_anc_dhs_core <- function(
   tibble::as_tibble(anc_results)
 }
 
-#' Calculate ANC Coverage from DHS Data (with metadata)
+#' Calculate ANC Coverage from DHS Data (standardized long-format output)
+#'
+#' Computes ANC 1+/2+/3+/4+/8+ coverage indicators nationally and optionally
+#' by subnational region, returning the standardized `list(adm0, adm1)` output.
 #'
 #' @inheritParams calc_anc_dhs_core
-#' @return List with data, dict, and metadata.
+#' @param ci_method CI method for svyciprop. Default: "logit".
+#'
+#' @return Named list with `adm0` tibble and optionally `adm1` tibble in
+#'   standardized long format.
 #' @export
 calc_anc_dhs <- function(
   dhs_ir,
@@ -197,59 +203,166 @@ calc_anc_dhs <- function(
   ),
   birth_window_months = 24,
   region_var = NULL,
-  gps_data = NULL,
-  gps_vars = list(
-    cluster = "DHSCLUST",
-    lat = "LATNUM",
-    lon = "LONGNUM"
-  ),
-  shapefile = NULL,
-  admin_level = NULL,
-  join_nearest = TRUE
+  ci_method = "logit"
 ) {
-  anc_data <- calc_anc_dhs_core(
+
+  # ---- 1. Extract survey metadata (IR data uses v-prefix) ----
+  survey_meta <- .extract_survey_meta(dhs_ir)
+
+  # ---- 2. Prepare data via existing helper ----
+  ir <- .prepare_anc_data(
     dhs_ir = dhs_ir,
     survey_vars = survey_vars,
     birth_window_months = birth_window_months,
-    region_var = region_var,
-    gps_data = gps_data,
-    gps_vars = gps_vars,
-    shapefile = shapefile,
-    admin_level = admin_level,
-    join_nearest = join_nearest
+    include_survey_vars = TRUE
   )
 
-  labels <- tibble::tribble(
-    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~dhs_recode, ~indicator_category, ~wmr_cascade_step, ~age_group, ~units, ~notes,
-    "dhs_anc_1plus", "ANC 1+ visit coverage", "Couverture CPN 1+ visite", "m14_1", "Women with 1+ ANC visits", "Women with recent birth", "m14_1", "v208", "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "IR module; ANC visit count for most recent birth",
-    "dhs_anc_1plus_low", "ANC 1+ - lower 95% CI", "CPN 1+ - IC 95% inferieur", "m14_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_anc_1plus_upp", "ANC 1+ - upper 95% CI", "CPN 1+ - IC 95% superieur", "m14_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_anc_2plus", "ANC 2+ visit coverage", "Couverture CPN 2+ visites", "m14_1", "Women with 2+ ANC visits", "Women with recent birth", "m14_1", "v208", "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "IR module; ANC visit count for most recent birth",
-    "dhs_anc_2plus_low", "ANC 2+ - lower 95% CI", "CPN 2+ - IC 95% inferieur", "m14_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_anc_2plus_upp", "ANC 2+ - upper 95% CI", "CPN 2+ - IC 95% superieur", "m14_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_anc_3plus", "ANC 3+ visit coverage", "Couverture CPN 3+ visites", "m14_1", "Women with 3+ ANC visits", "Women with recent birth", "m14_1", "v208", "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "IR module; ANC visit count for most recent birth; anc_3plus >= anc_4plus",
-    "dhs_anc_3plus_low", "ANC 3+ - lower 95% CI", "CPN 3+ - IC 95% inferieur", "m14_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_anc_3plus_upp", "ANC 3+ - upper 95% CI", "CPN 3+ - IC 95% superieur", "m14_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_anc_4plus", "ANC 4+ visit coverage", "Couverture CPN 4+ visites", "m14_1", "Women with 4+ ANC visits", "Women with recent birth", "m14_1", "v208", "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "IR module; ANC visit count for most recent birth; WHO recommendation until 2016",
-    "dhs_anc_4plus_low", "ANC 4+ - lower 95% CI", "CPN 4+ - IC 95% inferieur", "m14_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_anc_4plus_upp", "ANC 4+ - upper 95% CI", "CPN 4+ - IC 95% superieur", "m14_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_anc_8plus", "ANC 8+ visit coverage", "Couverture CPN 8+ visites", "m14_1", "Women with 8+ ANC visits", "Women with recent birth", "m14_1", "v208", "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "IR module; ANC visit count for most recent birth; current WHO 2016 recommendation",
-    "dhs_anc_8plus_low", "ANC 8+ - lower 95% CI", "CPN 8+ - IC 95% inferieur", "m14_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_anc_8plus_upp", "ANC 8+ - upper 95% CI", "CPN 8+ - IC 95% superieur", "m14_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_n_recent_births", "Number of recent births (denominator)", "Nombre de naissances recentes (denominateur)", "v208", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "count", "Unweighted count"
-  )
+  if (is.null(ir) || nrow(ir) == 0) {
+    cli::cli_abort("No eligible ANC data after preparation.")
+  }
 
-  dict <- sntutils::build_dictionary(anc_data)
-  dict <- .enrich_dhs_dictionary(dict, labels)
+  # ---- 3. Resolve region labels if region_var provided ----
+  group_var <- NULL
+  if (!is.null(region_var)) {
+    if (!region_var %in% names(dhs_ir)) {
+      cli::cli_abort("Column {.var {region_var}} not found in `dhs_ir`.")
+    }
+    # .prepare_anc_data() mutates dhs_ir with dplyr::mutate then filters, so
+    # the original column is preserved (zapped of haven labels). Use it
+    # directly from the prepared data.
+    if (region_var %in% names(ir)) {
+      ir$region <- .resolve_region_labels(ir[[region_var]], region_var)
+    } else {
+      cli::cli_abort(
+        "Region variable {.var {region_var}} not preserved after data prep."
+      )
+    }
+    group_var <- "region"
+  }
 
-  list(
-    data = anc_data,
-    dict = dict,
-    metadata = list(
-      analysis_type = "ANC (Antenatal Care)",
-      file_type = "IR",
-      birth_window_months = birth_window_months,
-      processed_date = Sys.Date()
+  # ---- 4. Get conditions ----
+  conditions <- .anc_conditions()
+
+  # ---- 5. Compute national results ----
+  national_results <- purrr::map_dfr(conditions, function(cond) {
+    .compute_dhs_indicator_generic(
+      data      = ir,
+      condition = cond,
+      group_var = NULL,
+      ci_method = ci_method
     )
+  })
+
+  # ---- 6. Compute regional results ----
+  regional_results <- tibble::tibble()
+  if (!is.null(group_var)) {
+    regional_results <- purrr::map_dfr(conditions, function(cond) {
+      .compute_dhs_indicator_generic(
+        data              = ir,
+        condition         = cond,
+        group_var         = group_var,
+        subnational_level = "adm1",
+        ci_method         = ci_method
+      )
+    })
+  }
+
+  # ---- 7. Assemble standardized output ----
+  .assemble_dhs_output(
+    national_results = national_results,
+    regional_results = regional_results,
+    survey_meta      = survey_meta,
+    geo_source       = if (!is.null(group_var)) "survey" else NA_character_,
+    admin_col        = "adm1"
+  )
+}
+
+
+# =============================================================================
+# ANC conditions & dictionary
+# =============================================================================
+
+#' Internal: ANC indicator conditions
+#'
+#' Returns a list of indicator specifications for ANC coverage indicators.
+#'
+#' @return List of named lists, each with: indicator, indicator_code,
+#'   indicator_title, denom_code, filter_expr, outcome_var, num_desc,
+#'   denom_desc.
+#' @noRd
+.anc_conditions <- function() {
+  denom <- "Women with recent birth (within birth_window_months)"
+  list(
+    list(
+      indicator       = "ANC_1PLUS",
+      indicator_code  = "anc_1plus",
+      indicator_title = "ANC 1+ visit coverage",
+      denom_code      = "recent_births",
+      filter_expr     = NULL,
+      outcome_var     = "has_anc1",
+      num_desc        = "Women with 1+ ANC visits",
+      denom_desc      = denom
+    ),
+    list(
+      indicator       = "ANC_2PLUS",
+      indicator_code  = "anc_2plus",
+      indicator_title = "ANC 2+ visit coverage",
+      denom_code      = "recent_births",
+      filter_expr     = NULL,
+      outcome_var     = "has_anc2",
+      num_desc        = "Women with 2+ ANC visits",
+      denom_desc      = denom
+    ),
+    list(
+      indicator       = "ANC_3PLUS",
+      indicator_code  = "anc_3plus",
+      indicator_title = "ANC 3+ visit coverage",
+      denom_code      = "recent_births",
+      filter_expr     = NULL,
+      outcome_var     = "has_anc3",
+      num_desc        = "Women with 3+ ANC visits",
+      denom_desc      = denom
+    ),
+    list(
+      indicator       = "ANC_4PLUS",
+      indicator_code  = "anc_4plus",
+      indicator_title = "ANC 4+ visit coverage",
+      denom_code      = "recent_births",
+      filter_expr     = NULL,
+      outcome_var     = "has_anc4",
+      num_desc        = "Women with 4+ ANC visits",
+      denom_desc      = denom
+    ),
+    list(
+      indicator       = "ANC_8PLUS",
+      indicator_code  = "anc_8plus",
+      indicator_title = "ANC 8+ visit coverage",
+      denom_code      = "recent_births",
+      filter_expr     = NULL,
+      outcome_var     = "has_anc8",
+      num_desc        = "Women with 8+ ANC visits",
+      denom_desc      = denom
+    )
+  )
+}
+
+
+#' ANC Indicator Dictionary
+#'
+#' Returns a tibble describing all ANC indicators computed by
+#' \code{\link{calc_anc_dhs}}.
+#'
+#' @return Tibble with columns: indicator, indicator_code, indicator_title,
+#'   numerator_description, denominator_description, denominator_code.
+#' @export
+anc_dictionary <- function() {
+  conds <- .anc_conditions()
+  tibble::tibble(
+    indicator               = vapply(conds, `[[`, character(1), "indicator"),
+    indicator_code          = vapply(conds, `[[`, character(1), "indicator_code"),
+    indicator_title         = vapply(conds, `[[`, character(1), "indicator_title"),
+    numerator_description   = vapply(conds, `[[`, character(1), "num_desc"),
+    denominator_description = vapply(conds, `[[`, character(1), "denom_desc"),
+    denominator_code        = vapply(conds, `[[`, character(1), "denom_code")
   )
 }

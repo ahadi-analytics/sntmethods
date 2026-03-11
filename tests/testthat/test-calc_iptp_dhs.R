@@ -49,13 +49,14 @@ test_that("calc_iptp_dhs_core errors when SP variable is missing", {
 
 # ---- Basic IPTp calculation ----
 
-test_that("calc_iptp_dhs_core returns tibble with all 8 IPTp columns", {
+test_that("calc_iptp_dhs_core returns tibble with all IPTp columns (cumulative + exact)", {
   skip_if_not_installed("survey")
 
   ir_data <- .mock_ir_iptp()
   result <- calc_iptp_dhs_core(ir_data)
 
   expect_s3_class(result, "tbl_df")
+  # Cumulative indicators
   expect_true("dhs_iptp_1" %in% names(result))
   expect_true("dhs_iptp_2" %in% names(result))
   expect_true("dhs_iptp_3" %in% names(result))
@@ -64,6 +65,13 @@ test_that("calc_iptp_dhs_core returns tibble with all 8 IPTp columns", {
   expect_true("dhs_n_iptp_2plus" %in% names(result))
   expect_true("dhs_n_iptp_3plus" %in% names(result))
   expect_true("dhs_n_iptp_4plus" %in% names(result))
+  # Exact-dose indicators
+  expect_true("dhs_iptp_1only" %in% names(result))
+  expect_true("dhs_iptp_2only" %in% names(result))
+  expect_true("dhs_iptp_3only" %in% names(result))
+  expect_true("dhs_n_iptp_1only" %in% names(result))
+  expect_true("dhs_n_iptp_2only" %in% names(result))
+  expect_true("dhs_n_iptp_3only" %in% names(result))
 })
 
 test_that("calc_iptp_dhs_core computes correct point estimates with known data", {
@@ -91,6 +99,9 @@ test_that("calc_iptp_dhs_core reports correct unweighted sample sizes", {
   # n_iptp_2plus: 7 (sp_doses >= 2)
   # n_iptp_3plus: 5 (sp_doses >= 3)
   # n_iptp_4plus: 3 (sp_doses >= 4)
+  # n_iptp_1only: 2 (sp_doses == 1)
+  # n_iptp_2only: 2 (sp_doses == 2)
+  # n_iptp_3only: 2 (sp_doses == 3)
   ir_data <- .mock_ir_iptp()
   result <- calc_iptp_dhs_core(ir_data)
 
@@ -99,6 +110,24 @@ test_that("calc_iptp_dhs_core reports correct unweighted sample sizes", {
   expect_equal(result$dhs_n_iptp_2plus, 7L)
   expect_equal(result$dhs_n_iptp_3plus, 5L)
   expect_equal(result$dhs_n_iptp_4plus, 3L)
+  expect_equal(result$dhs_n_iptp_1only, 2L)
+  expect_equal(result$dhs_n_iptp_2only, 2L)
+  expect_equal(result$dhs_n_iptp_3only, 2L)
+})
+
+test_that("calc_iptp_dhs_core computes correct exact-dose estimates", {
+  skip_if_not_installed("survey")
+
+  # sp_doses = c(0, 1, 2, 3, 4, 5, 1, 2, 3, 4) -> 10 women, equal weights
+  # iptp_1only (== 1): 2/10 = 0.20
+  # iptp_2only (== 2): 2/10 = 0.20
+  # iptp_3only (== 3): 2/10 = 0.20
+  ir_data <- .mock_ir_iptp()
+  result <- calc_iptp_dhs_core(ir_data)
+
+  expect_equal(result$dhs_iptp_1only, 0.20)
+  expect_equal(result$dhs_iptp_2only, 0.20)
+  expect_equal(result$dhs_iptp_3only, 0.20)
 })
 
 
@@ -167,21 +196,84 @@ test_that("iptp_4plus is zero when sp_doses is binary (m49a_1 style)", {
 })
 
 
-# ---- calc_iptp_dhs wrapper (metadata + dict) ----
+# ---- calc_iptp_dhs wrapper (standardized long-format output) ----
 
-test_that("calc_iptp_dhs returns list with data, dict, and metadata", {
+test_that("calc_iptp_dhs returns named list with adm0", {
   skip_if_not_installed("survey")
-  skip_if_not_installed("sntutils")
 
   ir_data <- .mock_ir_iptp()
   result <- calc_iptp_dhs(ir_data)
 
   expect_type(result, "list")
-  expect_named(result, c("data", "dict", "metadata"))
-  expect_equal(result$metadata$analysis_type, "IPTp Coverage")
-  expect_equal(result$metadata$file_type, "IR")
-  expect_true("dhs_iptp_1" %in% names(result$data))
-  expect_true("dhs_iptp_4" %in% names(result$data))
+  expect_true("adm0" %in% names(result))
+  expect_s3_class(result$adm0, "tbl_df")
+})
+
+test_that("calc_iptp_dhs adm0 has correct column structure", {
+  skip_if_not_installed("survey")
+
+  ir_data <- .mock_ir_iptp()
+  result <- calc_iptp_dhs(ir_data)
+
+  expected_cols <- c(
+    "survey_id", "iso3", "iso2", "survey_type", "survey_year",
+    "adm0", "type", "geo_source",
+    "point", "ci_l", "ci_u", "numerator", "denominator",
+    "indicator", "indicator_code",
+    "numerator_description", "denominator_description", "denominator_code"
+  )
+  expect_true(all(expected_cols %in% names(result$adm0)))
+})
+
+test_that("calc_iptp_dhs adm0 contains all IPTp indicator codes", {
+  skip_if_not_installed("survey")
+
+  ir_data <- .mock_ir_iptp()
+  result <- calc_iptp_dhs(ir_data)
+  codes <- unique(result$adm0$indicator_code)
+
+  expect_true("iptp_1plus" %in% codes)
+  expect_true("iptp_2plus" %in% codes)
+  expect_true("iptp_3plus" %in% codes)
+  expect_true("iptp_4plus" %in% codes)
+  expect_true("iptp_1only" %in% codes)
+  expect_true("iptp_2only" %in% codes)
+  expect_true("iptp_3only" %in% codes)
+})
+
+test_that("calc_iptp_dhs point estimates are between 0 and 1", {
+  skip_if_not_installed("survey")
+
+  ir_data <- .mock_ir_iptp()
+  result <- calc_iptp_dhs(ir_data)
+  adm0 <- result$adm0
+
+  valid <- !is.na(adm0$point)
+  expect_true(all(adm0$point[valid] >= 0))
+  expect_true(all(adm0$point[valid] <= 1))
+})
+
+test_that("calc_iptp_dhs CI bounds are ordered correctly", {
+  skip_if_not_installed("survey")
+
+  ir_data <- .mock_ir_iptp()
+  result <- calc_iptp_dhs(ir_data)
+  adm0 <- result$adm0
+
+  valid <- !is.na(adm0$point) & !is.na(adm0$ci_l) & !is.na(adm0$ci_u)
+  expect_true(all(adm0$ci_l[valid] <= adm0$point[valid]))
+  expect_true(all(adm0$point[valid] <= adm0$ci_u[valid]))
+})
+
+test_that("iptp_dictionary returns correct structure", {
+  dict <- iptp_dictionary()
+
+  expect_s3_class(dict, "tbl_df")
+  expect_true("indicator" %in% names(dict))
+  expect_true("indicator_code" %in% names(dict))
+  expect_true("numerator_description" %in% names(dict))
+  expect_true("denominator_description" %in% names(dict))
+  expect_equal(nrow(dict), 7)
 })
 
 

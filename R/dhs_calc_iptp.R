@@ -120,7 +120,10 @@ calc_iptp_dhs_core <- function(
       iptp_1plus = as.integer(has_1plus),
       iptp_2plus = as.integer(has_2plus),
       iptp_3plus = as.integer(has_3plus),
-      iptp_4plus = as.integer(has_4plus)
+      iptp_4plus = as.integer(has_4plus),
+      iptp_1only = as.integer(has_1only),
+      iptp_2only = as.integer(has_2only),
+      iptp_3only = as.integer(has_3only)
     )
 
   # Add adm2 if available and not already present
@@ -520,6 +523,105 @@ calc_iptp_dhs_core <- function(
     )
   }
 
+  # 7e. IPTp exactly 1 dose
+  if (!is.null(grouping_vars)) {
+    iptp1only_results <- survey::svyby(
+      ~iptp_1only,
+      by = grouping_formula,
+      design = design,
+      FUN = survey::svymean,
+      vartype = "ci",
+      keep.names = FALSE,
+      na.rm = TRUE
+    ) |>
+      tibble::as_tibble() |>
+      dplyr::rename(
+        ci_l.iptp_1only = ci_l,
+        ci_u.iptp_1only = ci_u
+      )
+  } else {
+    iptp1only_mean <- survey::svymean(
+      ~iptp_1only,
+      design = design,
+      na.rm = TRUE
+    )
+
+    iptp1only_ci <- stats::confint(iptp1only_mean)
+
+    iptp1only_results <- tibble::tibble(
+      level = "National",
+      iptp_1only = base::as.numeric(iptp1only_mean),
+      ci_l.iptp_1only = iptp1only_ci[1, 1],
+      ci_u.iptp_1only = iptp1only_ci[1, 2]
+    )
+  }
+
+  # 7f. IPTp exactly 2 doses
+  if (!is.null(grouping_vars)) {
+    iptp2only_results <- survey::svyby(
+      ~iptp_2only,
+      by = grouping_formula,
+      design = design,
+      FUN = survey::svymean,
+      vartype = "ci",
+      keep.names = FALSE,
+      na.rm = TRUE
+    ) |>
+      tibble::as_tibble() |>
+      dplyr::rename(
+        ci_l.iptp_2only = ci_l,
+        ci_u.iptp_2only = ci_u
+      )
+  } else {
+    iptp2only_mean <- survey::svymean(
+      ~iptp_2only,
+      design = design,
+      na.rm = TRUE
+    )
+
+    iptp2only_ci <- stats::confint(iptp2only_mean)
+
+    iptp2only_results <- tibble::tibble(
+      level = "National",
+      iptp_2only = base::as.numeric(iptp2only_mean),
+      ci_l.iptp_2only = iptp2only_ci[1, 1],
+      ci_u.iptp_2only = iptp2only_ci[1, 2]
+    )
+  }
+
+  # 7g. IPTp exactly 3 doses
+  if (!is.null(grouping_vars)) {
+    iptp3only_results <- survey::svyby(
+      ~iptp_3only,
+      by = grouping_formula,
+      design = design,
+      FUN = survey::svymean,
+      vartype = "ci",
+      keep.names = FALSE,
+      na.rm = TRUE
+    ) |>
+      tibble::as_tibble() |>
+      dplyr::rename(
+        ci_l.iptp_3only = ci_l,
+        ci_u.iptp_3only = ci_u
+      )
+  } else {
+    iptp3only_mean <- survey::svymean(
+      ~iptp_3only,
+      design = design,
+      na.rm = TRUE
+    )
+
+    iptp3only_ci <- stats::confint(iptp3only_mean)
+
+    iptp3only_results <- tibble::tibble(
+      level = "National",
+      iptp_3only = base::as.numeric(iptp3only_mean),
+      ci_l.iptp_3only = iptp3only_ci[1, 1],
+      ci_u.iptp_3only = iptp3only_ci[1, 2]
+    )
+  }
+
   # ---- 8. calculate sample sizes ---------------------------------------------
 
   if (!is.null(grouping_vars)) {
@@ -545,6 +647,18 @@ calc_iptp_dhs_core <- function(
           iptp_4plus == 1,
           na.rm = TRUE
         ),
+        dhs_n_iptp_1only = base::sum(
+          iptp_1only == 1,
+          na.rm = TRUE
+        ),
+        dhs_n_iptp_2only = base::sum(
+          iptp_2only == 1,
+          na.rm = TRUE
+        ),
+        dhs_n_iptp_3only = base::sum(
+          iptp_3only == 1,
+          na.rm = TRUE
+        ),
         .groups = "drop"
       )
   } else {
@@ -565,6 +679,18 @@ calc_iptp_dhs_core <- function(
       ),
       dhs_n_iptp_4plus = base::sum(
         ir_eligible$iptp_4plus == 1,
+        na.rm = TRUE
+      ),
+      dhs_n_iptp_1only = base::sum(
+        ir_eligible$iptp_1only == 1,
+        na.rm = TRUE
+      ),
+      dhs_n_iptp_2only = base::sum(
+        ir_eligible$iptp_2only == 1,
+        na.rm = TRUE
+      ),
+      dhs_n_iptp_3only = base::sum(
+        ir_eligible$iptp_3only == 1,
         na.rm = TRUE
       )
     )
@@ -587,6 +713,18 @@ calc_iptp_dhs_core <- function(
         by = grouping_vars
       ) |>
       dplyr::left_join(
+        iptp1only_results,
+        by = grouping_vars
+      ) |>
+      dplyr::left_join(
+        iptp2only_results,
+        by = grouping_vars
+      ) |>
+      dplyr::left_join(
+        iptp3only_results,
+        by = grouping_vars
+      ) |>
+      dplyr::left_join(
         sample_sizes,
         by = grouping_vars
       )
@@ -602,6 +740,18 @@ calc_iptp_dhs_core <- function(
       ) |>
       dplyr::bind_cols(
         iptp4_results |>
+          dplyr::select(-level)
+      ) |>
+      dplyr::bind_cols(
+        iptp1only_results |>
+          dplyr::select(-level)
+      ) |>
+      dplyr::bind_cols(
+        iptp2only_results |>
+          dplyr::select(-level)
+      ) |>
+      dplyr::bind_cols(
+        iptp3only_results |>
           dplyr::select(-level)
       ) |>
       dplyr::bind_cols(
@@ -624,7 +774,16 @@ calc_iptp_dhs_core <- function(
     dhs_iptp_3_upp = "ci_u.iptp_3plus",
     dhs_iptp_4 = "iptp_4plus",
     dhs_iptp_4_low = "ci_l.iptp_4plus",
-    dhs_iptp_4_upp = "ci_u.iptp_4plus"
+    dhs_iptp_4_upp = "ci_u.iptp_4plus",
+    dhs_iptp_1only = "iptp_1only",
+    dhs_iptp_1only_low = "ci_l.iptp_1only",
+    dhs_iptp_1only_upp = "ci_u.iptp_1only",
+    dhs_iptp_2only = "iptp_2only",
+    dhs_iptp_2only_low = "ci_l.iptp_2only",
+    dhs_iptp_2only_upp = "ci_u.iptp_2only",
+    dhs_iptp_3only = "iptp_3only",
+    dhs_iptp_3only_low = "ci_l.iptp_3only",
+    dhs_iptp_3only_upp = "ci_u.iptp_3only"
   )
 
   for (new_name in names(rename_map)) {
@@ -684,18 +843,25 @@ calc_iptp_dhs_core <- function(
     grouping_vars,
     "lat",
     "lon",
-    # main percentage indicators
+    # main percentage indicators (cumulative)
     "dhs_iptp_1",
     "dhs_iptp_2",
     "dhs_iptp_3",
     "dhs_iptp_4",
+    # main percentage indicators (exact dose)
+    "dhs_iptp_1only",
+    "dhs_iptp_2only",
+    "dhs_iptp_3only",
     # sample sizes
     "dhs_n_women",
     "dhs_n_iptp_1plus",
     "dhs_n_iptp_2plus",
     "dhs_n_iptp_3plus",
     "dhs_n_iptp_4plus",
-    # confidence intervals
+    "dhs_n_iptp_1only",
+    "dhs_n_iptp_2only",
+    "dhs_n_iptp_3only",
+    # confidence intervals (cumulative)
     "dhs_iptp_1_low",
     "dhs_iptp_1_upp",
     "dhs_iptp_2_low",
@@ -703,7 +869,14 @@ calc_iptp_dhs_core <- function(
     "dhs_iptp_3_low",
     "dhs_iptp_3_upp",
     "dhs_iptp_4_low",
-    "dhs_iptp_4_upp"
+    "dhs_iptp_4_upp",
+    # confidence intervals (exact dose)
+    "dhs_iptp_1only_low",
+    "dhs_iptp_1only_upp",
+    "dhs_iptp_2only_low",
+    "dhs_iptp_2only_upp",
+    "dhs_iptp_3only_low",
+    "dhs_iptp_3only_upp"
   )
 
   column_order <- base::intersect(
@@ -726,121 +899,32 @@ calc_iptp_dhs_core <- function(
   tibble::as_tibble(iptp_results)
 }
 
-#' Extract metadata from DHS datasets for IPTp analysis
+#' Calculate IPTp Coverage from DHS Data (standardized long-format output)
 #'
-#' Internal function to extract survey metadata from DHS Individual Recode
-#' data. Looks for standard DHS metadata columns and extracts key survey
-#' information relevant to IPTp coverage analysis.
-#'
-#' @param dhs_ir DHS Individual Recode dataset.
-#' @param survey_vars Named list of survey variable mappings.
-#' @param birth_window_months Birth window used for filtering.
-#'
-#' @return List containing survey metadata.
-#' @noRd
-extract_dhs_metadata_iptp <- function(
-  dhs_ir,
-  survey_vars = NULL,
-  birth_window_months = 24
-) {
-  metadata <- list()
-
-  # extract country code
-  if ("v000" %in% names(dhs_ir)) {
-    metadata$country_code <- unique(dhs_ir$v000)[1]
-  } else {
-    metadata$country_code <- NA_character_
-  }
-
-  # extract survey year
-  if ("v007" %in% names(dhs_ir)) {
-    metadata$survey_year <- unique(dhs_ir$v007)[1]
-  } else {
-    metadata$survey_year <- NA_integer_
-  }
-
-  # extract survey id
-  if ("v000" %in% names(dhs_ir)) {
-    metadata$survey_id <- unique(dhs_ir$v000)[1]
-  } else {
-    metadata$survey_id <- NA_character_
-  }
-
-  metadata$survey_type <- "DHS"
-  metadata$file_type <- "IR"
-
-  metadata$total_records <- nrow(dhs_ir)
-
-  # number of clusters
-  cluster_var <- if (!is.null(survey_vars$cluster)) {
-    survey_vars$cluster
-  } else {
-    "v001"
-  }
-
-  if (cluster_var %in% names(dhs_ir)) {
-    metadata$total_clusters <- length(unique(dhs_ir[[cluster_var]]))
-  }
-
-  metadata$birth_window_months <- birth_window_months
-
-  metadata$has_sp_taken <- !is.null(survey_vars$sp_taken) &&
-    survey_vars$sp_taken %in% names(dhs_ir)
-  metadata$has_sp_doses <- !is.null(survey_vars$sp_doses) &&
-    survey_vars$sp_doses %in% names(dhs_ir)
-
-  metadata$processed_date <- Sys.Date()
-  metadata$processed_time <- Sys.time()
-
-  metadata$analysis_type <- "IPTp Coverage"
-
-  metadata$indicators <- c(
-    "IPTp 1+ (one or more doses)",
-    "IPTp 2+ (two or more doses)",
-    "IPTp 3+ (three or more doses)",
-    "IPTp 4+ (four or more doses)"
-  )
-
-  metadata$variable_mapping <- survey_vars
-
-  metadata
-}
-
-#' Calculate IPTp Coverage from DHS Data with Spatial Aggregation Support
-#'
-#' Main function for calculating IPTp (Intermittent Preventive Treatment in
-#' pregnancy) coverage indicators from DHS Individual Recode (IR) data. When a
-#' shapefile is provided, calculations are performed directly at the
-#' administrative level for better statistical precision.
+#' Computes IPTp 1+/2+/3+/4+ and exact-dose 1/2/3 coverage indicators
+#' nationally and optionally by subnational region, returning the standardized
+#' `list(adm0, adm1)` output.
 #'
 #' @param dhs_ir DHS Individual Recode dataset (IR) in tidy format.
 #' @param survey_vars Named list mapping DHS variable names.
 #' @param birth_window_months Maximum age of most recent birth in months.
 #'   Default 24 (DHS standard).
-#' @param gps_data Optional DHS GPS dataset for spatial joins.
-#' @param gps_vars Named list for GPS variables (cluster, lat, lon).
-#' @param shapefile Optional sf object with administrative boundaries.
-#' @param admin_level Character vector of admin columns in shapefile.
-#' @param join_nearest Logical; assign unmatched clusters to nearest polygon.
+#' @param region_var Optional column name (character string) in `dhs_ir` to use
+#'   as the subnational grouping variable (e.g., `"v024"` for region).
+#' @param ci_method CI method for svyciprop. Default: "logit".
 #'
-#' @return List containing:
-#'   \itemize{
-#'     \item data: Tibble with IPTp indicators
-#'     \item dict: Data dictionary
-#'     \item metadata: Survey metadata
-#'   }
+#' @return Named list with `adm0` tibble and optionally `adm1` tibble in
+#'   standardized long format.
 #'
 #' @examples
 #' \dontrun{
 #' # Basic usage
 #' result <- calc_iptp_dhs(dhs_ir = ir_data)
 #'
-#' # With spatial aggregation
+#' # With subnational estimates
 #' result <- calc_iptp_dhs(
 #'   dhs_ir = ir_data,
-#'   gps_data = gps_data,
-#'   shapefile = admin_boundaries,
-#'   admin_level = "adm1"
+#'   region_var = "v024"
 #' )
 #' }
 #'
@@ -860,100 +944,205 @@ calc_iptp_dhs <- function(
     sp_doses = "ml1_1"
   ),
   birth_window_months = 24,
-  gps_data = NULL,
-  gps_vars = list(
-    cluster = "DHSCLUST",
-    lat = "LATNUM",
-    lon = "LONGNUM"
-  ),
-  shapefile = NULL,
-  admin_level = NULL,
-  join_nearest = TRUE
+  region_var = NULL,
+  ci_method = "logit"
 ) {
-  # extract metadata
-  metadata <- extract_dhs_metadata_iptp(
-    dhs_ir = dhs_ir,
-    survey_vars = survey_vars,
-    birth_window_months = birth_window_months
-  )
 
-  # validate shapefile if provided
-  if (!is.null(shapefile)) {
-    if (!requireNamespace("sf", quietly = TRUE)) {
-      cli::cli_abort("Package 'sf' required for spatial aggregation.")
-    }
+  # ---- 1. Extract survey metadata (IR data uses v-prefix) ----
+  survey_meta <- .extract_survey_meta(dhs_ir)
 
-    if (!inherits(shapefile, "sf")) {
-      cli::cli_abort("`shapefile` must be an sf object.")
-    }
-
-    if (is.null(gps_data)) {
-      cli::cli_abort(
-        "GPS data required for spatial aggregation with shapefile."
-      )
-    }
-  }
-
-  # compute indicators (core handles spatial join if shapefile provided)
-  iptp_results <- calc_iptp_dhs_core(
+  # ---- 2. Prepare data via existing helper ----
+  # .prepare_iptp_data() expects survey_vars with interview_date or
+  # interview_cmc key; it handles both via %||%.
+  ir <- .prepare_iptp_data(
     dhs_ir = dhs_ir,
     survey_vars = survey_vars,
     birth_window_months = birth_window_months,
-    gps_data = gps_data,
-    gps_vars = gps_vars,
-    shapefile = shapefile,
-    admin_level = admin_level,
-    join_nearest = join_nearest
+    include_survey_vars = TRUE
   )
 
-  # update metadata with aggregation info
-  if (!is.null(shapefile)) {
-    # admin_level may have been auto-detected in core function
-    if (is.null(admin_level)) {
-      admin_level <- names(shapefile)[
-        grepl("^adm[0-9]+$", names(shapefile))
-      ]
-    }
-    metadata$aggregation_level <- admin_level
-    metadata$spatial_join_method <- if (join_nearest) {
-      "st_within with nearest fallback"
-    } else {
-      "st_within only"
-    }
-  } else if (!is.null(gps_data)) {
-    metadata$aggregation_level <- "cluster"
-  } else {
-    metadata$aggregation_level <- "national or existing admin"
+  if (is.null(ir) || nrow(ir) == 0) {
+    cli::cli_abort("No eligible IPTp data after preparation.")
   }
 
-  labels <- tibble::tribble(
-    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~dhs_recode, ~indicator_category, ~wmr_cascade_step, ~age_group, ~units, ~notes,
-    "dhs_iptp_1", "IPTp 1+ dose coverage", "Couverture TPI 1+ dose", "m49a_1, ml1_1", "Women receiving 1+ SP dose", "Women with recent birth", "m49a_1", "v208", "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "IR module; women with recent birth (last 24 months)",
-    "dhs_iptp_1_low", "IPTp 1+ - lower 95% CI", "TPI 1+ - IC 95% inferieur", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_iptp_1_upp", "IPTp 1+ - upper 95% CI", "TPI 1+ - IC 95% superieur", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_iptp_2", "IPTp 2+ dose coverage", "Couverture TPI 2+ doses", "m49a_1, ml1_1", "Women receiving 2+ SP doses", "Women with recent birth", "m49a_1", "v208", "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "IR module; women with recent birth (last 24 months)",
-    "dhs_iptp_2_low", "IPTp 2+ - lower 95% CI", "TPI 2+ - IC 95% inferieur", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_iptp_2_upp", "IPTp 2+ - upper 95% CI", "TPI 2+ - IC 95% superieur", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_iptp_3", "IPTp 3+ dose coverage", "Couverture TPI 3+ doses", "m49a_1, ml1_1", "Women receiving 3+ SP doses", "Women with recent birth", "m49a_1", "v208", "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "IR module; WHO-recommended minimum; women with recent birth (last 24 months)",
-    "dhs_iptp_3_low", "IPTp 3+ - lower 95% CI", "TPI 3+ - IC 95% inferieur", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_iptp_3_upp", "IPTp 3+ - upper 95% CI", "TPI 3+ - IC 95% superieur", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_iptp_4", "IPTp 4+ dose coverage", "Couverture TPI 4+ doses", "ml1_1", "Women receiving 4+ SP doses", "Women with recent birth", "ml1_1", "v208", "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "IR module; requires ml1_1 (dose count); iptp_4plus <= iptp_3plus",
-    "dhs_iptp_4_low", "IPTp 4+ - lower 95% CI", "TPI 4+ - IC 95% inferieur", "ml1_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_iptp_4_upp", "IPTp 4+ - upper 95% CI", "TPI 4+ - IC 95% superieur", "ml1_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_n_women", "Number of eligible women (denominator)", "Nombre de femmes eligibles (denominateur)", "v208", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "count", "Unweighted count",
-    "dhs_n_iptp_1plus", "Number with 1+ SP doses", "Nombre avec 1+ doses de SP", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "count", "Unweighted count",
-    "dhs_n_iptp_2plus", "Number with 2+ SP doses", "Nombre avec 2+ doses de SP", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "count", "Unweighted count",
-    "dhs_n_iptp_3plus", "Number with 3+ SP doses", "Nombre avec 3+ doses de SP", "m49a_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "count", "Unweighted count",
-    "dhs_n_iptp_4plus", "Number with 4+ SP doses", "Nombre avec 4+ doses de SP", "ml1_1", NA_character_, NA_character_, NA_character_, NA_character_, "IR", "Maternal health", NA_integer_, "women 15-49", "count", "Unweighted count"
+  # ---- 3. Create binary outcome variables for generic helper ----
+  # .prepare_iptp_data() creates: has_1plus, has_2plus, has_3plus, has_4plus,
+  # has_1only, has_2only, has_3only from sp_doses.
+  # Rename to match outcome_var names expected by conditions.
+  ir <- ir |>
+    dplyr::mutate(
+      has_iptp_1plus = as.integer(has_1plus),
+      has_iptp_2plus = as.integer(has_2plus),
+      has_iptp_3plus = as.integer(has_3plus),
+      has_iptp_4plus = as.integer(has_4plus),
+      has_iptp_1only = as.integer(has_1only),
+      has_iptp_2only = as.integer(has_2only),
+      has_iptp_3only = as.integer(has_3only)
+    )
+
+  # ---- 4. Resolve region labels if region_var provided ----
+  group_var <- NULL
+  if (!is.null(region_var)) {
+    if (!region_var %in% names(dhs_ir)) {
+      cli::cli_abort("Column {.var {region_var}} not found in `dhs_ir`.")
+    }
+    # .prepare_iptp_data preserves original columns after zap_labels
+    if (region_var %in% names(ir)) {
+      ir$region <- .resolve_region_labels(ir[[region_var]], region_var)
+    } else {
+      cli::cli_abort(
+        "Region variable {.var {region_var}} not preserved after data prep."
+      )
+    }
+    group_var <- "region"
+  }
+
+  # ---- 5. Get conditions ----
+  conditions <- .iptp_conditions()
+
+  # ---- 6. Compute national results ----
+  national_results <- purrr::map_dfr(conditions, function(cond) {
+    .compute_dhs_indicator_generic(
+      data      = ir,
+      condition = cond,
+      group_var = NULL,
+      ci_method = ci_method
+    )
+  })
+
+  # ---- 7. Compute regional results ----
+  regional_results <- tibble::tibble()
+  if (!is.null(group_var)) {
+    regional_results <- purrr::map_dfr(conditions, function(cond) {
+      .compute_dhs_indicator_generic(
+        data              = ir,
+        condition         = cond,
+        group_var         = group_var,
+        subnational_level = "adm1",
+        ci_method         = ci_method
+      )
+    })
+  }
+
+  # ---- 8. Assemble standardized output ----
+  .assemble_dhs_output(
+    national_results = national_results,
+    regional_results = regional_results,
+    survey_meta      = survey_meta,
+    geo_source       = if (!is.null(group_var)) "survey" else NA_character_,
+    admin_col        = "adm1"
   )
+}
 
-  dict <- sntutils::build_dictionary(iptp_results)
-  dict <- .enrich_dhs_dictionary(dict, labels)
 
+# =============================================================================
+# IPTp conditions & dictionary
+# =============================================================================
+
+#' Internal: IPTp indicator conditions
+#'
+#' Returns a list of indicator specifications for IPTp coverage indicators.
+#' Covers 4 cumulative (1+, 2+, 3+, 4+) and 3 exact-dose (1, 2, 3)
+#' indicators.
+#'
+#' @return List of named lists, each with: indicator, indicator_code,
+#'   indicator_title, denom_code, filter_expr, outcome_var, num_desc,
+#'   denom_desc.
+#' @noRd
+.iptp_conditions <- function() {
+  denom <- "Women with recent birth (within birth_window_months)"
   list(
-    data = iptp_results,
-    dict = dict,
-    metadata = metadata
+    list(
+      indicator       = "IPTP_1PLUS",
+      indicator_code  = "iptp_1plus",
+      indicator_title = "IPTp 1+ dose coverage",
+      denom_code      = "recent_births",
+      filter_expr     = NULL,
+      outcome_var     = "has_iptp_1plus",
+      num_desc        = "Women receiving 1+ SP dose during pregnancy",
+      denom_desc      = denom
+    ),
+    list(
+      indicator       = "IPTP_2PLUS",
+      indicator_code  = "iptp_2plus",
+      indicator_title = "IPTp 2+ dose coverage",
+      denom_code      = "recent_births",
+      filter_expr     = NULL,
+      outcome_var     = "has_iptp_2plus",
+      num_desc        = "Women receiving 2+ SP doses during pregnancy",
+      denom_desc      = denom
+    ),
+    list(
+      indicator       = "IPTP_3PLUS",
+      indicator_code  = "iptp_3plus",
+      indicator_title = "IPTp 3+ dose coverage",
+      denom_code      = "recent_births",
+      filter_expr     = NULL,
+      outcome_var     = "has_iptp_3plus",
+      num_desc        = "Women receiving 3+ SP doses during pregnancy",
+      denom_desc      = denom
+    ),
+    list(
+      indicator       = "IPTP_4PLUS",
+      indicator_code  = "iptp_4plus",
+      indicator_title = "IPTp 4+ dose coverage",
+      denom_code      = "recent_births",
+      filter_expr     = NULL,
+      outcome_var     = "has_iptp_4plus",
+      num_desc        = "Women receiving 4+ SP doses during pregnancy",
+      denom_desc      = denom
+    ),
+    list(
+      indicator       = "IPTP_1ONLY",
+      indicator_code  = "iptp_1only",
+      indicator_title = "IPTp exactly 1 dose coverage",
+      denom_code      = "recent_births",
+      filter_expr     = NULL,
+      outcome_var     = "has_iptp_1only",
+      num_desc        = "Women receiving exactly 1 SP dose during pregnancy",
+      denom_desc      = denom
+    ),
+    list(
+      indicator       = "IPTP_2ONLY",
+      indicator_code  = "iptp_2only",
+      indicator_title = "IPTp exactly 2 doses coverage",
+      denom_code      = "recent_births",
+      filter_expr     = NULL,
+      outcome_var     = "has_iptp_2only",
+      num_desc        = "Women receiving exactly 2 SP doses during pregnancy",
+      denom_desc      = denom
+    ),
+    list(
+      indicator       = "IPTP_3ONLY",
+      indicator_code  = "iptp_3only",
+      indicator_title = "IPTp exactly 3 doses coverage",
+      denom_code      = "recent_births",
+      filter_expr     = NULL,
+      outcome_var     = "has_iptp_3only",
+      num_desc        = "Women receiving exactly 3 SP doses during pregnancy",
+      denom_desc      = denom
+    )
+  )
+}
+
+
+#' IPTp Indicator Dictionary
+#'
+#' Returns a tibble describing all IPTp indicators computed by
+#' \code{\link{calc_iptp_dhs}}.
+#'
+#' @return Tibble with columns: indicator, indicator_code, indicator_title,
+#'   numerator_description, denominator_description, denominator_code.
+#' @export
+iptp_dictionary <- function() {
+  conds <- .iptp_conditions()
+  tibble::tibble(
+    indicator               = vapply(conds, `[[`, character(1), "indicator"),
+    indicator_code          = vapply(conds, `[[`, character(1), "indicator_code"),
+    indicator_title         = vapply(conds, `[[`, character(1), "indicator_title"),
+    numerator_description   = vapply(conds, `[[`, character(1), "num_desc"),
+    denominator_description = vapply(conds, `[[`, character(1), "denom_desc"),
+    denominator_code        = vapply(conds, `[[`, character(1), "denom_code")
   )
 }
 
