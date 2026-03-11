@@ -192,3 +192,55 @@
 
   result
 }
+
+
+#' Resolve region variable to human-readable labels
+#'
+#' Converts a haven-labelled region variable to uppercase character labels.
+#' If the result is still numeric (no haven labels), falls back to extracting
+#' value labels from the `labels` attribute. Final fallback: "Region_N".
+#'
+#' @param region_col The region column (possibly haven_labelled).
+#' @param region_var_name Name of the variable (for messages).
+#' @return Character vector of uppercase region names.
+#' @noRd
+.resolve_region_labels <- function(region_col, region_var_name = "region") {
+  # Try haven::as_factor first
+  resolved <- tryCatch({
+    as.character(haven::as_factor(region_col)) |> toupper()
+  }, error = function(e) {
+    as.character(region_col) |> toupper()
+  })
+
+  # Check if result is still numeric
+  unique_vals <- unique(resolved[!is.na(resolved)])
+  is_numeric <- length(unique_vals) > 0 &&
+    all(grepl("^\\d+(\\.\\d+)?$", unique_vals))
+
+  if (!is_numeric) return(resolved)
+
+  # Try extracting from value labels attribute
+  val_labels <- attr(region_col, "labels")
+  if (!is.null(val_labels) && length(val_labels) > 0) {
+    lookup <- stats::setNames(
+      toupper(names(val_labels)), as.character(val_labels)
+    )
+    raw_vals <- as.character(as.vector(haven::zap_labels(region_col)))
+    new_resolved <- unname(lookup[raw_vals])
+    new_resolved[is.na(new_resolved)] <- resolved[is.na(new_resolved)]
+
+    new_unique <- unique(new_resolved[!is.na(new_resolved)])
+    if (!all(grepl("^\\d+(\\.\\d+)?$", new_unique))) {
+      cli::cli_alert_info(
+        "Resolved {.var {region_var_name}} codes to labels"
+      )
+      return(new_resolved)
+    }
+  }
+
+  # Final fallback
+  cli::cli_alert_warning(
+    "{.var {region_var_name}} has numeric values with no labels; using Region_N"
+  )
+  paste0("REGION_", resolved)
+}

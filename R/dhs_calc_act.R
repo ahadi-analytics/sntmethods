@@ -443,18 +443,20 @@ calc_act_dhs <- function(
   admin_hierarchy <- list()
 
   if (!is.null(region_var)) {
-    # Get human-readable labels from haven; fall back to kr_fever's own values
-    region_values <- tryCatch({
-      lbls <- as.character(haven::as_factor(dhs_kr[[region_var]]))
-      raw_vals <- as.vector(haven::zap_labels(dhs_kr[[region_var]]))
-      febrile_raw <- kr_fever[[region_var]]
-      lookup <- stats::setNames(lbls, raw_vals)
-      unname(lookup[as.character(febrile_raw)])
-    }, error = function(e) {
-      as.character(kr_fever[[region_var]])
-    })
+    # Use dhs_kr_raw labels if available (dhs_read may strip them)
+    label_src <- if (!is.null(dhs_kr_raw) &&
+                     region_var %in% names(dhs_kr_raw)) {
+      dhs_kr_raw[[region_var]]
+    } else {
+      dhs_kr[[region_var]]
+    }
 
-    kr_fever$region <- toupper(region_values)
+    # Build lookup from full dataset, then map to febrile subset
+    resolved_all <- .resolve_region_labels(label_src, region_var)
+    raw_all <- as.character(as.vector(haven::zap_labels(label_src)))
+    lookup <- stats::setNames(resolved_all, raw_all)
+    febrile_raw <- as.character(kr_fever[[region_var]])
+    kr_fever$region <- unname(lookup[febrile_raw])
     admin_hierarchy <- list(list(group_var = "region", level_name = "adm1"))
     geo_src <- "survey"
 

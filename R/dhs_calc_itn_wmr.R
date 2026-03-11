@@ -194,9 +194,9 @@ calc_itn_wmr <- function(
   # Add region variable for grouping
   region_hr_var <- survey_vars$adm1 %||% "hv024"
   if (region_hr_var %in% names(dhs_hr)) {
-    household_data$adm1_raw <- haven::as_factor(dhs_hr[[region_hr_var]]) |>
-      as.character() |>
-      toupper()
+    household_data$adm1_raw <- .resolve_region_labels(
+      dhs_hr[[region_hr_var]], region_hr_var
+    )
   }
 
   n_hh <- nrow(household_data)
@@ -258,9 +258,9 @@ calc_itn_wmr <- function(
 
   # Add region from PR
   if (region_hr_var %in% names(dhs_pr)) {
-    person_data$adm1_raw <- haven::as_factor(dhs_pr[[region_hr_var]]) |>
-      as.character() |>
-      toupper()
+    person_data$adm1_raw <- .resolve_region_labels(
+      dhs_pr[[region_hr_var]], region_hr_var
+    )
   }
 
   n_persons <- nrow(person_data)
