@@ -518,126 +518,94 @@ calc_u5mr_dhs_core <- function(
 # helper for NULL default
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
-#' Extract metadata from DHS KR dataset
+
+# =============================================================================
+# U5MR indicator conditions and dictionary
+# =============================================================================
+
+#' Internal: U5MR indicator conditions
 #'
-#' internal function to extract survey metadata from dhs children's recode
-#' data. looks for standard dhs metadata columns and extracts key survey
-#' information.
+#' Returns list of indicator specifications for childhood mortality rates.
+#' U5MR is a rate (per 1000 live births), not a proportion, so it is NOT
+#' computed via `.compute_dhs_indicator_generic()`.
 #'
-#' @param dhs_kr dhs children's recode dataset.
-#' @param survey_vars named list of survey variable mappings.
-#'
-#' @return list containing survey metadata.
+#' @return List of named lists.
 #' @noRd
-extract_dhs_metadata_kr <- function(
-  dhs_kr,
-  survey_vars = NULL
-) {
-  metadata <- list()
-
-  if ("v000" %in% names(dhs_kr)) {
-    metadata$country_code <- unique(dhs_kr$v000)[1]
-  } else if ("country_code" %in% names(dhs_kr)) {
-    metadata$country_code <- unique(dhs_kr$country_code)[1]
-  } else {
-    metadata$country_code <- NA_character_
-  }
-
-  if ("v007" %in% names(dhs_kr)) {
-    metadata$survey_year <- unique(dhs_kr$v007)[1]
-  } else if ("survey_year" %in% names(dhs_kr)) {
-    metadata$survey_year <- unique(dhs_kr$survey_year)[1]
-  } else {
-    metadata$survey_year <- NA_integer_
-  }
-
-  if ("survey_id" %in% names(dhs_kr)) {
-    metadata$survey_id <- unique(dhs_kr$survey_id)[1]
-  } else if ("v000" %in% names(dhs_kr)) {
-    metadata$survey_id <- unique(dhs_kr$v000)[1]
-  } else {
-    metadata$survey_id <- NA_character_
-  }
-
-  metadata$survey_type <- "DHS"
-  metadata$file_type <- "KR"
-
-  metadata$total_records <- nrow(dhs_kr)
-
-  cluster_var <- if (!is.null(survey_vars$cluster)) {
-    survey_vars$cluster
-  } else {
-    "v021"
-  }
-
-  if (cluster_var %in% names(dhs_kr)) {
-    metadata$total_clusters <- length(
-      unique(dhs_kr[[cluster_var]])
+.u5mr_conditions <- function() {
+  list(
+    list(
+      indicator       = "U5MR",
+      indicator_code  = "u5mr",
+      indicator_title = "Under-5 mortality rate",
+      outcome_var     = NA_character_,
+      filter_expr     = NULL,
+      num_desc        = "Deaths under age 5",
+      denom_desc      = "Live births (synthetic cohort life table)",
+      denom_code      = "live_births"
     )
-  }
-
-  age_death_var <- if (!is.null(survey_vars$age_at_death)) {
-    survey_vars$age_at_death
-  } else {
-    "b7"
-  }
-
-  if (age_death_var %in% names(dhs_kr)) {
-    metadata$total_births <- nrow(dhs_kr)
-    metadata$total_deaths_u5 <- sum(
-      !is.na(dhs_kr[[age_death_var]]) &
-        dhs_kr[[age_death_var]] < 60,
-      na.rm = TRUE
-    )
-  } else if ("b5" %in% names(dhs_kr)) {
-    metadata$total_births <- nrow(dhs_kr)
-    metadata$total_deaths_u5 <- sum(
-      dhs_kr$b5 == 0,
-      na.rm = TRUE
-    )
-  }
-
-  metadata$processed_date <- Sys.Date()
-  metadata$processed_time <- Sys.time()
-
-  metadata$analysis_type <- "U5MR (Under-5 Mortality Rate)"
-  metadata$age_group <- "0-59 months"
-
-  metadata$variable_mapping <- survey_vars
-
-  metadata
+  )
 }
 
-#' Calculate U5MR from DHS data with spatial aggregation support
+
+#' U5MR Indicator Dictionary
 #'
-#' main function for calculating under-5 mortality rate (U5MR) from dhs
-#' children's recode data using the DHS.rates package. supports spatial
-#' aggregation using administrative boundary shapefiles to calculate U5MR at
-#' any administrative level (adm0, adm1, adm2, etc.). returns both data and
-#' a data dictionary.
+#' Returns the dictionary of U5MR indicators with metadata.
 #'
-#' @param dhs_kr dhs children's recode (KR) dataset in tidy format.
-#' @param survey_vars named list mapping dhs variable names. see
-#'   calc_u5mr_dhs_core().
-#' @param period_years years before survey to calculate rates (default: 5).
-#' @param gps_data optional dhs gps dataset with cluster coordinates.
-#' @param gps_vars named list for gps variables (cluster, lat, lon).
-#' @param shapefile optional sf object with administrative boundaries. must
-#'   contain columns named "adm0", "adm1", "adm2", and so on for admin
-#'   levels.
-#' @param admin_level character vector specifying aggregation levels
-#'   (for example, c("adm1", "adm2")). if NULL, auto-detects available
-#'   admin columns.
-#' @param join_nearest logical; if TRUE, assigns clusters outside all
+#' @return Tibble with columns: indicator, indicator_code, indicator_title,
+#'   numerator_description, denominator_description, denominator_code.
+#'
+#' @examples
+#' u5mr_dictionary()
+#'
+#' @export
+u5mr_dictionary <- function() {
+  conds <- .u5mr_conditions()
+  tibble::tibble(
+    indicator               = vapply(conds, `[[`, character(1), "indicator"),
+    indicator_code          = vapply(conds, `[[`, character(1), "indicator_code"),
+    indicator_title         = vapply(conds, `[[`, character(1), "indicator_title"),
+    numerator_description   = vapply(conds, `[[`, character(1), "num_desc"),
+    denominator_description = vapply(conds, `[[`, character(1), "denom_desc"),
+    denominator_code        = vapply(conds, `[[`, character(1), "denom_code")
+  )
+}
+
+
+#' Calculate U5MR from DHS Data (Standardized Long Format)
+#'
+#' Estimates under-5 mortality rate (U5MR) from DHS Children's Recode data
+#' using the DHS.rates package. Returns results in standardized long format
+#' with `list(adm0, adm1)` structure.
+#'
+#' U5MR is computed via `DHS.rates::chmort()` (synthetic cohort life table
+#' method), NOT via `svyciprop()`, because it is a rate per 1000 live births
+#' rather than a proportion.
+#'
+#' @param dhs_kr DHS Children's Recode (KR) dataset in tidy format.
+#' @param survey_vars Named list mapping DHS variable names. See
+#'   [calc_u5mr_dhs_core()].
+#' @param period_years Years before survey to calculate rates (default: 5).
+#' @param region_var Optional column name for subnational grouping
+#'   (e.g., "v024"). Auto-falls back to "v024" if no spatial params.
+#' @param gps_data Optional DHS GPS dataset with cluster coordinates.
+#' @param gps_vars Named list for GPS variables (cluster, lat, lon).
+#' @param shapefile Optional sf object with administrative boundaries.
+#' @param admin_level Character vector specifying aggregation levels.
+#' @param join_nearest Logical; if TRUE, assigns clusters outside all
 #'   polygons to nearest administrative unit.
 #'
-#' @return list with:
-#'   \itemize{
-#'     \item `data`: tibble with U5MR estimates by admin level
-#'     \item `dict`: data dictionary from sntutils::build_dictionary()
-#'     \item `metadata`: list with survey metadata
+#' @return Named list of tibbles:
+#'   \describe{
+#'     \item{`adm0`}{National-level estimates (always present)}
+#'     \item{`adm1`}{Admin-1 estimates (when region_var or shapefile used)}
 #'   }
+#'   Each tibble contains columns: survey_id, iso3, iso2, survey_type,
+#'   survey_year, adm0, [adm1], type, geo_source, point, ci_l, ci_u,
+#'   numerator, denominator, indicator, indicator_code,
+#'   numerator_description, denominator_description, denominator_code.
 #'
+#' @seealso [u5mr_dictionary()] for indicator definitions,
+#'   [calc_u5mr_dhs_core()] for the legacy wide-format output
 #' @export
 calc_u5mr_dhs <- function(
   dhs_kr,
@@ -650,58 +618,267 @@ calc_u5mr_dhs <- function(
     age_at_death = "b7"
   ),
   period_years = 5,
-  gps_data = NULL,
-  gps_vars = list(
+  region_var   = NULL,
+  gps_data     = NULL,
+  gps_vars     = list(
     cluster = "DHSCLUST",
-    lat = "LATNUM",
-    lon = "LONGNUM"
+    lat     = "LATNUM",
+    lon     = "LONGNUM"
   ),
-  shapefile = NULL,
-  admin_level = NULL,
+  shapefile    = NULL,
+  admin_level  = NULL,
   join_nearest = TRUE
 ) {
-  metadata <- extract_dhs_metadata_kr(
-    dhs_kr = dhs_kr,
-    survey_vars = survey_vars
+  # ---- 1. Input validation ----
+
+  if (!is.data.frame(dhs_kr)) {
+    cli::cli_abort("`dhs_kr` must be a data.frame or tibble.")
+  }
+  if (nrow(dhs_kr) == 0) {
+    cli::cli_abort("`dhs_kr` is empty.")
+  }
+
+  # ---- 2. Extract survey metadata ----
+
+  survey_meta <- .extract_survey_meta(dhs_kr)
+
+  # ---- 3. Determine region variable ----
+
+  # Auto-fallback to v024 when no spatial parameters provided
+  if (is.null(region_var) && is.null(gps_data) && is.null(shapefile)) {
+    if ("v024" %in% names(dhs_kr)) {
+      region_var <- "v024"
+      cli::cli_alert_info(
+        "No region_var/GPS/shapefile specified; defaulting to {.var v024} for adm1"
+      )
+    }
+  }
+
+  # ---- 4. Compute U5MR via core function ----
+
+  # Resolve class_var for DHS.rates::chmort()
+  class_var_for_core <- NULL
+  geo_src <- NA_character_
+
+  if (!is.null(region_var) && region_var %in% names(dhs_kr)) {
+    class_var_for_core <- region_var
+    geo_src <- "survey"
+  }
+
+  # National computation (no Class variable)
+  mort_national <- tryCatch(
+    .compute_u5mr_chmort(
+      dhs_kr      = dhs_kr,
+      survey_vars = survey_vars,
+      period_years = period_years,
+      class_var   = NULL
+    ),
+    error = function(e) {
+      cli::cli_warn("National U5MR computation failed: {e$message}")
+      NULL
+    }
   )
 
-  metadata$reference_period <- paste0(
-    "0-",
-    period_years - 1,
-    " years before survey (",
-    period_years,
-    "-year rates)"
+  # Regional computation (with Class variable)
+  mort_regional <- NULL
+  if (!is.null(class_var_for_core)) {
+    mort_regional <- tryCatch(
+      .compute_u5mr_chmort(
+        dhs_kr      = dhs_kr,
+        survey_vars = survey_vars,
+        period_years = period_years,
+        class_var   = class_var_for_core
+      ),
+      error = function(e) {
+        cli::cli_warn("Regional U5MR computation failed: {e$message}")
+        NULL
+      }
+    )
+  }
+
+  # ---- 5. Condition metadata ----
+
+  cond <- .u5mr_conditions()[[1]]
+
+  age_death_var <- survey_vars$age_at_death %||% "b7"
+
+  # ---- 6. Build national long-format tibble ----
+
+  meta_cols <- tibble::tibble(
+    survey_id   = survey_meta$survey_id,
+    iso3        = survey_meta$iso3,
+    iso2        = survey_meta$iso2,
+    survey_type = survey_meta$survey_type,
+    survey_year = survey_meta$survey_year,
+    adm0        = survey_meta$country_upper
   )
 
-  u5mr_data <- calc_u5mr_dhs_core(
-    dhs_kr = dhs_kr,
-    survey_vars = survey_vars,
-    period_years = period_years,
-    gps_data = gps_data,
-    gps_vars = gps_vars,
-    shapefile = shapefile,
-    admin_level = admin_level,
-    join_nearest = join_nearest
-  )
+  # National row
+  if (!is.null(mort_national)) {
+    mort_nat_df <- as.data.frame(mort_national)
+    u5mr_idx <- which(grepl("U5MR", rownames(mort_nat_df), ignore.case = TRUE))
+    if (length(u5mr_idx) == 0) u5mr_idx <- 1L
+    u5mr_row <- mort_nat_df[u5mr_idx[1], , drop = FALSE]
 
-  labels <- tibble::tribble(
-    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~dhs_recode, ~indicator_category, ~wmr_cascade_step, ~age_group, ~units, ~notes,
-    "dhs_u5mr", "Under-5 mortality rate", "Taux de mortalite des moins de 5 ans", "b5, b7, b3", "Deaths under age 5", "Live births", "b5, b7", "b3", "KR", "Mortality", NA_integer_, "0-59 months", "per 1000 live births", "Per 1,000 live births; synthetic cohort life table method; 5-year reference period",
-    "dhs_u5mr_low", "U5MR - lower 95% CI", "TMM5 - IC 95% inferieur", "b5, b7, b3", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Mortality", NA_integer_, "0-59 months", "per 1000 live births", "Survey-weighted 95% CI",
-    "dhs_u5mr_upp", "U5MR - upper 95% CI", "TMM5 - IC 95% superieur", "b5, b7, b3", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Mortality", NA_integer_, "0-59 months", "per 1000 live births", "Survey-weighted 95% CI",
-    "dhs_n_births", "Number of live births (denominator)", "Nombre de naissances vivantes (denominateur)", "b3", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Mortality", NA_integer_, "0-59 months", "count", "Unweighted count",
-    "dhs_n_deaths", "Number of under-5 deaths (numerator)", "Nombre de deces de moins de 5 ans (numerateur)", "b5, b7", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Mortality", NA_integer_, "0-59 months", "count", "Unweighted count; deaths before age 60 months"
-  )
+    n_births_nat <- nrow(dhs_kr)
+    n_deaths_nat <- sum(
+      !is.na(dhs_kr[[age_death_var]]) & dhs_kr[[age_death_var]] < 60,
+      na.rm = TRUE
+    )
 
-  dict <- sntutils::build_dictionary(u5mr_data)
-  dict <- .enrich_dhs_dictionary(dict, labels)
+    national_tbl <- dplyr::bind_cols(
+      meta_cols,
+      tibble::tibble(
+        type       = "survey_weighted",
+        geo_source = NA_character_,
+        point      = round(u5mr_row$R, 1),
+        ci_l       = if ("LCI" %in% names(u5mr_row)) round(u5mr_row$LCI, 1) else NA_real_,
+        ci_u       = if ("UCI" %in% names(u5mr_row)) round(u5mr_row$UCI, 1) else NA_real_,
+        numerator   = as.integer(n_deaths_nat),
+        denominator = as.integer(n_births_nat),
+        indicator               = cond$indicator_title,
+        indicator_code          = cond$indicator_code,
+        numerator_description   = cond$num_desc,
+        denominator_description = cond$denom_desc,
+        denominator_code        = cond$denom_code
+      )
+    ) |> tibble::as_tibble()
+  } else {
+    national_tbl <- dplyr::bind_cols(
+      meta_cols,
+      tibble::tibble(
+        type       = "survey_weighted",
+        geo_source = NA_character_,
+        point      = NA_real_,
+        ci_l       = NA_real_,
+        ci_u       = NA_real_,
+        numerator   = NA_integer_,
+        denominator = as.integer(nrow(dhs_kr)),
+        indicator               = cond$indicator_title,
+        indicator_code          = cond$indicator_code,
+        numerator_description   = cond$num_desc,
+        denominator_description = cond$denom_desc,
+        denominator_code        = cond$denom_code
+      )
+    ) |> tibble::as_tibble()
+  }
 
-  list(
-    data = dplyr::distinct(u5mr_data),
-    dict = dict,
-    metadata = metadata
+  out <- list(adm0 = national_tbl)
+
+  # ---- 7. Build regional long-format tibble ----
+
+  if (!is.null(mort_regional) && !is.null(class_var_for_core)) {
+    mort_reg_df <- as.data.frame(mort_regional)
+
+    u5mr_rows <- mort_reg_df[
+      grepl("U5MR", rownames(mort_reg_df), ignore.case = TRUE),
+      , drop = FALSE
+    ]
+
+    if (nrow(u5mr_rows) > 0 && "Class" %in% names(u5mr_rows)) {
+      # Resolve region labels
+      region_labels <- .resolve_region_labels(
+        dhs_kr[[class_var_for_core]], class_var_for_core
+      )
+      label_lookup <- stats::setNames(
+        region_labels,
+        as.character(as.vector(haven::zap_labels(dhs_kr[[class_var_for_core]])))
+      )
+      # Deduplicate
+      label_lookup <- label_lookup[!duplicated(names(label_lookup))]
+
+      # Sample sizes by region
+      kr_zapped <- dhs_kr |>
+        dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
+        dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
+
+      sample_by_region <- kr_zapped |>
+        dplyr::group_by(.data[[class_var_for_core]]) |>
+        dplyr::summarise(
+          n_births = dplyr::n(),
+          n_deaths = sum(
+            !is.na(.data[[age_death_var]]) & .data[[age_death_var]] < 60,
+            na.rm = TRUE
+          ),
+          .groups = "drop"
+        )
+
+      regional_rows <- list()
+      for (i in seq_len(nrow(u5mr_rows))) {
+        class_val <- as.character(u5mr_rows$Class[i])
+        region_name <- if (class_val %in% names(label_lookup)) {
+          label_lookup[[class_val]]
+        } else {
+          toupper(class_val)
+        }
+
+        # Match sample sizes
+        ss_match <- sample_by_region[
+          as.character(sample_by_region[[class_var_for_core]]) == class_val,
+        ]
+        n_b <- if (nrow(ss_match) > 0) ss_match$n_births[1] else NA_integer_
+        n_d <- if (nrow(ss_match) > 0) ss_match$n_deaths[1] else NA_integer_
+
+        regional_rows[[i]] <- dplyr::bind_cols(
+          meta_cols,
+          tibble::tibble(
+            adm1       = toupper(region_name),
+            type       = "survey_weighted",
+            geo_source = geo_src,
+            point      = round(u5mr_rows$R[i], 1),
+            ci_l       = if ("LCI" %in% names(u5mr_rows)) round(u5mr_rows$LCI[i], 1) else NA_real_,
+            ci_u       = if ("UCI" %in% names(u5mr_rows)) round(u5mr_rows$UCI[i], 1) else NA_real_,
+            numerator   = as.integer(n_d),
+            denominator = as.integer(n_b),
+            indicator               = cond$indicator_title,
+            indicator_code          = cond$indicator_code,
+            numerator_description   = cond$num_desc,
+            denominator_description = cond$denom_desc,
+            denominator_code        = cond$denom_code
+          )
+        )
+      }
+
+      adm1_tbl <- dplyr::bind_rows(regional_rows) |>
+        tibble::as_tibble()
+
+      out[["adm1"]] <- adm1_tbl
+    }
+  }
+
+  out
+}
+
+
+#' Internal: Compute U5MR via DHS.rates::chmort()
+#'
+#' Thin wrapper around DHS.rates::chmort() that handles the call and
+#' returns the raw result object.
+#'
+#' @param dhs_kr DHS KR dataset.
+#' @param survey_vars Named list of variable mappings.
+#' @param period_years Reference period in years.
+#' @param class_var Optional class variable for subgroup estimates.
+#' @return Raw result from DHS.rates::chmort().
+#' @noRd
+.compute_u5mr_chmort <- function(dhs_kr, survey_vars, period_years,
+                                  class_var = NULL) {
+  age_death_var <- survey_vars$age_at_death %||% "b7"
+
+  DHS.rates::chmort(
+    Data = dhs_kr,
+    JK = "Yes",
+    Strata = survey_vars$stratum,
+    Cluster = survey_vars$cluster,
+    Weight = survey_vars$weight,
+    Date_of_interview = survey_vars$interview_date,
+    Date_of_birth = survey_vars$birth_date,
+    Age_at_death = age_death_var,
+    Period = period_years * 12,
+    Class = class_var
   )
 }
+
 
 #' Aggregate U5MR to administrative levels
 #'

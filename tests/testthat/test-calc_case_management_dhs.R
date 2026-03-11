@@ -1,3 +1,9 @@
+# ============================================================================
+# Tests for calc_case_management_dhs() — long-format case management indicators
+# ============================================================================
+
+# --- Shared mock data -------------------------------------------------------
+
 # Helper to create a mock KR dataset with CSB + antimalarial + ACT variables
 .make_eff_cm_kr_data <- function(n = 300, seed = 42) {
   set.seed(seed)
@@ -41,6 +47,9 @@
   kr_data
 }
 
+
+# --- Test: input validation --------------------------------------------------
+
 test_that("calc_case_management_dhs validates input data", {
   expect_error(
     calc_case_management_dhs("not a dataframe"),
@@ -53,96 +62,135 @@ test_that("calc_case_management_dhs validates input data", {
   )
 })
 
-test_that("calc_case_management_dhs returns expected columns at national level", {
+
+# --- Test: basic structure ---------------------------------------------------
+
+test_that("calc_case_management_dhs returns named list with adm0", {
   skip_if_not_installed("survey")
 
   kr_data <- .make_eff_cm_kr_data()
-
   result <- calc_case_management_dhs(kr_data)
 
-  expect_s3_class(result, "tbl_df")
-  expect_equal(nrow(result), 1)
+  expect_type(result, "list")
+  expect_true("adm0" %in% names(result))
+  expect_s3_class(result$adm0, "tbl_df")
+})
+
+
+test_that("adm0 has correct column structure", {
+  skip_if_not_installed("survey")
+
+  kr_data <- .make_eff_cm_kr_data()
+  result <- calc_case_management_dhs(kr_data)
 
   expected_cols <- c(
-    "dhs_eff_cm_any", "dhs_eff_cm_any_low", "dhs_eff_cm_any_upp",
-    "dhs_eff_cm_public", "dhs_eff_cm_public_low", "dhs_eff_cm_public_upp",
-    "dhs_n_fever", "dhs_n_antimalarial", "dhs_n_antimalarial_public"
+    "survey_id", "iso3", "iso2", "survey_type", "survey_year",
+    "adm0", "type", "geo_source",
+    "point", "ci_l", "ci_u", "numerator", "denominator",
+    "indicator", "indicator_code",
+    "numerator_description", "denominator_description", "denominator_code"
   )
-  for (col in expected_cols) {
-    expect_true(col %in% names(result), info = paste("Missing column:", col))
-  }
+  expect_true(all(expected_cols %in% names(result$adm0)))
 })
+
+
+test_that("adm0 contains both case management indicators", {
+  skip_if_not_installed("survey")
+
+  kr_data <- .make_eff_cm_kr_data()
+  result <- calc_case_management_dhs(kr_data)
+
+  indicator_codes <- unique(result$adm0$indicator_code)
+
+  expect_true("eff_cm_any" %in% indicator_codes)
+  expect_true("eff_cm_public" %in% indicator_codes)
+  expect_equal(length(indicator_codes), 2)
+})
+
+
+# --- Test: estimates are valid proportions -----------------------------------
 
 test_that("calc_case_management_dhs estimates are valid proportions", {
   skip_if_not_installed("survey")
 
   kr_data <- .make_eff_cm_kr_data()
-
   result <- calc_case_management_dhs(kr_data)
 
+  adm0 <- result$adm0
+
   # Estimates between 0 and 1
-  expect_true(result$dhs_eff_cm_any >= 0 && result$dhs_eff_cm_any <= 1)
-  expect_true(result$dhs_eff_cm_public >= 0 && result$dhs_eff_cm_public <= 1)
+  eff_any <- adm0$point[adm0$indicator_code == "eff_cm_any"]
+  eff_pub <- adm0$point[adm0$indicator_code == "eff_cm_public"]
+  expect_true(eff_any >= 0 && eff_any <= 1)
+  expect_true(eff_pub >= 0 && eff_pub <= 1)
 
   # CI ordering: low <= est <= upp
-  expect_true(result$dhs_eff_cm_any_low <= result$dhs_eff_cm_any)
-  expect_true(result$dhs_eff_cm_any_upp >= result$dhs_eff_cm_any)
-  expect_true(result$dhs_eff_cm_public_low <= result$dhs_eff_cm_public)
-  expect_true(result$dhs_eff_cm_public_upp >= result$dhs_eff_cm_public)
+  for (ic in c("eff_cm_any", "eff_cm_public")) {
+    row <- adm0[adm0$indicator_code == ic, ]
+    expect_true(row$ci_l <= row$point)
+    expect_true(row$ci_u >= row$point)
+  }
 
   # CIs clamped to [0, 1]
-  expect_true(result$dhs_eff_cm_any_low >= 0)
-  expect_true(result$dhs_eff_cm_any_upp <= 1)
-  expect_true(result$dhs_eff_cm_public_low >= 0)
-  expect_true(result$dhs_eff_cm_public_upp <= 1)
+  expect_true(all(adm0$ci_l >= 0))
+  expect_true(all(adm0$ci_u <= 1))
 
-  # Counts are positive integers
-  expect_true(result$dhs_n_fever > 0)
-  expect_true(result$dhs_n_antimalarial > 0)
-  expect_true(result$dhs_n_antimalarial <= result$dhs_n_fever)
+  # Denominators are positive integers
+  expect_true(all(adm0$denominator > 0))
 })
 
-test_that("calc_case_management_dhs works with region_var", {
+
+# --- Test: auto-fallback to v024 for adm1 ------------------------------------
+
+test_that("auto-falls back to v024 for adm1 with region data", {
   skip_if_not_installed("survey")
 
   kr_data <- .make_eff_cm_kr_data()
+  result <- calc_case_management_dhs(kr_data)
 
-  result <- calc_case_management_dhs(kr_data, region_var = "v024")
+  # Should produce adm1 tab automatically since v024 exists
+  expect_false(is.null(result$adm1))
+  expect_s3_class(result$adm1, "tbl_df")
+  expect_true("adm1" %in% names(result$adm1))
 
-  expect_s3_class(result, "tbl_df")
-  expect_true("v024" %in% names(result))
+  # Should have rows for each region x 2 indicators
+  n_regions <- length(unique(kr_data$v024))
+  expect_equal(nrow(result$adm1), n_regions * 2)
 
-  # Should have one row per region
-  expect_equal(nrow(result), 3)
-  expect_setequal(result$v024, c("REGION1", "REGION2", "REGION3"))
+  # Region names should be uppercase
+  expect_true(all(result$adm1$adm1 == toupper(result$adm1$adm1)))
 
-  # All estimates valid
-  expect_true(all(result$dhs_eff_cm_any >= 0 & result$dhs_eff_cm_any <= 1))
-  expect_true(all(result$dhs_eff_cm_public >= 0 & result$dhs_eff_cm_public <= 1))
-
-  # CI ordering for all rows
-  expect_true(all(result$dhs_eff_cm_any_low <= result$dhs_eff_cm_any))
-  expect_true(all(result$dhs_eff_cm_any_upp >= result$dhs_eff_cm_any))
+  # All regional estimates valid
+  valid <- !is.na(result$adm1$point)
+  expect_true(all(result$adm1$point[valid] >= 0))
+  expect_true(all(result$adm1$point[valid] <= 1))
 })
+
+
+# --- Test: public <= any -----------------------------------------------------
 
 test_that("calc_case_management_dhs public <= any", {
   skip_if_not_installed("survey")
 
   kr_data <- .make_eff_cm_kr_data()
-
   result <- calc_case_management_dhs(kr_data)
 
+  adm0 <- result$adm0
+  eff_any <- adm0$point[adm0$indicator_code == "eff_cm_any"]
+  eff_pub <- adm0$point[adm0$indicator_code == "eff_cm_public"]
+
   # Public CSB is a subset of any CSB, so eff_cm_public <= eff_cm_any
-  expect_true(result$dhs_eff_cm_public <= result$dhs_eff_cm_any)
+  expect_true(eff_pub <= eff_any)
 })
+
+
+# --- Test: public variant uses public-conditioned ACT rate -------------------
 
 test_that("calc_case_management_dhs public variant uses public-conditioned ACT rate", {
   skip_if_not_installed("survey")
 
   # Create data where public care seekers have very different ACT rates
-  # than private care seekers - this ensures eff_cm_public is NOT just
-
-  # csb_public * P(ACT|antimalarial, any) but properly conditioned.
+  # than private care seekers
   set.seed(99)
   n <- 500
 
@@ -177,16 +225,17 @@ test_that("calc_case_management_dhs public variant uses public-conditioned ACT r
   kr_data$ml13e[is_priv] <- sample(c(0, 1), sum(is_priv), replace = TRUE, prob = c(0.9, 0.1))
 
   result <- calc_case_management_dhs(kr_data)
+  adm0 <- result$adm0
 
-  # With such divergent ACT rates, eff_cm_public should be meaningfully
-  # different from what it would be if using the unconditional ACT rate.
-  # Specifically: public ACT rate (~0.9) >> overall ACT rate (~0.5),
-  # so eff_cm_public should be higher than under the old formula.
-  expect_true(!is.na(result$dhs_eff_cm_public))
-  expect_true(!is.na(result$dhs_eff_cm_any))
-  expect_true(result$dhs_n_antimalarial_public > 0)
-  expect_true(result$dhs_n_antimalarial_public <= result$dhs_n_antimalarial)
+  eff_pub <- adm0$point[adm0$indicator_code == "eff_cm_public"]
+  eff_any <- adm0$point[adm0$indicator_code == "eff_cm_any"]
+
+  expect_true(!is.na(eff_pub))
+  expect_true(!is.na(eff_any))
 })
+
+
+# --- Test: h37e fallback -----------------------------------------------------
 
 test_that("calc_case_management_dhs handles h37e fallback", {
   skip_if_not_installed("survey")
@@ -219,10 +268,16 @@ test_that("calc_case_management_dhs handles h37e fallback", {
 
   result <- calc_case_management_dhs(kr_data)
 
-  expect_s3_class(result, "tbl_df")
-  expect_true(!is.na(result$dhs_eff_cm_any))
-  expect_true(result$dhs_n_antimalarial > 0)
+  expect_type(result, "list")
+  expect_true("adm0" %in% names(result))
+
+  adm0 <- result$adm0
+  eff_any <- adm0$point[adm0$indicator_code == "eff_cm_any"]
+  expect_true(!is.na(eff_any))
 })
+
+
+# --- Test: haven_labelled placeholders with h37 real data --------------------
 
 test_that("calc_case_management_dhs handles ml13 placeholders with h37 real data (haven_labelled)", {
   skip_if_not_installed("survey")
@@ -267,14 +322,20 @@ test_that("calc_case_management_dhs handles ml13 placeholders with h37 real data
 
   result <- calc_case_management_dhs(kr_data)
 
-  expect_s3_class(result, "tbl_df")
+  expect_type(result, "list")
+  expect_true("adm0" %in% names(result))
+
+  adm0 <- result$adm0
+  eff_any <- adm0$point[adm0$indicator_code == "eff_cm_any"]
+
   # Key assertion: ACT should be non-zero because h37e has real data
-  expect_true(!is.na(result$dhs_eff_cm_any))
-  expect_true(result$dhs_eff_cm_any > 0,
+  expect_true(!is.na(eff_any))
+  expect_true(eff_any > 0,
     label = "eff_cm_any should be > 0 when h37e has data (ml13 placeholders)")
-  expect_true(result$dhs_n_antimalarial > 0,
-    label = "n_antimalarial should be > 0 from h37 series")
 })
+
+
+# --- Test: no antimalarial data errors ----------------------------------------
 
 test_that("calc_case_management_dhs errors with no antimalarial data", {
   skip_if_not_installed("survey")
@@ -302,6 +363,8 @@ test_that("calc_case_management_dhs errors with no antimalarial data", {
   )
 })
 
+
+# --- Test: composite ACT from multiple labeled variables ---------------------
 
 test_that("calc_case_management_dhs uses composite ACT from multiple labeled variables", {
   skip_if_not_installed("survey")
@@ -357,9 +420,43 @@ test_that("calc_case_management_dhs uses composite ACT from multiple labeled var
 
   result <- calc_case_management_dhs(kr_data)
 
-  expect_s3_class(result, "tbl_df")
+  expect_type(result, "list")
+  expect_true("adm0" %in% names(result))
+
+  adm0 <- result$adm0
+  eff_any <- adm0$point[adm0$indicator_code == "eff_cm_any"]
 
   # eff_cm_any should be non-zero and reflect composite ACT
-  expect_true(result$dhs_eff_cm_any > 0,
+  expect_true(eff_any > 0,
     label = "eff_cm_any should use composite ACT (ml13e + ml13f)")
+})
+
+
+# --- Test: type column -------------------------------------------------------
+
+test_that("type column is survey_weighted", {
+  skip_if_not_installed("survey")
+
+  kr_data <- .make_eff_cm_kr_data()
+  result <- calc_case_management_dhs(kr_data)
+
+  expect_true(all(result$adm0$type == "survey_weighted"))
+})
+
+
+# --- Test: case_management_dictionary() --------------------------------------
+
+test_that("case_management_dictionary returns correct structure", {
+  dict <- case_management_dictionary()
+
+  expect_s3_class(dict, "tbl_df")
+  expect_true("indicator" %in% names(dict))
+  expect_true("indicator_code" %in% names(dict))
+  expect_true("numerator_description" %in% names(dict))
+  expect_true("denominator_description" %in% names(dict))
+  expect_true("denominator_code" %in% names(dict))
+
+  # 2 indicators: eff_cm_any and eff_cm_public
+  expect_equal(nrow(dict), 2)
+  expect_setequal(dict$indicator_code, c("eff_cm_any", "eff_cm_public"))
 })

@@ -118,84 +118,6 @@ calculate_dhs_gini <- function(
   1 - G
 }
 
-#' Extract Wealth-Specific Metadata from DHS Household Dataset
-#'
-#' Internal function to extract survey metadata specific to wealth analysis
-#' from DHS Household Records data.
-#'
-#' @param dhs_hr DHS Household Records dataset
-#' @param survey_vars Named list of survey variable mappings
-#'
-#' @return A list containing survey metadata
-#' @noRd
-extract_wealth_metadata <- function(dhs_hr, survey_vars = NULL) {
-  metadata <- list()
-
-  # Extract country code (hv000)
-  if ("hv000" %in% names(dhs_hr)) {
-    metadata$country_code <- unique(dhs_hr$hv000)[1]
-  } else if ("country_code" %in% names(dhs_hr)) {
-    metadata$country_code <- unique(dhs_hr$country_code)[1]
-  } else {
-    metadata$country_code <- NA_character_
-  }
-
-  # Extract survey year (hv007)
-  if ("hv007" %in% names(dhs_hr)) {
-    metadata$survey_year <- unique(dhs_hr$hv007)[1]
-  } else if ("survey_year" %in% names(dhs_hr)) {
-    metadata$survey_year <- unique(dhs_hr$survey_year)[1]
-  } else {
-    metadata$survey_year <- NA_integer_
-  }
-
-  # Extract survey ID
-  if ("survey_id" %in% names(dhs_hr)) {
-    metadata$survey_id <- unique(dhs_hr$survey_id)[1]
-  } else if ("hv000" %in% names(dhs_hr)) {
-    metadata$survey_id <- unique(dhs_hr$hv000)[1]
-  } else {
-    metadata$survey_id <- NA_character_
-  }
-
-  # Survey type
-  metadata$survey_type <- "DHS"
-  metadata$file_type <- "HR"
-
-  # Extract total sample sizes
-  metadata$total_households <- nrow(dhs_hr)
-
-  cluster_var <- if (!is.null(survey_vars$cluster)) {
-    survey_vars$cluster
-  } else {
-    "hv001"
-  }
-
-  if (cluster_var %in% names(dhs_hr)) {
-    metadata$total_clusters <- length(unique(dhs_hr[[cluster_var]]))
-  }
-
-  # Add processing timestamp
-  metadata$processed_date <- Sys.Date()
-  metadata$processed_time <- Sys.time()
-
-  # Add analysis type
-  metadata$analysis_type <- "Wealth Quintile Distribution and Gini Coefficient"
-
-  # Check which wealth variables are available
-  metadata$has_wealth_quintile <- "hv270" %in% names(dhs_hr) ||
-    (!is.null(survey_vars$wealth_quintile) &&
-      survey_vars$wealth_quintile %in% names(dhs_hr))
-
-  metadata$has_wealth_score <- "hv271" %in% names(dhs_hr) ||
-    (!is.null(survey_vars$wealth_score) &&
-      survey_vars$wealth_score %in% names(dhs_hr))
-
-  # Add variable mapping info for transparency
-  metadata$variable_mapping <- survey_vars
-
-  metadata
-}
 
 #' Calculate Core Wealth Quintile Distributions from DHS Data
 #'
@@ -710,49 +632,138 @@ calc_wealth_dhs_core <- function(
   tibble::as_tibble(wealth_dist)
 }
 
+
+# =============================================================================
+# Wealth indicator conditions and dictionary
+# =============================================================================
+
+#' Internal: Wealth indicator conditions
+#'
+#' Returns list of indicator specifications for wealth quintile proportions
+#' and Gini coefficient. Each quintile is a separate indicator.
+#'
+#' @return List of named lists.
+#' @noRd
+.wealth_conditions <- function() {
+  list(
+    list(
+      indicator       = "WEALTH_Q1",
+      indicator_code  = "wealth_q1",
+      indicator_title = "Proportion in poorest wealth quintile (Q1)",
+      outcome_var     = "is_q1",
+      filter_expr     = NULL,
+      num_desc        = "Households in poorest quintile (Q1)",
+      denom_desc      = "All households with valid wealth quintile",
+      denom_code      = "hh_wealth"
+    ),
+    list(
+      indicator       = "WEALTH_Q2",
+      indicator_code  = "wealth_q2",
+      indicator_title = "Proportion in poorer wealth quintile (Q2)",
+      outcome_var     = "is_q2",
+      filter_expr     = NULL,
+      num_desc        = "Households in poorer quintile (Q2)",
+      denom_desc      = "All households with valid wealth quintile",
+      denom_code      = "hh_wealth"
+    ),
+    list(
+      indicator       = "WEALTH_Q3",
+      indicator_code  = "wealth_q3",
+      indicator_title = "Proportion in middle wealth quintile (Q3)",
+      outcome_var     = "is_q3",
+      filter_expr     = NULL,
+      num_desc        = "Households in middle quintile (Q3)",
+      denom_desc      = "All households with valid wealth quintile",
+      denom_code      = "hh_wealth"
+    ),
+    list(
+      indicator       = "WEALTH_Q4",
+      indicator_code  = "wealth_q4",
+      indicator_title = "Proportion in richer wealth quintile (Q4)",
+      outcome_var     = "is_q4",
+      filter_expr     = NULL,
+      num_desc        = "Households in richer quintile (Q4)",
+      denom_desc      = "All households with valid wealth quintile",
+      denom_code      = "hh_wealth"
+    ),
+    list(
+      indicator       = "WEALTH_Q5",
+      indicator_code  = "wealth_q5",
+      indicator_title = "Proportion in richest wealth quintile (Q5)",
+      outcome_var     = "is_q5",
+      filter_expr     = NULL,
+      num_desc        = "Households in richest quintile (Q5)",
+      denom_desc      = "All households with valid wealth quintile",
+      denom_code      = "hh_wealth"
+    ),
+    list(
+      indicator       = "GINI",
+      indicator_code  = "gini",
+      indicator_title = "Gini coefficient of wealth inequality",
+      outcome_var     = NA_character_,
+      filter_expr     = NULL,
+      num_desc        = "Wealth inequality (Brown formula)",
+      denom_desc      = "All households with valid wealth score",
+      denom_code      = "hh_wealth_score"
+    )
+  )
+}
+
+
+#' Wealth Indicator Dictionary
+#'
+#' Returns the full dictionary of wealth indicators with metadata.
+#'
+#' @return Tibble with columns: indicator, indicator_code, indicator_title,
+#'   numerator_description, denominator_description, denominator_code.
+#'
+#' @examples
+#' wealth_dictionary()
+#'
+#' @export
+wealth_dictionary <- function() {
+  conds <- .wealth_conditions()
+  tibble::tibble(
+    indicator               = vapply(conds, `[[`, character(1), "indicator"),
+    indicator_code          = vapply(conds, `[[`, character(1), "indicator_code"),
+    indicator_title         = vapply(conds, `[[`, character(1), "indicator_title"),
+    numerator_description   = vapply(conds, `[[`, character(1), "num_desc"),
+    denominator_description = vapply(conds, `[[`, character(1), "denom_desc"),
+    denominator_code        = vapply(conds, `[[`, character(1), "denom_code")
+  )
+}
+
+
 #' Calculate Wealth Quintile Distributions from DHS Data
 #'
-#' Main function for calculating wealth quintile distributions and Gini
-#' coefficients from DHS Household Records data. Supports spatial aggregation
-#' using administrative boundary shapefiles to calculate wealth indicators at
-#' any administrative level. Returns both data and a comprehensive data
-#' dictionary.
+#' Computes wealth quintile proportions (Q1-Q5) and Gini coefficient from
+#' DHS Household Records data. Returns survey-weighted estimates in
+#' standardized long format with `list(adm0, adm1)` structure.
 #'
 #' @param dhs_hr DHS Household Records dataset in tidy format.
 #' @param survey_vars Named list mapping DHS variable names.
+#' @param region_var Optional column name for subnational grouping
+#'   (e.g., "hv024"). Auto-falls back to "hv024" if no spatial params.
 #' @param gps_data Optional DHS GPS dataset with cluster coordinates.
 #' @param gps_vars Named list for GPS variables (cluster, lat, lon).
 #' @param shapefile Optional sf object with administrative boundaries.
 #' @param admin_level Character vector specifying aggregation levels.
 #' @param join_nearest Logical; if `TRUE`, assigns clusters outside all
-#'   polygons to the nearest administrative unit.
+#'   polygons to nearest administrative unit.
+#' @param ci_method Method for confidence intervals. Default: "logit".
 #'
-#' @return A list containing three elements:
-#'   \itemize{
-#'     \item `data`: A tibble with wealth quintile distributions and Gini
-#'       coefficients
-#'     \item `dict`: A data dictionary created using `sntutils::build_dictionary()`
-#'     \item `metadata`: A list containing survey metadata
+#' @return Named list of tibbles:
+#'   \describe{
+#'     \item{`adm0`}{National-level estimates (always present)}
+#'     \item{`adm1`}{Admin-1 estimates (when region_var or shapefile used)}
 #'   }
+#'   Each tibble contains columns: survey_id, iso3, iso2, survey_type,
+#'   survey_year, adm0, [adm1], type, geo_source, point, ci_l, ci_u,
+#'   numerator, denominator, indicator, indicator_code,
+#'   numerator_description, denominator_description, denominator_code.
 #'
-#' @examples
-#' # Example with spatial aggregation
-#' # wealth_results <- calc_wealth_dhs(
-#' #   dhs_hr = hr_data,
-#' #   gps_data = gps_data,
-#' #   shapefile = admin_shapefile,
-#' #   admin_level = c("adm1")
-#' # )
-#' #
-#' # # Access the data
-#' # wealth_data <- wealth_results$data
-#' #
-#' # # Access the dictionary
-#' # wealth_dict <- wealth_results$dict
-#' #
-#' # # Access the metadata
-#' # wealth_metadata <- wealth_results$metadata
-#'
+#' @seealso [wealth_dictionary()] for indicator definitions,
+#'   [calc_wealth_dhs_core()] for the legacy wide-format output
 #' @export
 calc_wealth_dhs <- function(
   dhs_hr,
@@ -766,91 +777,258 @@ calc_wealth_dhs <- function(
     wealth_score = "hv271",
     hh_members = "hv012"
   ),
-  gps_data = NULL,
-  gps_vars = list(
+  region_var   = NULL,
+  gps_data     = NULL,
+  gps_vars     = list(
     cluster = "DHSCLUST",
-    lat = "LATNUM",
-    lon = "LONGNUM"
+    lat     = "LATNUM",
+    lon     = "LONGNUM"
   ),
-  shapefile = NULL,
-  admin_level = NULL,
-  join_nearest = TRUE
+  shapefile    = NULL,
+  admin_level  = NULL,
+  join_nearest = TRUE,
+  ci_method    = "logit"
 ) {
-  # Extract metadata from DHS data
-  metadata <- extract_wealth_metadata(dhs_hr, survey_vars)
+  # ---- 1. Input validation ----
 
-  # Validate shapefile if provided
-  if (!is.null(shapefile)) {
-    if (!requireNamespace("sf", quietly = TRUE)) {
-      cli::cli_abort("Package 'sf' required for spatial aggregation.")
-    }
+  if (!is.data.frame(dhs_hr)) {
+    cli::cli_abort("`dhs_hr` must be a data.frame or tibble.")
+  }
+  if (nrow(dhs_hr) == 0) {
+    cli::cli_abort("`dhs_hr` is empty.")
+  }
 
-    if (!inherits(shapefile, "sf")) {
-      cli::cli_abort("`shapefile` must be an sf object.")
-    }
+  # Check required survey variables
+  needed_cols <- c(survey_vars$cluster, survey_vars$weight,
+                   survey_vars$stratum, survey_vars$wealth_quintile)
+  missing_cols <- setdiff(needed_cols, names(dhs_hr))
+  if (length(missing_cols) > 0) {
+    cli::cli_abort(c(
+      "Required variables not found: {.var {missing_cols}}",
+      "i" = "Check your survey_vars mapping"
+    ))
+  }
 
-    if (is.null(gps_data)) {
-      cli::cli_abort(
-        "GPS data required for spatial aggregation with shapefile."
+  # ---- 2. Extract survey metadata ----
+
+  survey_meta <- .extract_survey_meta_hv(dhs_hr)
+
+  # ---- 3. Prepare household-level data ----
+
+  hr_zapped <- dhs_hr |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
+
+  hr_data <- tibble::tibble(
+    cluster_id      = hr_zapped[[survey_vars$cluster]],
+    stratum_id      = hr_zapped[[survey_vars$stratum]],
+    survey_weight   = hr_zapped[[survey_vars$weight]] / 1e6,
+    wealth_quintile = hr_zapped[[survey_vars$wealth_quintile]]
+  )
+
+  # Filter to valid quintile values
+
+  hr_data <- hr_data |>
+    dplyr::filter(wealth_quintile %in% 1:5)
+
+  # Create binary outcome variables for each quintile
+  hr_data <- hr_data |>
+    dplyr::mutate(
+      is_q1 = as.integer(wealth_quintile == 1),
+      is_q2 = as.integer(wealth_quintile == 2),
+      is_q3 = as.integer(wealth_quintile == 3),
+      is_q4 = as.integer(wealth_quintile == 4),
+      is_q5 = as.integer(wealth_quintile == 5)
+    )
+
+  # Add wealth score and hh_members for Gini calculation
+  wealth_score_var <- survey_vars$wealth_score %||% "hv271"
+  hh_members_var <- survey_vars$hh_members %||% "hv012"
+
+  if (wealth_score_var %in% names(hr_zapped)) {
+    hr_data$wealth_score <- hr_zapped[[wealth_score_var]]
+  }
+  if (hh_members_var %in% names(hr_zapped)) {
+    hr_data$hh_members <- hr_zapped[[hh_members_var]]
+  }
+
+  n_hh <- nrow(hr_data)
+  cli::cli_alert_info(
+    "Processed {format(n_hh, big.mark = ',')} households with valid wealth quintile"
+  )
+
+  # ---- 4. Region grouping ----
+
+  region_hr_var <- survey_vars$adm1 %||% "hv024"
+  group_var <- NULL
+  geo_src <- NA_character_
+
+  # Auto-fallback to hv024 when no spatial parameters provided
+  if (is.null(region_var) && is.null(gps_data) && is.null(shapefile)) {
+    if (region_hr_var %in% names(dhs_hr)) {
+      region_var <- region_hr_var
+      cli::cli_alert_info(
+        "No region_var/GPS/shapefile specified; defaulting to {.var {region_hr_var}} for adm1"
       )
     }
   }
 
-  # Compute indicators (core handles spatial join if shapefile provided)
-  wealth_results <- calc_wealth_dhs_core(
-    dhs_hr = dhs_hr,
-    survey_vars = survey_vars,
-    gps_data = gps_data,
-    gps_vars = gps_vars,
-    shapefile = shapefile,
-    admin_level = admin_level,
-    join_nearest = join_nearest
-  )
-
-  # Update metadata with aggregation info
-  if (!is.null(shapefile)) {
-    if (is.null(admin_level)) {
-      admin_level <- names(shapefile)[
-        grepl("^adm[0-9]+$", names(shapefile))
-      ]
+  if (!is.null(region_var)) {
+    if (!region_var %in% names(dhs_hr)) {
+      cli::cli_abort("Column {.var {region_var}} not found in `dhs_hr`.")
     }
-    metadata$aggregation_level <- admin_level
-    metadata$spatial_join_method <- if (join_nearest) {
-      "st_within with nearest fallback"
-    } else {
-      "st_within only"
-    }
-  } else if (!is.null(gps_data)) {
-    metadata$aggregation_level <- "cluster"
-  } else {
-    metadata$aggregation_level <- "national or existing admin"
+    hr_data$region <- .resolve_region_labels(
+      dhs_hr[[region_var]], region_var
+    )
+    # Subset to rows that passed the quintile filter
+    # (region was extracted from dhs_hr before filtering, need to align)
+    # Re-extract from the same rows
+    valid_idx <- which(hr_zapped[[survey_vars$wealth_quintile]] %in% 1:5)
+    hr_data$region <- .resolve_region_labels(
+      dhs_hr[[region_var]][valid_idx], region_var
+    )
+    group_var <- "region"
+    geo_src <- "survey"
   }
 
-  labels <- tibble::tribble(
-    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~dhs_recode, ~indicator_category, ~wmr_cascade_step, ~age_group, ~units, ~notes,
-    "dhs_prop_poorest", "Proportion in poorest quintile", "Proportion dans le quintile le plus pauvre", "hv270", "Households in poorest", "All households", "hv270", "hv001", "HR", "Wealth", NA_integer_, NA_character_, "proportion (0-1)", "HR module; DHS-defined wealth quintiles",
-    "dhs_prop_poorer", "Proportion in poorer quintile", "Proportion dans le quintile pauvre", "hv270", "Households in poorer", "All households", "hv270", "hv001", "HR", "Wealth", NA_integer_, NA_character_, "proportion (0-1)", "HR module; DHS-defined wealth quintiles",
-    "dhs_prop_middle", "Proportion in middle quintile", "Proportion dans le quintile moyen", "hv270", "Households in middle", "All households", "hv270", "hv001", "HR", "Wealth", NA_integer_, NA_character_, "proportion (0-1)", "HR module; DHS-defined wealth quintiles",
-    "dhs_prop_richer", "Proportion in richer quintile", "Proportion dans le quintile riche", "hv270", "Households in richer", "All households", "hv270", "hv001", "HR", "Wealth", NA_integer_, NA_character_, "proportion (0-1)", "HR module; DHS-defined wealth quintiles",
-    "dhs_prop_richest", "Proportion in richest quintile", "Proportion dans le quintile le plus riche", "hv270", "Households in richest", "All households", "hv270", "hv001", "HR", "Wealth", NA_integer_, NA_character_, "proportion (0-1)", "HR module; DHS-defined wealth quintiles",
-    "dhs_dominant_quintile", "Dominant wealth quintile", "Quintile de richesse dominant", "hv270", NA_character_, NA_character_, NA_character_, NA_character_, "HR", "Wealth", NA_integer_, NA_character_, "categorical", "Most common quintile in the area",
-    "dhs_dominant_prop", "Proportion in dominant quintile", "Proportion dans le quintile dominant", "hv270", "Households in dominant quintile", "All households", "hv270", "hv001", "HR", "Wealth", NA_integer_, NA_character_, "proportion (0-1)", "Proportion of households in the dominant quintile",
-    "dhs_gini", "Gini coefficient", "Coefficient de Gini", "hv271", NA_character_, NA_character_, NA_character_, NA_character_, "HR", "Wealth", NA_integer_, NA_character_, "coefficient (0-1)", "Computed from hv271 wealth factor scores",
-    "dhs_n_households", "Number of households", "Nombre de menages", NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, "HR", "Wealth", NA_integer_, NA_character_, "count", "Unweighted count",
-    "dhs_weighted_households", "Weighted number of households", "Nombre pondere de menages", NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, "HR", "Wealth", NA_integer_, NA_character_, "count", "Survey-weighted count",
-    "dhs_gini_sample_size", "Sample size for Gini", "Taille d'echantillon pour Gini", NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, "HR", "Wealth", NA_integer_, NA_character_, "count", "Number of households used for Gini calculation",
-    "dhs_gini_reliable", "Gini reliability flag", "Indicateur de fiabilite du Gini", NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, "HR", "Wealth", NA_integer_, NA_character_, "boolean", "TRUE if sample size >= 25"
+  # ---- 5. Get conditions and compute quintile indicators ----
+
+  conds <- .wealth_conditions()
+  # Only compute Q1-Q5 (not Gini) via .compute_dhs_indicator_generic
+  q_conds <- conds[seq_len(5)]
+
+  meta_cols <- tibble::tibble(
+    survey_id   = survey_meta$survey_id,
+    iso3        = survey_meta$iso3,
+    iso2        = survey_meta$iso2,
+    survey_type = survey_meta$survey_type,
+    survey_year = survey_meta$survey_year,
+    adm0        = survey_meta$country_upper
   )
 
-  dict <- sntutils::build_dictionary(wealth_results)
-  dict <- .enrich_dhs_dictionary(dict, labels)
+  .round_results <- function(tbl) {
+    tbl |>
+      dplyr::mutate(
+        point       = round(point, 3),
+        ci_l        = round(pmax(ci_l, 0, na.rm = TRUE), 3),
+        ci_u        = round(pmin(ci_u, 1, na.rm = TRUE), 3),
+        numerator   = as.integer(numerator),
+        denominator = as.integer(denominator)
+      )
+  }
 
-  list(
-    data = wealth_results,
-    dict = dict,
-    metadata = metadata
-  )
+  # --- Compute Gini nationally ---
+  gini_cond <- conds[[6]]
+  has_gini_data <- "wealth_score" %in% names(hr_data) &&
+    "hh_members" %in% names(hr_data)
+
+  .build_gini_row <- function(data_subset, level_val, location_val) {
+    if (!has_gini_data) {
+      return(tibble::tibble(
+        level = level_val, location = location_val,
+        point = NA_real_, ci_l = NA_real_, ci_u = NA_real_,
+        numerator = NA_integer_, denominator = as.integer(nrow(data_subset)),
+        indicator = gini_cond$indicator_title,
+        indicator_code = gini_cond$indicator_code,
+        numerator_description = gini_cond$num_desc,
+        denominator_description = gini_cond$denom_desc,
+        denominator_code = gini_cond$denom_code
+      ))
+    }
+    gini_val <- calculate_dhs_gini(
+      wealth_scores = data_subset$wealth_score,
+      weights       = data_subset$survey_weight,
+      population    = data_subset$hh_members
+    )
+    tibble::tibble(
+      level = level_val, location = location_val,
+      point = round(gini_val, 3), ci_l = NA_real_, ci_u = NA_real_,
+      numerator = NA_integer_, denominator = as.integer(nrow(data_subset)),
+      indicator = gini_cond$indicator_title,
+      indicator_code = gini_cond$indicator_code,
+      numerator_description = gini_cond$num_desc,
+      denominator_description = gini_cond$denom_desc,
+      denominator_code = gini_cond$denom_code
+    )
+  }
+
+  # --- adm0 (national) ---
+  national_results <- purrr::map_dfr(q_conds, function(cond) {
+    .compute_dhs_indicator_generic(
+      data      = hr_data,
+      condition = cond,
+      group_var = NULL,
+      ci_method = ci_method
+    )
+  })
+
+  # Add Gini national
+  gini_national <- .build_gini_row(hr_data, "adm0", "National")
+  national_results <- dplyr::bind_rows(national_results, gini_national)
+
+  national_results <- .round_results(national_results)
+
+  adm0_tbl <- dplyr::bind_cols(
+    meta_cols[rep(1, nrow(national_results)), ],
+    tibble::tibble(type = "survey_weighted", geo_source = NA_character_),
+    national_results |> dplyr::select(-level, -location)
+  ) |>
+    tibble::as_tibble()
+
+  out <- list(adm0 = adm0_tbl)
+
+  # --- adm1 (subnational) ---
+  if (!is.null(group_var)) {
+    sub_results <- purrr::map_dfr(q_conds, function(cond) {
+      .compute_dhs_indicator_generic(
+        data              = hr_data,
+        condition         = cond,
+        group_var         = group_var,
+        subnational_level = "adm1",
+        ci_method         = ci_method
+      )
+    })
+
+    # Add Gini by region
+    regions <- unique(hr_data[[group_var]])
+    regions <- regions[!is.na(regions)]
+    gini_regional <- purrr::map_dfr(regions, function(rgn) {
+      sub <- hr_data[hr_data[[group_var]] == rgn, ]
+      .build_gini_row(sub, "adm1", rgn)
+    })
+
+    sub_results <- dplyr::bind_rows(sub_results, gini_regional)
+
+    # Filter to regional rows only
+    sub_results <- sub_results |>
+      dplyr::filter(level != "adm0")
+
+    if (nrow(sub_results) > 0) {
+      sub_results <- .round_results(sub_results)
+
+      sub_tbl <- dplyr::bind_cols(
+        meta_cols[rep(1, nrow(sub_results)), ],
+        sub_results |>
+          dplyr::transmute(
+            adm1       = toupper(location),
+            type       = "survey_weighted",
+            geo_source = geo_src,
+            point, ci_l, ci_u,
+            numerator, denominator,
+            indicator, indicator_code,
+            numerator_description,
+            denominator_description, denominator_code
+          )
+      ) |>
+        tibble::as_tibble()
+
+      out[["adm1"]] <- sub_tbl
+    }
+  }
+
+  out
 }
+
 
 #' Aggregate Cluster-level Wealth Data to Administrative Levels
 #'

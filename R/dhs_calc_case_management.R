@@ -10,9 +10,12 @@
 #'
 #' Two variants are produced:
 #' \itemize{
-#'   \item \code{dhs_eff_cm_any}: using any care-seeking (public or private)
-#'   \item \code{dhs_eff_cm_public}: using public sector care-seeking only
+#'   \item \code{EFF_CM_ANY}: using any care-seeking (public or private)
+#'   \item \code{EFF_CM_PUBLIC}: using public sector care-seeking only
 #' }
+#'
+#' Returns results in standardized long format with
+#' \code{list(adm0, adm1)} structure.
 #'
 #' @param dhs_kr DHS children's recode (KR) dataset (data.frame or tibble).
 #' @param survey_vars Named list mapping DHS variable names. Required keys:
@@ -27,20 +30,19 @@
 #'   }
 #' @param csb_classification Data frame specifying h32 variable to CSB category
 #'   mapping (passed to \code{.prepare_csb_data()}). Must have columns
-#'   \code{variable} and \code{csb}. If NULL, uses default WMR classification.
+#'   \code{variable} and \code{csb}. If NULL, uses default classification.
 #' @param region_var Optional column name in \code{dhs_kr} to use as grouping
 #'   variable (e.g., "v024" for region).
 #'
-#' @return Tibble with effective coverage estimates by grouping level:
-#'   \itemize{
-#'     \item Grouping variable column (if \code{region_var} provided)
-#'     \item \code{dhs_eff_cm_any}: Effective CM using any care-seeking
-#'     \item \code{dhs_eff_cm_any_low}, \code{dhs_eff_cm_any_upp}: 95\% CI
-#'     \item \code{dhs_eff_cm_public}: Effective CM using public care-seeking
-#'     \item \code{dhs_eff_cm_public_low}, \code{dhs_eff_cm_public_upp}: 95\% CI
-#'     \item \code{dhs_n_fever}: Unweighted count of febrile U5 children
-#'     \item \code{dhs_n_antimalarial}: Unweighted count receiving any antimalarial
+#' @return Named list of tibbles:
+#'   \describe{
+#'     \item{`adm0`}{National-level estimates (always present)}
+#'     \item{`adm1`}{Admin-1 estimates (when `region_var` provided)}
 #'   }
+#'   Each tibble contains columns: survey_id, iso3, iso2, survey_type,
+#'   survey_year, adm0, [adm1], type, geo_source, point, ci_l, ci_u,
+#'   numerator, denominator, indicator, indicator_code,
+#'   numerator_description, denominator_description, denominator_code.
 #'
 #' @details
 #' The effective coverage indicator captures the probability that a febrile
@@ -60,7 +62,8 @@
 #' )
 #' }
 #'
-#' @seealso [calc_csb_dhs_core()], [calc_act_dhs()]
+#' @seealso [case_management_dictionary()] for indicator definitions,
+#'   [calc_csb_dhs_core()], [calc_act_dhs()]
 #' @export
 calc_case_management_dhs <- function(
   dhs_kr,
@@ -106,7 +109,20 @@ calc_case_management_dhs <- function(
     }
   }
 
-  # ---- 2. Prepare CSB data (febrile U5 with care-seeking indicators) ----
+  # Auto-fallback to v024 when no region_var provided
+  if (is.null(region_var) && "v024" %in% names(dhs_kr)) {
+    region_var <- "v024"
+    cli::cli_alert_info(
+      "No region_var specified; defaulting to {.var v024} for adm1"
+    )
+  }
+
+  # ---- 2. Extract survey metadata ----
+
+  survey_meta <- .extract_survey_meta(dhs_kr)
+  geo_src <- if (!is.null(region_var)) "survey" else NA_character_
+
+  # ---- 3. Prepare CSB data (febrile U5 with care-seeking indicators) ----
 
   csb_vars <- survey_vars[c("cluster", "weight", "stratum", "age", "fever", "alive")]
   kr_fever <- .prepare_csb_data(
@@ -138,18 +154,16 @@ calc_case_management_dhs <- function(
 
   # Preserve region_var from original data
   if (!is.null(region_var)) {
-    kr_fever[[region_var]] <- dhs_kr_zapped[[region_var]][febrile_idx]
+    kr_fever$region <- .resolve_region_labels(
+      dhs_kr[[region_var]][febrile_idx], region_var
+    )
   }
 
-  # ---- 3. Add antimalarial variable ----
+  # ---- 4. Add antimalarial variable ----
 
-  # Detect ml13 series or h37 fallback (check for positive values on zapped data).
-  # IMPORTANT: antimalarial series must align with the ACT variable. If ACT fell
-  # back to h37e (ml13e placeholder), antimalarial must also use h37 series.
   ml13_vars <- grep("^ml13[a-z]+$", names(dhs_kr_zapped), value = TRUE)
   h37_vars <- grep("^h37[a-z]+$", names(dhs_kr_zapped), value = TRUE)
 
-  # Detect if ACT fell back to h37e
   act_var_name <- survey_vars$act %||% "ml13e"
   act_used_h37 <- FALSE
   if (act_var_name %in% names(dhs_kr_zapped)) {
@@ -204,11 +218,9 @@ calc_case_management_dhs <- function(
 
   for (dvar in drug_series) {
     kr_fever[[dvar]] <- dhs_kr_zapped[[dvar]][febrile_idx]
-    # Recode "don't know" (8) and coded-missing (9) to NA
     kr_fever[[dvar]][!kr_fever[[dvar]] %in% c(0, 1)] <- NA
   }
 
-  # Create received_antimalarial: 1 if any drug variable == 1, NA if all NA
   drug_matrix <- as.matrix(kr_fever[, drug_series, drop = FALSE])
   kr_fever$received_antimalarial <- apply(drug_matrix, 1, function(row) {
     if (all(is.na(row))) return(NA_real_)
@@ -225,7 +237,7 @@ calc_case_management_dhs <- function(
     cli::cli_abort("No children received any antimalarial treatment.")
   }
 
-  # ---- 4. Add ACT variable (composite — ACT is a drug class) ----
+  # ---- 5. Add ACT variable (composite) ----
 
   act_input <- survey_vars$act %||% "ml13e"
   if (length(act_input) == 1 && act_input == "ml13e") {
@@ -236,7 +248,6 @@ calc_case_management_dhs <- function(
   act_vars <- intersect(act_vars, names(dhs_kr_zapped))
 
   if (length(act_vars) == 0) {
-    # Try h37 fallback
     h37_acts <- .detect_act_vars(dhs_kr, default_vars = "h37e")
     act_vars <- intersect(h37_acts, names(dhs_kr_zapped))
     if (length(act_vars) > 0) {
@@ -251,7 +262,6 @@ calc_case_management_dhs <- function(
     }
   }
 
-  # Check for positive values; fallback to h37e if needed
   act_has_data <- any(sapply(act_vars, function(v) {
     any(dhs_kr_zapped[[v]][febrile_idx] == 1, na.rm = TRUE)
   }))
@@ -266,7 +276,6 @@ calc_case_management_dhs <- function(
     }
   }
 
-  # Build composite received_act from all ACT variables
   act_matrix <- sapply(act_vars, function(v) dhs_kr_zapped[[v]][febrile_idx])
   act_matrix <- matrix(act_matrix, nrow = length(febrile_idx), ncol = length(act_vars))
   act_matrix[!act_matrix %in% c(0, 1)] <- NA
@@ -280,13 +289,12 @@ calc_case_management_dhs <- function(
     "Using {length(act_vars)} ACT variable{?s}: {paste(act_vars, collapse = ', ')}"
   )
 
-  # Binary indicator for ACT among antimalarial recipients
   kr_fever$has_act <- dplyr::if_else(
     kr_fever$received_act == 1, 1, 0,
     missing = NA_real_
   )
 
-  # ---- 5. Set up survey design ----
+  # ---- 6. Set up survey design ----
 
   use_strata <- dplyr::n_distinct(kr_fever$stratum_id) > 1
 
@@ -310,42 +318,231 @@ calc_case_management_dhs <- function(
     )
   }
 
-  # ---- 6. Compute estimates ----
+  # ---- 7. Compute estimates and build long-format output ----
 
+  conds <- .case_management_conditions()
+
+  meta_cols <- tibble::tibble(
+    survey_id   = survey_meta$survey_id,
+    iso3        = survey_meta$iso3,
+    iso2        = survey_meta$iso2,
+    survey_type = survey_meta$survey_type,
+    survey_year = survey_meta$survey_year,
+    adm0        = survey_meta$country_upper
+  )
+
+  # --- National estimates ---
+  national_result <- .compute_eff_cm_national(
+    kr_fever = kr_fever,
+    des = des
+  )
+
+  national_long <- .eff_cm_to_long(national_result, conds, level = "adm0",
+                                    location = "National")
+
+  national_long <- national_long |>
+    dplyr::mutate(
+      point       = round(point, 4),
+      ci_l        = round(pmax(ci_l, 0, na.rm = TRUE), 4),
+      ci_u        = round(pmin(ci_u, 1, na.rm = TRUE), 4),
+      numerator   = as.integer(numerator),
+      denominator = as.integer(denominator)
+    )
+
+  adm0_tbl <- dplyr::bind_cols(
+    meta_cols[rep(1, nrow(national_long)), ],
+    tibble::tibble(type = "survey_weighted", geo_source = NA_character_),
+    national_long |> dplyr::select(-level, -location)
+  ) |>
+    tibble::as_tibble()
+
+  out <- list(adm0 = adm0_tbl)
+
+  # --- Regional estimates ---
   if (!is.null(region_var)) {
-    result <- .compute_eff_cm_grouped(
+    group_var <- "region"
+    regional_result <- .compute_eff_cm_grouped(
       kr_fever = kr_fever,
       des = des,
-      region_var = region_var
+      region_var = group_var
     )
-  } else {
-    result <- .compute_eff_cm_national(
-      kr_fever = kr_fever,
-      des = des
-    )
+
+    # Convert each region row to long format
+    regions <- unique(kr_fever[[group_var]])
+    regions <- regions[!is.na(regions)]
+
+    regional_long_list <- list()
+    for (rgn in regions) {
+      rgn_row <- regional_result[regional_result[[group_var]] == rgn, ]
+      if (nrow(rgn_row) == 0) next
+      rgn_long <- .eff_cm_to_long(rgn_row, conds, level = "adm1",
+                                    location = as.character(rgn))
+      regional_long_list[[as.character(rgn)]] <- rgn_long
+    }
+
+    sub_results <- dplyr::bind_rows(regional_long_list)
+
+    if (nrow(sub_results) > 0) {
+      sub_results <- sub_results |>
+        dplyr::mutate(
+          point       = round(point, 4),
+          ci_l        = round(pmax(ci_l, 0, na.rm = TRUE), 4),
+          ci_u        = round(pmin(ci_u, 1, na.rm = TRUE), 4),
+          numerator   = as.integer(numerator),
+          denominator = as.integer(denominator)
+        )
+
+      sub_tbl <- dplyr::bind_cols(
+        meta_cols[rep(1, nrow(sub_results)), ],
+        sub_results |>
+          dplyr::transmute(
+            adm1       = toupper(location),
+            type       = "survey_weighted",
+            geo_source = geo_src,
+            point, ci_l, ci_u,
+            numerator, denominator,
+            indicator, indicator_code,
+            numerator_description,
+            denominator_description, denominator_code
+          )
+      ) |>
+        tibble::as_tibble()
+
+      out[["adm1"]] <- sub_tbl
+    }
   }
-
-  # ---- 7. Format output ----
-
-  result <- result |>
-    dplyr::mutate(
-      dplyr::across(dplyr::matches("^dhs_eff_cm_"), ~ round(.x, 4)),
-      dplyr::across(dplyr::matches("_low$"), ~ pmax(0, .)),
-      dplyr::across(dplyr::matches("_upp$"), ~ pmin(1, .))
-    )
-
-  count_cols <- intersect(
-    c("dhs_n_fever", "dhs_n_antimalarial"),
-    names(result)
-  )
-  result <- result |>
-    dplyr::mutate(
-      dplyr::across(dplyr::all_of(count_cols), ~ as.integer(round(.x)))
-    )
 
   cli::cli_alert_success("Effective coverage of case management computed")
 
-  tibble::as_tibble(result)
+  out
+}
+
+
+# =============================================================================
+# Case management indicator conditions and dictionary
+# =============================================================================
+
+#' Internal: Case management indicator conditions
+#'
+#' Returns list of indicator specifications for effective case management
+#' indicators. These are product indicators (CSB * ACT|AM) computed via
+#' delta method, not standard proportions.
+#'
+#' @return List of named lists.
+#' @noRd
+.case_management_conditions <- function() {
+  list(
+    list(
+      indicator       = "EFF_CM_ANY",
+      indicator_code  = "eff_cm_any",
+      indicator_title = "Effective case management (any care-seeking)",
+      outcome_var     = NA_character_,
+      filter_expr     = NULL,
+      num_desc        = "Febrile U5 who sought any care AND received ACT given antimalarial",
+      denom_desc      = "Febrile children under 5",
+      denom_code      = "feb_u5"
+    ),
+    list(
+      indicator       = "EFF_CM_PUBLIC",
+      indicator_code  = "eff_cm_public",
+      indicator_title = "Effective case management (public sector)",
+      outcome_var     = NA_character_,
+      filter_expr     = NULL,
+      num_desc        = "Febrile U5 who sought public care AND received ACT given antimalarial",
+      denom_desc      = "Febrile children under 5",
+      denom_code      = "feb_u5"
+    )
+  )
+}
+
+
+#' Case Management Indicator Dictionary
+#'
+#' Returns the dictionary of effective case management indicators.
+#'
+#' @return Tibble with columns: indicator, indicator_code, indicator_title,
+#'   numerator_description, denominator_description, denominator_code.
+#'
+#' @examples
+#' case_management_dictionary()
+#'
+#' @export
+case_management_dictionary <- function() {
+  conds <- .case_management_conditions()
+  tibble::tibble(
+    indicator               = vapply(conds, `[[`, character(1), "indicator"),
+    indicator_code          = vapply(conds, `[[`, character(1), "indicator_code"),
+    indicator_title         = vapply(conds, `[[`, character(1), "indicator_title"),
+    numerator_description   = vapply(conds, `[[`, character(1), "num_desc"),
+    denominator_description = vapply(conds, `[[`, character(1), "denom_desc"),
+    denominator_code        = vapply(conds, `[[`, character(1), "denom_code")
+  )
+}
+
+
+# =============================================================================
+# Internal helpers
+# =============================================================================
+
+#' Convert effective CM result row to long format
+#'
+#' Takes a single-row tibble from .compute_eff_cm_national() or a single
+#' region row from .compute_eff_cm_grouped() and pivots to long format
+#' with one row per indicator.
+#'
+#' @param result_row Single-row tibble with dhs_eff_cm_any, dhs_eff_cm_public, etc.
+#' @param conds List of indicator conditions.
+#' @param level Character: "adm0" or "adm1".
+#' @param location Character: region name or "National".
+#' @return Tibble with standardized long-format columns.
+#' @noRd
+.eff_cm_to_long <- function(result_row, conds, level, location) {
+  rows <- list()
+
+  # EFF_CM_ANY
+  any_cond <- conds[[1]]
+  n_fever <- if ("dhs_n_fever" %in% names(result_row)) result_row$dhs_n_fever[1] else NA_integer_
+  n_am <- if ("dhs_n_antimalarial" %in% names(result_row)) result_row$dhs_n_antimalarial[1] else NA_integer_
+
+  rows[[1]] <- tibble::tibble(
+    level    = level,
+    location = location,
+    point    = result_row$dhs_eff_cm_any[1],
+    ci_l     = result_row$dhs_eff_cm_any_low[1],
+    ci_u     = result_row$dhs_eff_cm_any_upp[1],
+    numerator   = n_am,
+    denominator = n_fever,
+    indicator               = any_cond$indicator_title,
+    indicator_code          = any_cond$indicator_code,
+    numerator_description   = any_cond$num_desc,
+    denominator_description = any_cond$denom_desc,
+    denominator_code        = any_cond$denom_code
+  )
+
+  # EFF_CM_PUBLIC
+  pub_cond <- conds[[2]]
+  n_am_pub <- if ("dhs_n_antimalarial_public" %in% names(result_row)) {
+    result_row$dhs_n_antimalarial_public[1]
+  } else {
+    NA_integer_
+  }
+
+  rows[[2]] <- tibble::tibble(
+    level    = level,
+    location = location,
+    point    = result_row$dhs_eff_cm_public[1],
+    ci_l     = result_row$dhs_eff_cm_public_low[1],
+    ci_u     = result_row$dhs_eff_cm_public_upp[1],
+    numerator   = n_am_pub,
+    denominator = n_fever,
+    indicator               = pub_cond$indicator_title,
+    indicator_code          = pub_cond$indicator_code,
+    numerator_description   = pub_cond$num_desc,
+    denominator_description = pub_cond$denom_desc,
+    denominator_code        = pub_cond$denom_code
+  )
+
+  dplyr::bind_rows(rows)
 }
 
 

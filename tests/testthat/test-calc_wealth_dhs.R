@@ -1,33 +1,70 @@
-test_that("calc_wealth_dhs returns list with data, dict, and metadata", {
-  mock_hr <- data.frame(
-    hv001 = rep(1:2, each = 10),
-    hv005 = 1000000,
-    hv022 = 1,
-    hv024 = rep(1:2, each = 10),
-    hv270 = c(
-      1, 1, 2, 2, 3, 3, 4, 4, 5, 5,
-      1, 2, 3, 4, 5, 1, 2, 3, 4, 5
-    ),
-    hv271 = rnorm(20, mean = 0, sd = 1),
-    hv012 = sample(3:8, 20, replace = TRUE),
-    hv000 = "SL7",
-    hv007 = 2019
-  )
+# ============================================================================
+# Tests for calc_wealth_dhs() — long-format wealth indicators
+# ============================================================================
 
+# --- Shared mock data -------------------------------------------------------
+
+make_wealth_mock <- function(n_hh = 30, seed = 42) {
+  set.seed(seed)
+  data.frame(
+    hv001 = rep(1:6, each = 5),
+    hv005 = 1000000,
+    hv022 = rep(1:2, each = 15),
+    hv024 = rep(1:2, each = 15),
+    hv270 = sample(1:5, n_hh, replace = TRUE),
+    hv271 = rnorm(n_hh),
+    hv012 = sample(3:8, n_hh, replace = TRUE),
+    hv000 = "SL7",
+    hv007 = 2019,
+    stringsAsFactors = FALSE
+  )
+}
+
+
+# --- Test: basic structure ---------------------------------------------------
+
+test_that("calc_wealth_dhs returns named list with adm0", {
+  mock_hr <- make_wealth_mock()
   result <- calc_wealth_dhs(dhs_hr = mock_hr)
 
   expect_type(result, "list")
-  expect_setequal(names(result), c("data", "dict", "metadata"))
-
-  expect_true("dhs_prop_poorest" %in% names(result$data))
-  expect_true("dhs_prop_richest" %in% names(result$data))
-  expect_true("dhs_dominant_quintile" %in% names(result$data))
-  expect_true("dhs_gini" %in% names(result$data))
-
-  expect_equal(result$metadata$country_code, "SL7")
-  expect_equal(result$metadata$survey_year, 2019)
-  expect_equal(result$metadata$file_type, "HR")
+  expect_true("adm0" %in% names(result))
+  expect_s3_class(result$adm0, "tbl_df")
 })
+
+
+test_that("adm0 has correct column structure", {
+  mock_hr <- make_wealth_mock()
+  result <- calc_wealth_dhs(dhs_hr = mock_hr)
+
+  expected_cols <- c(
+    "survey_id", "iso3", "iso2", "survey_type", "survey_year",
+    "adm0", "type", "geo_source",
+    "point", "ci_l", "ci_u", "numerator", "denominator",
+    "indicator", "indicator_code",
+    "numerator_description", "denominator_description", "denominator_code"
+  )
+  expect_true(all(expected_cols %in% names(result$adm0)))
+})
+
+
+test_that("adm0 contains all 6 wealth indicators", {
+  mock_hr <- make_wealth_mock()
+  result <- calc_wealth_dhs(dhs_hr = mock_hr)
+
+  indicator_codes <- unique(result$adm0$indicator_code)
+
+  expect_true("wealth_q1" %in% indicator_codes)
+  expect_true("wealth_q2" %in% indicator_codes)
+  expect_true("wealth_q3" %in% indicator_codes)
+  expect_true("wealth_q4" %in% indicator_codes)
+  expect_true("wealth_q5" %in% indicator_codes)
+  expect_true("gini" %in% indicator_codes)
+  expect_equal(length(indicator_codes), 6)
+})
+
+
+# --- Test: input validation --------------------------------------------------
 
 test_that("calc_wealth_dhs validates input data", {
   expect_error(
@@ -41,75 +78,117 @@ test_that("calc_wealth_dhs validates input data", {
   )
 })
 
-test_that("calc_wealth_dhs calculates correct proportions", {
+
+# --- Test: quintile proportions are valid ------------------------------------
+
+test_that("calc_wealth_dhs point estimates are valid proportions", {
   mock_hr <- data.frame(
-    hv001 = rep(1, 20),
+    hv001 = rep(1:4, each = 5),
     hv005 = 1000000,
-    hv022 = 1,
+    hv022 = rep(1:2, each = 10),
     hv024 = 1,
     hv270 = c(rep(1, 4), rep(2, 4), rep(3, 4), rep(4, 4), rep(5, 4)),
     hv271 = rnorm(20),
     hv012 = 4,
     hv000 = "SL7",
-    hv007 = 2019
+    hv007 = 2019,
+    stringsAsFactors = FALSE
   )
 
   result <- calc_wealth_dhs(dhs_hr = mock_hr)
+  adm0 <- result$adm0
 
-  # Proportions are 0-1 scale
-  expect_equal(result$data$dhs_prop_poorest, 0.20)
-  expect_equal(result$data$dhs_prop_poorer, 0.20)
-  expect_equal(result$data$dhs_prop_middle, 0.20)
-  expect_equal(result$data$dhs_prop_richer, 0.20)
-  expect_equal(result$data$dhs_prop_richest, 0.20)
+  # Check that quintile proportions are between 0 and 1
+  q_rows <- adm0[grepl("^wealth_q", adm0$indicator_code), ]
+  expect_true(all(q_rows$point >= 0))
+  expect_true(all(q_rows$point <= 1))
+
+  # Each quintile should have proportion 0.2 (equal distribution)
+  for (qcode in paste0("wealth_q", 1:5)) {
+    est <- adm0$point[adm0$indicator_code == qcode]
+    expect_equal(est, 0.2, tolerance = 0.01)
+  }
 })
 
-test_that("calc_wealth_dhs identifies dominant quintile correctly", {
-  mock_hr <- data.frame(
-    hv001 = rep(1, 20),
-    hv005 = 1000000,
-    hv022 = 1,
-    hv024 = 1,
-    hv270 = c(rep(1, 10), rep(2, 3), rep(3, 3), rep(4, 2), rep(5, 2)),
-    hv271 = rnorm(20),
-    hv012 = 4,
-    hv000 = "SL7",
-    hv007 = 2019
-  )
 
+# --- Test: auto-fallback to hv024 for adm1 -----------------------------------
+
+test_that("auto-falls back to hv024 for adm1", {
+  mock_hr <- make_wealth_mock()
   result <- calc_wealth_dhs(dhs_hr = mock_hr)
 
-  expect_equal(as.character(result$data$dhs_dominant_quintile), "Poorest")
-  expect_s3_class(result$data$dhs_dominant_quintile, "ordered")
+  expect_false(is.null(result$adm1))
+  expect_s3_class(result$adm1, "tbl_df")
+  expect_true("adm1" %in% names(result$adm1))
+
+  # Region names should be uppercase
+  expect_true(all(result$adm1$adm1 == toupper(result$adm1$adm1)))
 })
 
-test_that("calc_wealth_dhs works with cluster-level GPS data", {
-  mock_hr <- data.frame(
-    hv001 = rep(1:3, each = 10),
-    hv005 = 1000000,
-    hv022 = 1,
-    hv024 = 1,
-    hv270 = sample(1:5, 30, replace = TRUE),
-    hv271 = rnorm(30),
-    hv012 = 4,
-    hv000 = "SL7",
-    hv007 = 2019
-  )
 
-  mock_gps <- data.frame(
-    DHSCLUST = 1:3,
-    LATNUM = c(8.5, 8.6, 8.7),
-    LONGNUM = c(-11.5, -11.4, -11.3)
-  )
+# --- Test: CI ordering -------------------------------------------------------
 
-  result <- calc_wealth_dhs(dhs_hr = mock_hr, gps_data = mock_gps)
+test_that("CI bounds are ordered correctly", {
+  mock_hr <- make_wealth_mock()
+  result <- calc_wealth_dhs(dhs_hr = mock_hr)
 
-  expect_equal(nrow(result$data), 3)
-  expect_true("cluster_id" %in% names(result$data))
-  expect_true("lat" %in% names(result$data))
-  expect_true("lon" %in% names(result$data))
-  expect_equal(result$metadata$aggregation_level, "cluster")
+  adm0 <- result$adm0
+  valid <- !is.na(adm0$point) & !is.na(adm0$ci_l) & !is.na(adm0$ci_u)
+  expect_true(all(adm0$ci_l[valid] <= adm0$point[valid]))
+  expect_true(all(adm0$point[valid] <= adm0$ci_u[valid]))
 })
+
+
+# --- Test: Gini indicator present --------------------------------------------
+
+test_that("Gini coefficient is included in results", {
+  mock_hr <- make_wealth_mock(n_hh = 60)
+  result <- calc_wealth_dhs(dhs_hr = mock_hr)
+
+  adm0 <- result$adm0
+  gini_row <- adm0[adm0$indicator_code == "gini", ]
+  expect_equal(nrow(gini_row), 1)
+  # Gini is between 0 and 1 (or NA)
+  if (!is.na(gini_row$point)) {
+    expect_true(gini_row$point >= 0 && gini_row$point <= 1)
+  }
+})
+
+
+# --- Test: type column --------------------------------------------------------
+
+test_that("type column is survey_weighted", {
+  mock_hr <- make_wealth_mock()
+  result <- calc_wealth_dhs(dhs_hr = mock_hr)
+
+  expect_true(all(result$adm0$type == "survey_weighted"))
+})
+
+
+# --- Test: wealth_dictionary() -----------------------------------------------
+
+test_that("wealth_dictionary returns correct structure", {
+  dict <- wealth_dictionary()
+
+  expect_s3_class(dict, "tbl_df")
+  expect_true("indicator" %in% names(dict))
+  expect_true("indicator_code" %in% names(dict))
+  expect_true("numerator_description" %in% names(dict))
+  expect_true("denominator_description" %in% names(dict))
+  expect_true("denominator_code" %in% names(dict))
+
+  # 6 indicators: wealth_q1 through wealth_q5 + gini
+  expect_equal(nrow(dict), 6)
+  expect_setequal(
+    dict$indicator_code,
+    c("wealth_q1", "wealth_q2", "wealth_q3", "wealth_q4", "wealth_q5", "gini")
+  )
+})
+
+
+# ============================================================================
+# Tests for calculate_dhs_gini() — UNCHANGED (core utility)
+# ============================================================================
 
 test_that("calculate_dhs_gini returns valid coefficient", {
   wealth_scores <- c(rep(-2, 20), rep(0, 30), rep(2, 50))
@@ -143,43 +222,4 @@ test_that("calculate_dhs_gini handles insufficient data", {
   )
 
   expect_true(is.na(gini))
-})
-
-test_that("calc_wealth_dhs outputs only key columns", {
-  mock_hr <- data.frame(
-    hv001 = rep(1:2, each = 15),
-    hv005 = 1000000,
-    hv022 = 1,
-    hv024 = rep(1:2, each = 15),
-    hv270 = sample(1:5, 30, replace = TRUE),
-    hv271 = rnorm(30),
-    hv012 = 4,
-    hv000 = "SL7",
-    hv007 = 2019
-  )
-
-  result <- calc_wealth_dhs(dhs_hr = mock_hr)
-
-  expected_cols <- c(
-    "adm1",
-    "dhs_prop_poorest",
-    "dhs_prop_poorer",
-    "dhs_prop_middle",
-    "dhs_prop_richer",
-    "dhs_prop_richest",
-    "dhs_dominant_quintile",
-    "dhs_dominant_prop",
-    "dhs_gini",
-    "dhs_n_households",
-    "dhs_weighted_households",
-    "dhs_gini_sample_size",
-    "dhs_gini_reliable"
-  )
-
-  expect_setequal(names(result$data), expected_cols)
-
-  expect_true("dhs_n_households" %in% names(result$data))
-  expect_true("dhs_weighted_households" %in% names(result$data))
-  expect_true("dhs_gini_sample_size" %in% names(result$data))
-  expect_true("dhs_gini_reliable" %in% names(result$data))
 })

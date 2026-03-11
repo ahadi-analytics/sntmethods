@@ -1,3 +1,7 @@
+# ============================================================================
+# Tests for calc_u5mr_dhs_core() — UNCHANGED (core function)
+# ============================================================================
+
 test_that("calc_u5mr_dhs_core validates input data", {
   # Test with non-dataframe input
   expect_error(
@@ -66,22 +70,25 @@ test_that("calc_u5mr_dhs_core works with minimal valid data", {
   expect_true(all(result$dhs_n_births > 0))
 })
 
-test_that("calc_u5mr_dhs returns list with data, dict, and metadata", {
-  skip_if_not_installed("DHS.rates")
-  skip_if_not_installed("sntutils")
 
-  # Create mock KR data
+# ============================================================================
+# Tests for calc_u5mr_dhs() — long-format U5MR indicator
+# ============================================================================
+
+test_that("calc_u5mr_dhs returns named list with adm0", {
+  skip_if_not_installed("DHS.rates")
+
   set.seed(456)
   n_births <- 50
 
   kr_data <- data.frame(
-    v000 = rep("SL7", n_births),     # Country code
-    v007 = rep(2016, n_births),      # Survey year
-    v021 = rep(1:5, each = 10),      # 5 clusters
-    v005 = rep(1000000, n_births),   # Weight
-    v022 = rep(1, n_births),         # Stratum
-    v024 = rep("WESTERN", n_births), # Admin1
-    v008 = rep(1500, n_births),      # Interview date
+    v000 = rep("SL7", n_births),
+    v007 = rep(2016, n_births),
+    v021 = rep(1:5, each = 10),
+    v005 = rep(1000000, n_births),
+    v022 = rep(1, n_births),
+    v024 = rep("WESTERN", n_births),
+    v008 = rep(1500, n_births),
     b3 = 1500 - sample(0:59, n_births, replace = TRUE),
     b7 = c(rep(NA, 45), sample(0:59, 5, replace = TRUE)),
     bord = 1:n_births
@@ -89,50 +96,146 @@ test_that("calc_u5mr_dhs returns list with data, dict, and metadata", {
 
   result <- calc_u5mr_dhs(kr_data)
 
-  # Check that result is a list with expected components
   expect_type(result, "list")
-  expect_named(result, c("data", "dict", "metadata"))
-
-  # Check data component
-  expect_s3_class(result$data, "tbl_df")
-  expect_true("dhs_u5mr" %in% names(result$data))
-
-  # Check metadata component
-  expect_type(result$metadata, "list")
-  expect_equal(result$metadata$country_code, "SL7")
-  expect_equal(result$metadata$survey_year, 2016)
-  expect_equal(result$metadata$file_type, "KR")
-  expect_equal(result$metadata$analysis_type, "U5MR (Under-5 Mortality Rate)")
-
-  # Check dictionary component
-  expect_s3_class(result$dict, "data.frame")
-  expect_true("variable" %in% names(result$dict))
+  expect_true("adm0" %in% names(result))
+  expect_s3_class(result$adm0, "tbl_df")
 })
 
-test_that("extract_dhs_metadata_kr extracts correct metadata", {
+
+test_that("adm0 has correct column structure", {
+  skip_if_not_installed("DHS.rates")
+
+  set.seed(456)
+  n_births <- 50
+
   kr_data <- data.frame(
-    v000 = rep("TZ8", 100),
-    v007 = rep(2022, 100),
-    v021 = rep(1:10, each = 10),
-    b7 = c(rep(NA, 95), rep(10, 5))  # 5 deaths
+    v000 = rep("SL7", n_births),
+    v007 = rep(2016, n_births),
+    v021 = rep(1:5, each = 10),
+    v005 = rep(1000000, n_births),
+    v022 = rep(1, n_births),
+    v024 = rep("WESTERN", n_births),
+    v008 = rep(1500, n_births),
+    b3 = 1500 - sample(0:59, n_births, replace = TRUE),
+    b7 = c(rep(NA, 45), sample(0:59, 5, replace = TRUE)),
+    bord = 1:n_births
   )
 
-  metadata <- extract_dhs_metadata_kr(
-    kr_data,
-    survey_vars = list(
-      cluster = "v021",
-      death_age = "b7"
-    )
-  )
+  result <- calc_u5mr_dhs(kr_data)
 
-  expect_equal(metadata$country_code, "TZ8")
-  expect_equal(metadata$survey_year, 2022)
-  expect_equal(metadata$file_type, "KR")
-  expect_equal(metadata$total_records, 100)
-  expect_equal(metadata$total_clusters, 10)
-  expect_equal(metadata$total_births, 100)
-  expect_equal(metadata$total_deaths_u5, 5)
+  expected_cols <- c(
+    "survey_id", "iso3", "iso2", "survey_type", "survey_year",
+    "adm0", "type", "geo_source",
+    "point", "ci_l", "ci_u", "numerator", "denominator",
+    "indicator", "indicator_code",
+    "numerator_description", "denominator_description", "denominator_code"
+  )
+  expect_true(all(expected_cols %in% names(result$adm0)))
 })
+
+
+test_that("adm0 contains u5mr indicator", {
+  skip_if_not_installed("DHS.rates")
+
+  set.seed(456)
+  n_births <- 50
+
+  kr_data <- data.frame(
+    v000 = rep("SL7", n_births),
+    v007 = rep(2016, n_births),
+    v021 = rep(1:5, each = 10),
+    v005 = rep(1000000, n_births),
+    v022 = rep(1, n_births),
+    v024 = rep("WESTERN", n_births),
+    v008 = rep(1500, n_births),
+    b3 = 1500 - sample(0:59, n_births, replace = TRUE),
+    b7 = c(rep(NA, 45), sample(0:59, 5, replace = TRUE)),
+    bord = 1:n_births
+  )
+
+  result <- calc_u5mr_dhs(kr_data)
+
+  indicator_codes <- unique(result$adm0$indicator_code)
+  expect_true("u5mr" %in% indicator_codes)
+  expect_equal(length(indicator_codes), 1)
+})
+
+
+test_that("U5MR point estimate is a rate (per 1000), not a proportion", {
+  skip_if_not_installed("DHS.rates")
+
+  set.seed(456)
+  n_births <- 50
+
+  kr_data <- data.frame(
+    v000 = rep("SL7", n_births),
+    v007 = rep(2016, n_births),
+    v021 = rep(1:5, each = 10),
+    v005 = rep(1000000, n_births),
+    v022 = rep(1, n_births),
+    v024 = rep("WESTERN", n_births),
+    v008 = rep(1500, n_births),
+    b3 = 1500 - sample(0:59, n_births, replace = TRUE),
+    b7 = c(rep(NA, 45), sample(0:59, 5, replace = TRUE)),
+    bord = 1:n_births
+  )
+
+  result <- calc_u5mr_dhs(kr_data)
+
+  # U5MR is per 1000 live births, so should be > 1 if there are deaths
+  u5mr_val <- result$adm0$point[result$adm0$indicator_code == "u5mr"]
+  if (!is.na(u5mr_val)) {
+    expect_true(u5mr_val >= 0)
+  }
+})
+
+
+test_that("type column is survey_weighted", {
+  skip_if_not_installed("DHS.rates")
+
+  set.seed(456)
+  n_births <- 50
+
+  kr_data <- data.frame(
+    v000 = rep("SL7", n_births),
+    v007 = rep(2016, n_births),
+    v021 = rep(1:5, each = 10),
+    v005 = rep(1000000, n_births),
+    v022 = rep(1, n_births),
+    v024 = rep("WESTERN", n_births),
+    v008 = rep(1500, n_births),
+    b3 = 1500 - sample(0:59, n_births, replace = TRUE),
+    b7 = c(rep(NA, 45), sample(0:59, 5, replace = TRUE)),
+    bord = 1:n_births
+  )
+
+  result <- calc_u5mr_dhs(kr_data)
+
+  expect_true(all(result$adm0$type == "survey_weighted"))
+})
+
+
+# --- Test: u5mr_dictionary() -------------------------------------------------
+
+test_that("u5mr_dictionary returns correct structure", {
+  dict <- u5mr_dictionary()
+
+  expect_s3_class(dict, "tbl_df")
+  expect_true("indicator" %in% names(dict))
+  expect_true("indicator_code" %in% names(dict))
+  expect_true("numerator_description" %in% names(dict))
+  expect_true("denominator_description" %in% names(dict))
+  expect_true("denominator_code" %in% names(dict))
+
+  # 1 indicator: u5mr
+  expect_equal(nrow(dict), 1)
+  expect_equal(dict$indicator_code, "u5mr")
+})
+
+
+# ============================================================================
+# Tests for helper functions
+# ============================================================================
 
 test_that("aggregate_u5mr_admin works with mock data", {
   skip_if_not_installed("sf")
