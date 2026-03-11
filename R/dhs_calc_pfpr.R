@@ -540,321 +540,590 @@ extract_dhs_metadata <- function(dhs_pr, survey_vars = NULL) {
   return(metadata)
 }
 
-#' Calculate PfPR from DHS Data with Spatial Aggregation Support
+#' Calculate WMR PfPR Indicators from DHS Data
 #'
-#' Main function for calculating Plasmodium falciparum Parasite Rate (PfPR)
-#' from DHS data. Supports spatial aggregation using administrative boundary
-#' shapefiles to calculate PfPR at cluster level or aggregate to any
-#' administrative level (adm0, adm1, adm2, etc.). Returns both data and a
-#' comprehensive data dictionary.
+#' Computes PfPR (Plasmodium falciparum Parasite Rate) indicators from DHS
+#' Person Records (PR) data. Returns survey-weighted proportions with logit
+#' confidence intervals in WMR long format.
 #'
-#' @param dhs_pr DHS Person Records dataset in tidy format.
+#' @details
+#' Computes PfPR for children aged 6-59 months using RDT (hml35) and/or
+#' microscopy (hml32) results. Follows the same output pattern as
+#' \code{\link{calc_act_dhs}} and \code{\link{calc_itn_wmr}}.
+#'
+#' @param dhs_pr DHS Person Records (PR) dataset (data.frame or tibble).
 #' @param survey_vars Named list mapping DHS variable names. Required keys:
 #'   \itemize{
-#'     \item `cluster`: Primary sampling unit (default: "hv021"). Note: Use
-#'       hv021 (PSU) for proper survey design, not hv001 (cluster number).
-#'     \item `weight`: Survey weight (default: "hv005", divided by 1,000,000)
-#'     \item `stratum`: Explicit stratum variable if available (default: "hv022")
-#'     \item `adm1`: First administrative level (default: "hv024")
-#'     \item `adm2`: Second administrative level (default: NULL)
-#'     \item `age`: Child's age in months (default: "hc1")
-#'     \item `present`: Present in household (1=yes, default: "hv103")
-#'     \item `mother`: Mother listed in household (1=yes, default: "hv042")
-#'     \item `rdt`: RDT result (0=negative, 1=positive, default: "hml35")
-#'     \item `mic`: Microscopy result (0=neg, 1=pos, 6=other species,
-#'       default: "hml32")
+#'     \item \code{cluster}: PSU ID (default: "hv021")
+#'     \item \code{weight}: Survey weight (default: "hv005")
+#'     \item \code{stratum}: Stratum variable (default: "hv022")
+#'     \item \code{adm1}: Admin-1 variable (default: "hv024")
+#'     \item \code{age}: Child's age in months (default: "hc1")
+#'     \item \code{present}: Present in household (default: "hv103")
+#'     \item \code{mother}: Mother listed in household (default: "hv042")
+#'     \item \code{rdt}: RDT result (default: "hml35")
+#'     \item \code{mic}: Microscopy result (default: "hml32")
 #'   }
-#' @param gps_data Optional DHS GPS dataset with cluster coordinates.
-#' @param gps_vars Named list for GPS variables (cluster, lat, lon).
-#' @param shapefile Optional sf object with administrative boundaries. Must
-#'   contain columns named "adm0", "adm1", "adm2", etc. for administrative
-#'   levels.
-#' @param admin_level Character vector specifying aggregation levels
-#'   (e.g., `c("adm1", "adm2")`). If NULL, auto-detects available admin columns.
-#' @param join_nearest Logical; if `TRUE`, assigns clusters outside all polygons
-#'   to the nearest administrative unit. Useful for displaced DHS coordinates.
+#' @param region_var Optional column name for subnational grouping
+#'   (e.g., "hv024").
+#' @param gps_data Optional DHS GE dataset with cluster coordinates.
+#' @param gps_vars Named list for GE variables: cluster, lat, lon.
+#' @param shapefile Optional sf object with administrative boundaries.
+#' @param admin_level Character vector of admin columns from shapefile.
+#' @param join_nearest Logical; if TRUE, assigns unmatched clusters to nearest
+#'   admin unit. Default: TRUE.
+#' @param indicators Character vector of indicator names to compute. If NULL
+#'   (default), computes all indicators from \code{\link{pfpr_wmr_dictionary}}.
+#' @param ci_method Method for confidence intervals. Default: "logit".
 #'
-#' @return A list containing three elements:
-#'   \itemize{
-#'     \item `data`: A tibble with PfPR estimates by administrative level if
-#'       shapefile is provided, otherwise cluster-level results
-#'     \item `dict`: A data dictionary created using `sntutils::build_dictionary()`
-#'       describing all columns in the data
-#'     \item `metadata`: A list containing survey metadata including:
-#'       \itemize{
-#'         \item `country_code`: DHS country code
-#'         \item `survey_year`: Year of survey
-#'         \item `survey_id`: DHS survey identifier
-#'         \item `survey_type`: Type of survey (DHS, MIS, etc.)
-#'         \item `file_type`: Type of DHS file (PR)
-#'         \item `total_records`: Total number of records processed
-#'         \item `total_households`: Number of unique households/clusters
-#'         \item `analysis_type`: Type of analysis performed
-#'         \item `age_group`: Age group analyzed
-#'         \item `has_rdt`: Whether RDT data is available
-#'         \item `has_microscopy`: Whether microscopy data is available
-#'         \item `processed_date`: Date of processing
-#'         \item Additional geographic and administrative information
-#'       }
+#' @return Named list of tibbles, one per admin level:
+#'   \describe{
+#'     \item{\code{adm0}}{National-level estimates (always present)}
+#'     \item{\code{adm1}}{Admin-1 estimates (when region_var or shapefile)}
+#'     \item{\code{adm2}}{Admin-2 estimates (when shapefile with adm2)}
 #'   }
+#'   Each tibble has WMR standard columns: survey_id, iso3, iso2,
+#'   survey_type, survey_year, adm0, type, geo_source, point, ci_l, ci_u,
+#'   numerator, denominator, indicator, indicator_code,
+#'   numerator_description, denominator_description, denominator_code.
 #'
 #' @examples
-#' # Example with spatial aggregation
-#' # pfpr_results <- calc_pfpr_dhs(
-#' #   dhs_pr = pr_data,
-#' #   gps_data = gps_data,
-#' #   shapefile = admin_shapefile,
-#' #   admin_level = c("adm1")
-#' # )
-#' #
-#' # # Access the data
-#' # pfpr_data <- pfpr_results$data
-#' #
-#' # # Access the dictionary
-#' # pfpr_dict <- pfpr_results$dict
-#' #
-#' # # Access the metadata
-#' # pfpr_metadata <- pfpr_results$metadata
-#' # print(pfpr_metadata$country_code)
-#' # print(pfpr_metadata$survey_year)
+#' \dontrun{
+#' result <- calc_pfpr_dhs(dhs_pr = pr_data)
+#' result$adm0  # national PfPR estimates
 #'
+#' # With subnational
+#' result <- calc_pfpr_dhs(dhs_pr = pr_data, region_var = "hv024")
+#' result$adm1  # regional PfPR
+#' }
+#'
+#' @seealso \code{\link{pfpr_wmr_dictionary}} for indicator definitions
 #' @export
 calc_pfpr_dhs <- function(
   dhs_pr,
   survey_vars = list(
     cluster = "hv021",
-    weight = "hv005",
+    weight  = "hv005",
     stratum = "hv022",
-    adm1 = "hv024",
-    adm2 = NULL,
-    age = "hc1",
+    adm1    = "hv024",
+    adm2    = NULL,
+    age     = "hc1",
     present = "hv103",
-    mother = "hv042",
-    rdt = "hml35",
-    mic = "hml32"
+    mother  = "hv042",
+    rdt     = "hml35",
+    mic     = "hml32"
   ),
-  gps_data = NULL,
-  gps_vars = list(
+  region_var   = NULL,
+  gps_data     = NULL,
+  gps_vars     = list(
     cluster = "DHSCLUST",
-    lat = "LATNUM",
-    lon = "LONGNUM"
+    lat     = "LATNUM",
+    lon     = "LONGNUM"
   ),
-  shapefile = NULL,
-  admin_level = NULL,
-  join_nearest = TRUE
+  shapefile    = NULL,
+  admin_level  = NULL,
+  join_nearest = TRUE,
+  indicators   = NULL,
+  ci_method    = "logit"
 ) {
-  # Extract metadata from DHS data
-  metadata <- extract_dhs_metadata(dhs_pr, survey_vars)
 
-  cluster_results <- calc_pfpr_dhs_core(
-    dhs_pr = dhs_pr,
-    survey_vars = survey_vars,
-    gps_data = gps_data,
-    gps_vars = gps_vars
+  # ---- 1. Input validation ----
+
+  if (!is.data.frame(dhs_pr)) {
+    cli::cli_abort("`dhs_pr` must be a data.frame or tibble.")
+  }
+  if (nrow(dhs_pr) == 0) {
+    cli::cli_abort("`dhs_pr` is empty.")
+  }
+
+  # ---- 1b. Extract survey metadata ----
+  survey_meta <- .extract_survey_meta_hv(dhs_pr)
+
+  # ---- 2. Prepare PfPR data ----
+
+  pr <- .prepare_pfpr_data(
+    dhs_pr           = dhs_pr,
+    survey_vars      = survey_vars,
+    age_min          = 6,
+    age_max          = 59,
+    include_survey_vars = TRUE
+  )
+  if (is.null(pr)) {
+    cli::cli_abort("No valid PfPR data after preparation.")
+  }
+
+  has_rdt <- any(pr$tested_rdt == 1, na.rm = TRUE)
+  has_mic <- any(pr$tested_mic == 1, na.rm = TRUE)
+
+  n_rdt <- sum(pr$tested_rdt == 1, na.rm = TRUE)
+  n_mic <- sum(pr$tested_mic == 1, na.rm = TRUE)
+  cli::cli_alert_info(
+    "Children 6-59 months: {n_rdt} tested by RDT, {n_mic} by microscopy"
   )
 
-  if (is.null(shapefile)) {
-    dict <- sntutils::build_dictionary(cluster_results)
-    dict <- .enrich_dhs_dictionary(dict, .pfpr_labels())
-    return(list(
-      data = cluster_results,
-      dict = dict,
-      metadata = metadata
-    ))
-  }
+  # ---- 3. Region grouping or spatial join ----
 
-  if (!requireNamespace("sf", quietly = TRUE)) {
-    cli::cli_abort(
-      "package `sf` is required for spatial operations. please install it."
-    )
-  }
+  admin_hierarchy <- list()
+  geo_src <- NA_character_
 
-  if (!inherits(shapefile, "sf")) {
-    cli::cli_abort("`shapefile` must be an sf object.")
-  }
-
-  cluster_sf <- cluster_results |>
-    sf::st_as_sf(
-      coords = c("lon", "lat"),
-      crs = 4326,
-      remove = FALSE
-    )
-
-  shapefile <- shapefile |>
-    sf::st_transform(4326) |>
-    sf::st_make_valid()
-
-  if (is.null(admin_level)) {
-    available_admins <- names(shapefile)[
-      grep("^adm[0-9]+$", names(shapefile))
-    ]
-
-    if (length(available_admins) == 0) {
-      cli::cli_abort(
-        "no admin columns (adm0, adm1, adm2, etc.) found in shapefile."
-      )
-    }
-
-    admin_level <- available_admins
-
-    cli::cli_alert_info(
-      "using admin levels: {paste(admin_level, collapse = ', ')}"
-    )
-  }
-
-  missing_cols <- setdiff(admin_level, names(shapefile))
-
-  if (length(missing_cols) > 0) {
-    cli::cli_abort(
-      "admin columns not found in shapefile: ",
-      "{paste(missing_cols, collapse = ', ')}"
-    )
-  }
-
-  joined <- sf::st_join(
-    cluster_sf,
-    shapefile[, c(admin_level, "geometry")],
-    join = sf::st_within,
-    left = TRUE
-  )
-
-  if (join_nearest) {
-    unmatched <- is.na(joined[[admin_level[1]]])
-
-    if (any(unmatched)) {
+  # Auto-fallback to hv024
+  region_hr_var <- survey_vars$adm1 %||% "hv024"
+  if (is.null(region_var) && is.null(gps_data) && is.null(shapefile)) {
+    if (region_hr_var %in% names(dhs_pr)) {
+      region_var <- region_hr_var
       cli::cli_alert_info(
-        "Assigning {format(sum(unmatched), big.mark = ',')} clusters to nearest admin units."
+        "No region_var/GPS/shapefile specified; defaulting to \\
+        {.var {region_hr_var}} for adm1"
       )
-
-      nearest_idx <- sf::st_nearest_feature(
-        joined[unmatched, ],
-        shapefile
-      )
-
-      for (col in admin_level) {
-        joined[unmatched, col] <- shapefile[[col]][nearest_idx]
-      }
     }
   }
 
-  if (length(admin_level) == 0) {
-    dict <- sntutils::build_dictionary(joined)
-    dict <- .enrich_dhs_dictionary(dict, .pfpr_labels())
-    return(list(
-      data = joined,
-      dict = dict,
-      metadata = metadata
-    ))
-  }
-
-  joined_df <- sf::st_drop_geometry(joined)
-
-  aggregated <- joined_df |>
-    dplyr::group_by(
-      dplyr::across(dplyr::all_of(admin_level))
-    ) |>
-    dplyr::summarise(
-      dhs_pfpr_rdt = stats::weighted.mean(
-        dhs_pfpr_rdt,
-        w = dhs_n_tested_rdt,
-        na.rm = TRUE
-      ),
-      dhs_pfpr_mic = stats::weighted.mean(
-        dhs_pfpr_mic,
-        w = dhs_n_tested_mic,
-        na.rm = TRUE
-      ),
-      dhs_n_tested_rdt = sum(dhs_n_tested_rdt, na.rm = TRUE),
-      dhs_n_pos_rdt = sum(dhs_n_pos_rdt, na.rm = TRUE),
-      dhs_n_tested_mic = sum(dhs_n_tested_mic, na.rm = TRUE),
-      dhs_n_pos_mic = sum(dhs_n_pos_mic, na.rm = TRUE),
-      n_clusters = dplyr::n(),
-      .groups = "drop"
-    ) |>
-    dplyr::mutate(
-      dhs_pfpr_rdt_se = sqrt(
-        (dhs_pfpr_rdt / 100 * (1 - dhs_pfpr_rdt / 100)) / dhs_n_tested_rdt
-      ) *
-        100,
-      dhs_pfpr_rdt_low = pmax(
-        0,
-        dhs_pfpr_rdt - 1.96 * dhs_pfpr_rdt_se
-      ),
-      dhs_pfpr_rdt_upp = pmin(
-        100,
-        dhs_pfpr_rdt + 1.96 * dhs_pfpr_rdt_se
-      ),
-      dhs_pfpr_mic_se = sqrt(
-        (dhs_pfpr_mic / 100 * (1 - dhs_pfpr_mic / 100)) / dhs_n_tested_mic
-      ) *
-        100,
-      dhs_pfpr_mic_low = pmax(
-        0,
-        dhs_pfpr_mic - 1.96 * dhs_pfpr_mic_se
-      ),
-      dhs_pfpr_mic_upp = pmin(
-        100,
-        dhs_pfpr_mic + 1.96 * dhs_pfpr_mic_se
+  if (!is.null(region_var)) {
+    # Resolve region labels
+    pr$region <- .resolve_region_labels(
+      dhs_pr[[region_var]], region_var
+    )
+    # Map to febrile subset if lengths differ
+    if (nrow(pr) != nrow(dhs_pr)) {
+      # pr is a subset — need lookup approach
+      resolved_all <- .resolve_region_labels(
+        dhs_pr[[region_var]], region_var
       )
-    ) |>
-    dplyr::select(
-      -dhs_pfpr_rdt_se,
-      -dhs_pfpr_mic_se
-    ) |>
-    dplyr::mutate(
-      dhs_pfpr_rdt = round(dhs_pfpr_rdt, 2),
-      dhs_pfpr_rdt_low = round(dhs_pfpr_rdt_low, 2),
-      dhs_pfpr_rdt_upp = round(dhs_pfpr_rdt_upp, 2),
-      dhs_pfpr_mic = round(dhs_pfpr_mic, 2),
-      dhs_pfpr_mic_low = round(dhs_pfpr_mic_low, 2),
-      dhs_pfpr_mic_upp = round(dhs_pfpr_mic_upp, 2),
-      dhs_n_tested_rdt = as.integer(dhs_n_tested_rdt),
-      dhs_n_pos_rdt = as.integer(dhs_n_pos_rdt),
-      dhs_n_tested_mic = as.integer(dhs_n_tested_mic),
-      dhs_n_pos_mic = as.integer(dhs_n_pos_mic)
+      raw_all <- as.character(
+        as.vector(haven::zap_labels(dhs_pr[[region_var]]))
+      )
+      lookup <- stats::setNames(resolved_all, raw_all)
+      pr_raw <- as.character(pr[[region_var]])
+      pr$region <- unname(lookup[pr_raw])
+    }
+
+    admin_hierarchy <- list(
+      list(group_var = "region", level_name = "adm1")
+    )
+    geo_src <- "survey"
+    cli::cli_alert_info(
+      "Grouping by {.var {region_var}}: \\
+      {paste(unique(pr$region), collapse = ', ')}"
     )
 
-  # Detect and preserve admin name columns
-  admin_name_cols <- paste0(admin_level, "_name")
-  admin_name_cols <- admin_name_cols[admin_name_cols %in% names(shapefile)]
-  all_admin_cols <- c(admin_level, admin_name_cols)
+  } else if (!is.null(gps_data) && !is.null(shapefile)) {
+    pr <- .spatial_join_ge(
+      kr_fever     = pr,
+      gps_data     = gps_data,
+      gps_vars     = gps_vars,
+      shapefile    = shapefile,
+      admin_level  = admin_level,
+      join_nearest = join_nearest
+    )
+    geo_src <- "gps"
+    admin_lvls <- attr(pr, "admin_levels") %||% character(0)
+    for (lvl in admin_lvls) {
+      admin_hierarchy <- c(admin_hierarchy, list(
+        list(group_var = lvl, level_name = lvl)
+      ))
+    }
+  }
 
-  result_with_geometry <- shapefile |>
-    dplyr::select(dplyr::all_of(all_admin_cols)) |>
-    dplyr::distinct() |>
-    dplyr::left_join(
-      aggregated,
-      by = admin_level
+  # ---- 4. Get indicator conditions and filter ----
+
+  dict <- .pfpr_wmr_conditions()
+
+  # Skip indicators without data
+  if (!has_rdt) {
+    dict <- dict[vapply(
+      dict, function(d) d$outcome_var != "rdt_pos", logical(1)
+    )]
+  }
+  if (!has_mic) {
+    dict <- dict[vapply(
+      dict, function(d) d$outcome_var != "mic_pos", logical(1)
+    )]
+  }
+
+  if (!is.null(indicators)) {
+    valid <- vapply(dict, function(d) d$indicator, character(1))
+    bad <- setdiff(indicators, valid)
+    if (length(bad) > 0) {
+      cli::cli_warn(
+        "Unknown indicators ignored: {paste(bad, collapse = ', ')}"
+      )
+    }
+    dict <- dict[vapply(
+      dict, function(d) d$indicator %in% indicators, logical(1)
+    )]
+  }
+
+  if (length(dict) == 0) {
+    cli::cli_abort("No valid indicators to compute.")
+  }
+
+  # ---- 5. Compute each indicator ----
+
+  options(survey.lonely.psu = "adjust")
+
+  if (is.na(geo_src)) {
+    geo_src <- if (!is.null(gps_data) && !is.null(shapefile)) {
+      "gps"
+    } else {
+      "survey"
+    }
+  }
+
+  meta_cols <- tibble::tibble(
+    survey_id   = survey_meta$survey_id,
+    iso3        = survey_meta$iso3,
+    iso2        = survey_meta$iso2,
+    survey_type = survey_meta$survey_type,
+    survey_year = survey_meta$survey_year,
+    adm0        = survey_meta$country_upper
+  )
+
+  .round_results <- function(tbl) {
+    tbl |>
+      dplyr::mutate(
+        point       = round(point, 3),
+        ci_l        = round(pmax(ci_l, 0, na.rm = TRUE), 3),
+        ci_u        = round(pmin(ci_u, 1, na.rm = TRUE), 3),
+        numerator   = as.integer(numerator),
+        denominator = as.integer(denominator)
+      )
+  }
+
+  # --- adm0 (national) ---
+  national_results <- purrr::map_dfr(dict, function(cond) {
+    .compute_pfpr_indicator(
+      data      = pr,
+      condition = cond,
+      group_var = NULL,
+      ci_method = ci_method
+    )
+  })
+
+  national_results <- .round_results(national_results)
+
+  adm0_tbl <- dplyr::bind_cols(
+    meta_cols[rep(1, nrow(national_results)), ],
+    tibble::tibble(type = "survey_weighted", geo_source = geo_src),
+    national_results |> dplyr::select(-level, -location)
+  ) |>
+    tibble::as_tibble()
+
+  out <- list(adm0 = adm0_tbl)
+
+  # --- subnational tabs ---
+  all_level_names <- vapply(
+    admin_hierarchy, `[[`, character(1), "level_name"
+  )
+
+  for (i in seq_along(admin_hierarchy)) {
+    ah <- admin_hierarchy[[i]]
+    grp <- ah$group_var
+    lvl_name <- ah$level_name
+
+    sub_results <- purrr::map_dfr(dict, function(cond) {
+      .compute_pfpr_indicator(
+        data              = pr,
+        condition         = cond,
+        group_var         = grp,
+        subnational_level = lvl_name,
+        ci_method         = ci_method
+      )
+    })
+
+    sub_results <- sub_results |>
+      dplyr::filter(level != "adm0")
+
+    if (nrow(sub_results) == 0) next
+
+    sub_results <- .round_results(sub_results)
+    sub_results <- sub_results |>
+      dplyr::mutate(!!lvl_name := toupper(location))
+
+    # Parent admin columns
+    parent_levels <- all_level_names[seq_len(i - 1)]
+    parent_cols_in_data <- intersect(parent_levels, names(pr))
+    if (length(parent_cols_in_data) > 0 && grp %in% names(pr)) {
+      parent_lookup <- pr |>
+        dplyr::select(dplyr::all_of(c(grp, parent_cols_in_data))) |>
+        dplyr::mutate(
+          dplyr::across(dplyr::everything(), ~toupper(as.character(.)))
+        ) |>
+        dplyr::distinct()
+      sub_results <- sub_results |>
+        dplyr::left_join(
+          parent_lookup, by = stats::setNames(grp, lvl_name)
+        )
+    }
+
+    admin_cols <- c(
+      intersect(parent_cols_in_data, names(sub_results)), lvl_name
+    )
+
+    sub_tbl <- dplyr::bind_cols(
+      meta_cols[rep(1, nrow(sub_results)), ],
+      sub_results |>
+        dplyr::select(
+          dplyr::all_of(admin_cols), point, ci_l, ci_u,
+          numerator, denominator,
+          indicator, indicator_code,
+          numerator_description,
+          denominator_description, denominator_code
+        )
     ) |>
-    dplyr::select(-n_clusters) |>
-    sf::st_drop_geometry()
+      dplyr::mutate(
+        type       = "survey_weighted",
+        geo_source = geo_src,
+        .after     = dplyr::all_of(lvl_name)
+      ) |>
+      tibble::as_tibble()
 
-  dict <- sntutils::build_dictionary(result_with_geometry)
-  dict <- .enrich_dhs_dictionary(dict, .pfpr_labels())
+    out[[lvl_name]] <- sub_tbl
+  }
 
-  list(
-    data = dplyr::distinct(result_with_geometry),
-    dict = dict,
-    metadata = metadata
+  out
+}
+
+
+# =============================================================================
+# PfPR WMR Indicator Dictionary
+# =============================================================================
+
+#' PfPR WMR Indicator Dictionary
+#'
+#' Returns the dictionary of WMR PfPR indicators.
+#'
+#' @return Tibble with columns: indicator, indicator_code, indicator_title,
+#'   outcome_var, numerator_description, denominator_description,
+#'   denominator_code, data_level.
+#'
+#' @examples
+#' pfpr_wmr_dictionary()
+#'
+#' @export
+pfpr_wmr_dictionary <- function() {
+  conds <- .pfpr_wmr_conditions()
+  tibble::tibble(
+    indicator = vapply(conds, `[[`, character(1), "indicator"),
+    indicator_code = vapply(conds, `[[`, character(1), "indicator_code"),
+    indicator_title = vapply(conds, `[[`, character(1), "indicator_title"),
+    outcome_var = vapply(conds, `[[`, character(1), "outcome_var"),
+    numerator_description = vapply(conds, `[[`, character(1), "num_desc"),
+    denominator_description = vapply(conds, `[[`, character(1), "denom_desc"),
+    denominator_code = vapply(conds, `[[`, character(1), "denom_code"),
+    data_level = "adm0"
   )
 }
 
-#' PfPR label definitions
+
+#' Internal: PfPR WMR indicator conditions
 #' @noRd
-.pfpr_labels <- function() {
-  tibble::tribble(
-    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~dhs_recode, ~indicator_category, ~wmr_cascade_step, ~age_group, ~units, ~notes,
-    "dhs_pfpr_rdt", "PfPR by RDT", "TIP par TDR", "hml35", "RDT-positive children", "Children 6-59 months tested by RDT", "hml35", "hml35", "PR", "Malaria", NA_integer_, "6-59 months", "proportion (0-1)", "PR module; children 6-59 months; measures test RESULT not test performed",
-    "dhs_pfpr_rdt_low", "PfPR RDT - lower 95% CI", "TIP TDR - IC 95% inferieur", "hml35", NA_character_, NA_character_, NA_character_, NA_character_, "PR", "Malaria", NA_integer_, "6-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_pfpr_rdt_upp", "PfPR RDT - upper 95% CI", "TIP TDR - IC 95% superieur", "hml35", NA_character_, NA_character_, NA_character_, NA_character_, "PR", "Malaria", NA_integer_, "6-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_pfpr_mic", "PfPR by microscopy", "TIP par microscopie", "hml32", "Microscopy-positive children", "Children 6-59 months tested by microscopy", "hml32", "hml32", "PR", "Malaria", NA_integer_, "6-59 months", "proportion (0-1)", "PR module; children 6-59 months; measures test RESULT not test performed",
-    "dhs_pfpr_mic_low", "PfPR microscopy - lower 95% CI", "TIP microscopie - IC 95% inferieur", "hml32", NA_character_, NA_character_, NA_character_, NA_character_, "PR", "Malaria", NA_integer_, "6-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_pfpr_mic_upp", "PfPR microscopy - upper 95% CI", "TIP microscopie - IC 95% superieur", "hml32", NA_character_, NA_character_, NA_character_, NA_character_, "PR", "Malaria", NA_integer_, "6-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_n_tested_rdt", "Number tested by RDT (denominator)", "Nombre testes par TDR (denominateur)", "hml35", NA_character_, NA_character_, NA_character_, NA_character_, "PR", "Malaria", NA_integer_, "6-59 months", "count", "Unweighted count",
-    "dhs_n_pos_rdt", "Number RDT-positive (numerator)", "Nombre positifs au TDR (numerateur)", "hml35", NA_character_, NA_character_, NA_character_, NA_character_, "PR", "Malaria", NA_integer_, "6-59 months", "count", "Unweighted count",
-    "dhs_n_tested_mic", "Number tested by microscopy (denominator)", "Nombre testes par microscopie (denominateur)", "hml32", NA_character_, NA_character_, NA_character_, NA_character_, "PR", "Malaria", NA_integer_, "6-59 months", "count", "Unweighted count",
-    "dhs_n_pos_mic", "Number microscopy-positive (numerator)", "Nombre positifs a la microscopie (numerateur)", "hml32", NA_character_, NA_character_, NA_character_, NA_character_, "PR", "Malaria", NA_integer_, "6-59 months", "count", "Unweighted count"
+.pfpr_wmr_conditions <- function() {
+  list(
+    list(
+      indicator      = "PFPR_RDT",
+      indicator_code = "pfpr_rdt",
+      indicator_title = "PfPR by RDT",
+      denom_code     = "tested_rdt_6_59mo",
+      filter_expr    = quote(tested_rdt == 1),
+      outcome_var    = "rdt_pos",
+      num_desc       = "Children 6-59 months positive by RDT",
+      denom_desc     = "Children 6-59 months tested by RDT"
+    ),
+    list(
+      indicator      = "PFPR_MIC",
+      indicator_code = "pfpr_mic",
+      indicator_title = "PfPR by microscopy",
+      denom_code     = "tested_mic_6_59mo",
+      filter_expr    = quote(tested_mic == 1),
+      outcome_var    = "mic_pos",
+      num_desc       = "Children 6-59 months positive by microscopy",
+      denom_desc     = "Children 6-59 months tested by microscopy"
+    )
   )
+}
+
+
+# =============================================================================
+# PfPR computation helper
+# =============================================================================
+
+#' Compute a single PfPR WMR indicator
+#'
+#' @param data Prepared PfPR dataset with test result columns.
+#' @param condition List with indicator spec (filter_expr, outcome_var, etc.).
+#' @param group_var Optional grouping variable for regional estimates.
+#' @param subnational_level Admin level name for grouped rows.
+#' @param ci_method CI method for svyciprop.
+#' @return Tibble with level, location, point, ci_l, ci_u, numerator,
+#'   denominator, indicator metadata.
+#' @noRd
+.compute_pfpr_indicator <- function(data, condition, group_var = NULL,
+                                     subnational_level = NULL,
+                                     ci_method = "logit") {
+
+  outcome_var <- condition$outcome_var
+  ind_title <- condition$indicator_title
+
+  # Apply filter
+  if (is.null(condition$filter_expr)) {
+    filtered <- data
+  } else {
+    filtered <- tryCatch(
+      dplyr::filter(data, !!condition$filter_expr),
+      error = function(e) tibble::tibble()
+    )
+  }
+
+  if (!outcome_var %in% names(filtered)) {
+    return(tibble::tibble())
+  }
+
+  filtered$.wmr_outcome <- filtered[[outcome_var]]
+  filtered <- filtered[!is.na(filtered$.wmr_outcome), ]
+
+  n_denom <- nrow(filtered)
+  if (n_denom == 0) return(tibble::tibble())
+
+  # Survey design
+  n_clusters <- dplyr::n_distinct(filtered$cluster_id)
+  use_strata <- dplyr::n_distinct(filtered$stratum_id) > 1
+
+  # Weighted counts
+  n_denom_w <- round(sum(filtered$survey_weight, na.rm = TRUE))
+  n_numer_w <- round(sum(
+    filtered$survey_weight * (filtered$.wmr_outcome == 1), na.rm = TRUE
+  ))
+
+  # Single-cluster guard
+  if (n_clusters < 2) {
+    point_est <- n_numer_w / n_denom_w
+    national <- tibble::tibble(
+      level = "adm0", location = "National",
+      point = point_est, ci_l = NA_real_, ci_u = NA_real_,
+      numerator = n_numer_w, denominator = n_denom_w
+    )
+    return(
+      national |>
+        dplyr::mutate(
+          indicator               = condition$indicator_title,
+          indicator_code          = condition$indicator_code,
+          numerator_description   = condition$num_desc,
+          denominator_description = condition$denom_desc,
+          denominator_code        = condition$denom_code
+        )
+    )
+  }
+
+  svy <- tryCatch({
+    if (use_strata) {
+      survey::svydesign(
+        ids = ~cluster_id, strata = ~stratum_id,
+        weights = ~survey_weight, data = filtered, nest = TRUE
+      )
+    } else {
+      survey::svydesign(
+        ids = ~cluster_id, weights = ~survey_weight,
+        data = filtered, nest = TRUE
+      )
+    }
+  }, error = function(e) {
+    survey::svydesign(
+      ids = ~cluster_id, weights = ~survey_weight,
+      data = filtered, nest = TRUE
+    )
+  })
+
+  # National estimate
+  national <- tryCatch({
+    est <- survey::svyciprop(~.wmr_outcome, svy, method = ci_method,
+                              na.rm = TRUE)
+    ci  <- stats::confint(est)
+    tibble::tibble(
+      level = "adm0", location = "National",
+      point = as.numeric(est), ci_l = ci[1], ci_u = ci[2],
+      numerator = n_numer_w, denominator = n_denom_w
+    )
+  }, error = function(e) {
+    cli::cli_alert_warning("    {ind_title} national: {e$message}")
+    tibble::tibble(
+      level = "adm0", location = "National", point = NA_real_,
+      ci_l = NA_real_, ci_u = NA_real_,
+      numerator = n_numer_w, denominator = n_denom_w
+    )
+  })
+
+  # Regional estimates
+  regional <- tibble::tibble()
+  sub_level <- subnational_level %||% "adm1"
+
+  if (!is.null(group_var) && group_var %in% names(filtered)) {
+    group_formula <- stats::as.formula(paste("~", group_var))
+
+    regional <- tryCatch({
+      by_result <- survey::svyby(
+        ~.wmr_outcome, by = group_formula, design = svy,
+        FUN = survey::svyciprop, vartype = "ci",
+        method = ci_method, na.rm = TRUE, keep.names = FALSE
+      ) |> tibble::as_tibble()
+
+      region_num <- filtered |>
+        dplyr::group_by(.data[[group_var]]) |>
+        dplyr::summarise(
+          numerator = round(sum(
+            survey_weight * (.wmr_outcome == 1), na.rm = TRUE
+          )), .groups = "drop"
+        )
+
+      region_denom <- filtered |>
+        dplyr::group_by(.data[[group_var]]) |>
+        dplyr::summarise(
+          denominator = round(sum(survey_weight, na.rm = TRUE)),
+          .groups = "drop"
+        )
+
+      names(by_result)[names(by_result) == "ci_l"] <- "ci_l..wmr_outcome"
+      names(by_result)[names(by_result) == "ci_u"] <- "ci_u..wmr_outcome"
+
+      by_result |>
+        dplyr::rename(
+          location = !!group_var, point = .wmr_outcome,
+          ci_l = `ci_l..wmr_outcome`, ci_u = `ci_u..wmr_outcome`
+        ) |>
+        dplyr::mutate(location = as.character(location)) |>
+        dplyr::left_join(
+          region_num |>
+            dplyr::mutate(
+              location = as.character(.data[[group_var]])
+            ) |>
+            dplyr::select(location, numerator),
+          by = "location"
+        ) |>
+        dplyr::left_join(
+          region_denom |>
+            dplyr::mutate(
+              location = as.character(.data[[group_var]])
+            ) |>
+            dplyr::select(location, denominator),
+          by = "location"
+        ) |>
+        dplyr::mutate(level = sub_level) |>
+        dplyr::select(
+          level, location, point, ci_l, ci_u, numerator, denominator
+        )
+    }, error = function(e) {
+      cli::cli_alert_warning("    {ind_title} by group: {e$message}")
+      tibble::tibble()
+    })
+  }
+
+  dplyr::bind_rows(national, regional) |>
+    dplyr::mutate(
+      indicator               = condition$indicator_title,
+      indicator_code          = condition$indicator_code,
+      numerator_description   = condition$num_desc,
+      denominator_description = condition$denom_desc,
+      denominator_code        = condition$denom_code
+    )
 }
 
 #' Aggregate Cluster-level PfPR to Administrative Levels
