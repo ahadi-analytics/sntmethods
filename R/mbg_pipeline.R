@@ -1342,11 +1342,29 @@ run_mbg_pipeline <- function(
 
   # Run MBG if enabled
   if (run_mbg && requireNamespace("mbg", quietly = TRUE)) {
+    # Pre-flight check: verify INLA is available before entering the loop
+    if (!requireNamespace("INLA", quietly = TRUE)) {
+      cli::cli_alert_warning(
+        "INLA not installed — skipping MBG model fitting for all indicators"
+      )
+      return(results)
+    }
+
     for (ind_name in names(cluster_data)) {
       # Skip combined tables — they are reference data, not MBG inputs
       if (grepl("^pfpr_combined_", ind_name)) next
 
-      cli::cli_alert_info("Running MBG for {ind_name}...")
+      # Skip indicators with too few clusters for MBG
+      dt <- cluster_data[[ind_name]]
+      n_clusters <- if (!is.null(dt)) nrow(dt) else 0L
+      if (n_clusters < 5) {
+        cli::cli_alert_warning(
+          "Skipping MBG for {.val {ind_name}}: only {n_clusters} cluster(s) (need >= 5)"
+        )
+        next
+      }
+
+      cli::cli_alert_info("Running MBG for {ind_name} ({n_clusters} clusters)...")
 
       mbg_result <- tryCatch({
         .run_single_mbg(
@@ -1506,7 +1524,7 @@ run_mbg_pipeline <- function(
     data_name <- as.character(data_name)
 
     write_result <- sntutils::write_snt_data(
-      obj = dt,
+      obj = df,
       path = output_dir,
       data_name = data_name,
       file_formats = "qs2",
