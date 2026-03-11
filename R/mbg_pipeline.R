@@ -2686,23 +2686,26 @@ run_mbg_pipeline <- function(
 #'
 #' @noRd
 .relative_path <- function(path) {
-  # Try to compute relative path from working directory
-  rel <- tryCatch({
-    fs::path_rel(path, start = getwd())
-  }, error = function(e) {
-    # Fallback: extract path after common project patterns
-    # Matches patterns like: /project-name/01_data/... or /project-name/03_outputs/...
-    match <- regmatches(
-      path,
-      regexpr("(01_data|02_scripts|03_outputs|04_reports|05_metadata_docs)/.*$", path)
-    )
-    if (length(match) > 0 && nchar(match) > 0) {
-      return(match)
-    }
-    # Final fallback: just return basename
-    basename(path)
-  })
-  as.character(rel)
+  path <- as.character(path)
+
+  # Try to extract a short project-relative path first
+  # Matches SNT project patterns like: 03_outputs/3.4_model/tables/file.tif
+  match <- regmatches(
+    path,
+    regexpr("(01_data|02_scripts|03_outputs|04_reports|05_metadata_docs)/.*$", path)
+  )
+  if (length(match) > 0 && nchar(match) > 0) {
+    return(match)
+  }
+
+  # Fall back to fs::path_rel, but only if it doesn't produce a long ../ chain
+  rel <- tryCatch(as.character(fs::path_rel(path, start = getwd())), error = function(e) NULL)
+  if (!is.null(rel) && !grepl("^\\.\\./\\.\\./\\.\\./", rel)) {
+    return(rel)
+  }
+
+  # Final fallback: just the filename
+  basename(path)
 }
 
 
