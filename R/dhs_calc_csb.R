@@ -200,9 +200,7 @@ calc_csb_dhs_core <- function(
 
   # ---- 2. Handle classification parameter ------------------------------------
 
-  # Handle backwards compatibility and defaults
   if (!is.null(source_config) && is.null(csb_classification)) {
-    # Legacy source_config provided - convert to classification
     cli::cli_alert_warning(
       "source_config is deprecated. Use csb_classification instead."
     )
@@ -211,18 +209,14 @@ calc_csb_dhs_core <- function(
       "Converted source_config to csb_classification format"
     )
   } else if (is.null(csb_classification)) {
-    # Neither provided - use WMR default
-    csb_classification <- .default_csb_classification()
-    cli::cli_alert_info(
-      "Using default WMR csb_classification"
-    )
+    # Auto-detect from haven labels (same approach as ACT detection)
+    csb_classification <- .detect_csb_from_labels(dhs_kr)
   }
 
   # Validate csb_classification
   if (!is.data.frame(csb_classification)) {
     cli::cli_abort("`csb_classification` must be a data.frame")
   }
-
   if (!all(c("variable", "csb") %in% names(csb_classification))) {
     cli::cli_abort(
       c(
@@ -232,50 +226,20 @@ calc_csb_dhs_core <- function(
     )
   }
 
-  valid_csb_values <- c(
-    "public", "chw", "private_formal",
-    "private_informal", "pharmacy"
-  )
-  invalid_csb <- setdiff(unique(csb_classification$csb), valid_csb_values)
-
-  if (length(invalid_csb) > 0) {
-    cli::cli_abort(
-      c(
-        "Invalid csb values: {.val {invalid_csb}}",
-        "i" = "Valid values: {.val {valid_csb_values}}"
-      )
-    )
-  }
-
-  # Filter classification to only include variables present in data
+  # Filter to variables present in data
   csb_classification <- csb_classification |>
     dplyr::filter(variable %in% available_h32)
 
   if (nrow(csb_classification) == 0) {
-    class_vars <- unique(csb_classification$variable)
     cli::cli_abort(
       c(
         "No h32 variables from csb_classification found in data.",
-        "i" = "Available h32 variables: {.var {available_h32}}",
-        "i" = "Classification variables: {.var {class_vars}}"
+        "i" = "Available h32 variables: {.var {available_h32}}"
       )
     )
   }
 
-  # Log which categories are available
-  categories_found <- unique(csb_classification$csb)
-  cli::cli_alert_info(
-    "CSB categories found: {paste(categories_found, collapse = ', ')}"
-  )
-
-  for (cat in categories_found) {
-    cat_vars <- csb_classification$variable[csb_classification$csb == cat]
-    cli::cli_alert_info(
-      "  {cat} ({length(cat_vars)}): {paste(cat_vars, collapse = ', ')}"
-    )
-  }
-
-  # ---- 3. Prepare base dataset and create indicators -------------------------
+  # ---- 3. Prepare base dataset -----------------------------------------------
 
   kr_fever <- .prepare_csb_data(
     dhs_kr = dhs_kr,
@@ -284,513 +248,197 @@ calc_csb_dhs_core <- function(
     include_survey_vars = TRUE
   )
 
-  # Verify mathematical invariant: any + none must equal 1
-  stopifnot(
-    all(kr_fever$csb_any_treatment + kr_fever$csb_no_treatment == 1)
-  )
-
-  # Log distribution for diagnostic purposes (unweighted)
-  n_total <- nrow(kr_fever)
-  n_public <- sum(kr_fever$csb_public, na.rm = TRUE)
-  n_private <- sum(kr_fever$csb_private, na.rm = TRUE)
-  n_none <- sum(kr_fever$csb_no_treatment, na.rm = TRUE)
-  n_trained <- sum(kr_fever$csb_trained_provider, na.rm = TRUE)
-
-  cli::cli_alert_info(
-    paste0(
-      "Care-seeking (unweighted): ",
-      "public={round(n_public/n_total*100, 1)}%, ",
-      "private={round(n_private/n_total*100, 1)}%, ",
-      "none={round(n_none/n_total*100, 1)}%, ",
-      "trained={round(n_trained/n_total*100, 1)}%"
+  # Add granular CSB columns needed by indicator conditions
+  kr_fever <- kr_fever |>
+    dplyr::mutate(
+      csb_any_treatment      = csb_any,
+      csb_no_treatment       = csb_none,
+      csb_trained_provider   = csb_trained,
+      csb_public_nochw       = as.numeric(has_public == 1 & has_chw == 0),
+      csb_chw                = as.numeric(has_chw == 1),
+      csb_private_formal_ind = as.numeric(has_private_formal == 1),
+      csb_pharmacy           = as.numeric(has_pharmacy == 1),
+      csb_private_informal   = as.numeric(has_private_informal == 1),
+      csb_private_formal_pha = as.numeric(
+        has_private_formal == 1 | has_pharmacy == 1
+      )
     )
+
+  cli::cli_alert_success(
+    "Under 5 with fever: {format(nrow(kr_fever), big.mark = ',')} children"
   )
 
-  # ---- 5. Join GPS and shapefile if provided --------------------------------
+  # ---- 4. Extract survey metadata -------------------------------------------
 
-  class_var <- NULL
+  survey_meta <- .extract_survey_meta(dhs_kr)
+
+  # ---- 5. Region grouping or spatial join -----------------------------------
+
+  group_var <- NULL
+  subnational_level <- NULL
+
+  # Auto-fallback to v024 when no spatial parameters provided
+  if (is.null(region_var) && is.null(gps_data) && is.null(shapefile)) {
+    if ("v024" %in% names(dhs_kr)) {
+      region_var <- "v024"
+      cli::cli_alert_info(
+        "No region_var/GPS/shapefile specified; defaulting to {.var v024} for adm1"
+      )
+    }
+  }
+
+  # admin_hierarchy: list of list(group_var, level_name) for each admin level
+  admin_hierarchy <- list()
 
   if (!is.null(region_var)) {
-    class_var <- region_var
-    cli::cli_alert_info("Using {.var {region_var}} as grouping variable")
-  } else if (!is.null(gps_data) && !is.null(shapefile)) {
-    cli::cli_alert_info(
-      "Joining GPS coordinates and administrative boundaries"
-    )
-
-    if (!requireNamespace("sf", quietly = TRUE)) {
-      cli::cli_abort("Package 'sf' is required for spatial operations")
-    }
-
-    gps_clean <- gps_data |>
-      dplyr::select(
-        cluster_id = !!gps_vars$cluster,
-        lat = !!gps_vars$lat,
-        lon = !!gps_vars$lon
-      ) |>
-      dplyr::distinct()
-
-    kr_fever <- kr_fever |>
-      dplyr::left_join(
-        gps_clean,
-        by = "cluster_id"
-      )
-
-    clusters_sf <- kr_fever |>
-      dplyr::select(
-        cluster_id,
-        lat,
-        lon
-      ) |>
-      dplyr::distinct() |>
-      dplyr::filter(
-        !is.na(lat),
-        !is.na(lon)
-      ) |>
-      sf::st_as_sf(
-        coords = c("lon", "lat"),
-        crs = 4326
-      )
-
-    shapefile <- shapefile |>
-      sf::st_transform(4326) |>
-      sf::st_make_valid()
-
-    if (is.null(admin_level)) {
-      available_admins <- names(shapefile)[
-        grep("^adm[0-9]+$", names(shapefile))
-      ]
-
-      if (length(available_admins) == 0) {
-        cli::cli_abort(
-          "No admin columns (adm0, adm1, adm2, etc.) found in shapefile"
-        )
-      }
-
-      admin_level <- available_admins
-
-      cli::cli_alert_info(
-        "Using admin levels: {paste(admin_level, collapse = ', ')}"
-      )
-    }
-
-    missing_cols <- setdiff(admin_level, names(shapefile))
-
-    if (length(missing_cols) > 0) {
-      cli::cli_abort(
-        "Admin columns not found in shapefile: ",
-        "{paste(missing_cols, collapse = ', ')}"
-      )
-    }
-
-    admin_name_cols <- paste0(admin_level, "_name")
-    admin_name_cols <- admin_name_cols[
-      admin_name_cols %in% names(shapefile)
-    ]
-    all_admin_cols <- c(admin_level, admin_name_cols)
-
-    cluster_admin <- sf::st_join(
-      clusters_sf,
-      shapefile[, c(all_admin_cols, "geometry")],
-      join = sf::st_within,
-      left = TRUE
-    )
-
-    if (join_nearest) {
-      unmatched <- is.na(cluster_admin[[admin_level[1]]])
-
-      if (any(unmatched)) {
-        n_unmatched <- format(sum(unmatched), big.mark = ",")
-        cli::cli_alert_info(
-          "Assigning {n_unmatched} clusters to nearest admin units"
-        )
-
-        nearest_idx <- sf::st_nearest_feature(
-          cluster_admin[unmatched, ],
-          shapefile
-        )
-
-        for (col in all_admin_cols) {
-          if (col %in% names(shapefile)) {
-            cluster_admin[unmatched, col] <- shapefile[[col]][
-              nearest_idx
-            ]
-          }
-        }
-      }
-    }
-
-    cluster_admin_df <- sf::st_drop_geometry(cluster_admin)
-
-    kr_fever <- kr_fever |>
-      dplyr::left_join(
-        cluster_admin_df,
-        by = "cluster_id"
-      )
-
-    if (length(admin_level) > 1) {
-      kr_fever$admin_class <- apply(
-        kr_fever[, admin_level, drop = FALSE],
-        1,
-        paste,
-        collapse = "_"
-      )
-      class_var <- "admin_class"
-    } else {
-      class_var <- admin_level[1]
-    }
-  } else if (!is.null(shapefile)) {
-    cli::cli_alert_warning(
-      "Shapefile provided without GPS data; using existing admin vars"
-    )
-
-    existing_admins <- c("v024", "v025", "sdist")
-    found_admin <- existing_admins[
-      existing_admins %in% names(kr_fever)
-    ][1]
-
-    if (!is.na(found_admin)) {
-      class_var <- found_admin
-      cli::cli_alert_info(
-        "Using {.var {found_admin}} as grouping variable"
-      )
-    }
-  } else if (!is.null(gps_data)) {
-    cli::cli_alert_info(
-      "GPS provided without shapefile; calculating cluster-level CSB"
-    )
-    class_var <- "cluster_id"
-  } else {
-    if ("v024" %in% names(kr_fever)) {
-      class_var <- "v024"
-      cli::cli_alert_info(
-        "Using v024 (region) as grouping variable"
-      )
-    }
-  }
-
-  # ---- 6. Set up survey design ----------------------------------------------
-
-  if (!is.null(class_var)) {
-    cli::cli_alert_info(
-      "Calculating CSB by {.var {class_var}}"
-    )
-  } else {
-    cli::cli_alert_info(
-      "Calculating national-level CSB"
-    )
-  }
-
-  # Check for single-PSU strata
-  strata_check <- kr_fever |>
-    dplyr::group_by(stratum_id) |>
-    dplyr::summarise(
-      n_clusters = dplyr::n_distinct(cluster_id),
-      .groups = "drop"
-    )
-
-  single_psu_strata <- sum(strata_check$n_clusters == 1)
-
-  if (single_psu_strata > 0) {
-    n_strata <- format(single_psu_strata, big.mark = ",")
-    cli::cli_alert_info(
-      "Found {n_strata} strata with single PSU; using certainty option"
-    )
-  }
-
-  use_strata <- dplyr::n_distinct(kr_fever$stratum_id) > 1
-
-  if (use_strata) {
-    # Set survey options to handle single-PSU strata
-    survey_options <- options(survey.lonely.psu = "certainty")
-    on.exit(options(survey_options), add = TRUE)
-
-    des <- survey::svydesign(
-      ids = ~cluster_id,
-      strata = ~stratum_id,
-      weights = ~survey_weight,
-      data = kr_fever,
-      nest = TRUE
-    )
-  } else {
-    des <- survey::svydesign(
-      ids = ~cluster_id,
-      weights = ~survey_weight,
-      data = kr_fever,
-      nest = TRUE
-    )
-  }
-
-  # ---- 7. Calculate care-seeking indicators ---------------------------------
-  # Use the WMR derived indicators for survey estimation
-
-  # Determine grouping
-  if (!is.null(class_var)) {
-    group_formula <- stats::as.formula(paste("~", class_var))
-  } else {
-    group_formula <- ~1
-  }
-
-  # Formula for svyby using WMR indicators
-  indicator_formula <- ~ csb_public + csb_private +
-    csb_no_treatment + csb_trained_provider
-
-  # Calculate proportions
-  if (!is.null(class_var)) {
-    # Additional check for single-cluster groups when grouping by admin level
-    if (class_var != "cluster_id") {
-      group_check <- kr_fever |>
-        dplyr::group_by(.data[[class_var]]) |>
-        dplyr::summarise(
-          n_clusters = dplyr::n_distinct(cluster_id),
-          .groups = "drop"
-        )
-
-      single_cluster_groups <- sum(group_check$n_clusters == 1)
-
-      if (single_cluster_groups > 0) {
-        cli::cli_alert_warning(
-          paste0(
-            "{single_cluster_groups} admin unit(s) have only one cluster; ",
-            "variance estimates may be unreliable"
-          )
-        )
-      }
-    }
-
-    csb_results <- tryCatch({
-      survey::svyby(
-        indicator_formula,
-        by = group_formula,
-        design = des,
-        FUN = survey::svymean,
-        vartype = "ci",
-        keep.names = FALSE
-      ) |>
-        tibble::as_tibble()
+    region_values <- tryCatch({
+      lbls <- as.character(haven::as_factor(dhs_kr[[region_var]]))
+      raw_vals <- as.vector(haven::zap_labels(dhs_kr[[region_var]]))
+      febrile_raw <- kr_fever[[region_var]]
+      lookup <- stats::setNames(lbls, raw_vals)
+      unname(lookup[as.character(febrile_raw)])
     }, error = function(e) {
-      if (grepl("has only one PSU", e$message)) {
-        cli::cli_alert_warning(
-          "Single PSU issue persists; trying with adjusted survey design"
-        )
-        # Fall back to ignoring strata
-        des_no_strata <- survey::svydesign(
-          ids = ~cluster_id,
-          weights = ~survey_weight,
-          data = kr_fever,
-          nest = TRUE
-        )
-        survey::svyby(
-          indicator_formula,
-          by = group_formula,
-          design = des_no_strata,
-          FUN = survey::svymean,
-          vartype = "ci",
-          keep.names = FALSE
-        ) |>
-          tibble::as_tibble()
-      } else {
-        stop(e)
-      }
+      as.character(kr_fever[[region_var]])
     })
-  } else {
-    csb_means <- survey::svymean(
-      indicator_formula,
-      design = des
+    kr_fever$region <- toupper(region_values)
+    admin_hierarchy <- list(list(group_var = "region", level_name = "adm1"))
+    geo_src <- "survey"
+
+    cli::cli_alert_info(
+      "Grouping by `{region_var}`: {paste(unique(kr_fever$region), collapse = ', ')}"
     )
-    csb_ci <- stats::confint(csb_means)
-
-    csb_results <- tibble::tibble(
-      level = "National",
-      csb_public = as.numeric(csb_means["csb_public"]),
-      `ci_l.csb_public` = csb_ci["csb_public", 1],
-      `ci_u.csb_public` = csb_ci["csb_public", 2],
-      csb_private = as.numeric(csb_means["csb_private"]),
-      `ci_l.csb_private` = csb_ci["csb_private", 1],
-      `ci_u.csb_private` = csb_ci["csb_private", 2],
-      csb_no_treatment = as.numeric(csb_means["csb_no_treatment"]),
-      `ci_l.csb_no_treatment` = csb_ci["csb_no_treatment", 1],
-      `ci_u.csb_no_treatment` = csb_ci["csb_no_treatment", 2],
-      csb_trained_provider = as.numeric(csb_means["csb_trained_provider"]),
-      `ci_l.csb_trained_provider` = csb_ci["csb_trained_provider", 1],
-      `ci_u.csb_trained_provider` = csb_ci["csb_trained_provider", 2]
+  } else if (!is.null(gps_data) && !is.null(shapefile)) {
+    kr_fever <- .spatial_join_ge(
+      kr_fever    = kr_fever,
+      gps_data    = gps_data,
+      gps_vars    = gps_vars,
+      shapefile   = shapefile,
+      admin_level = admin_level,
+      join_nearest = join_nearest
     )
-  }
+    geo_src <- "gps"
 
-  # ---- 8. Calculate sample sizes --------------------------------------------
-
-  if (!is.null(class_var)) {
-    sample_sizes <- kr_fever |>
-      dplyr::group_by(.data[[class_var]]) |>
-      dplyr::summarise(
-        dhs_n_fever = dplyr::n(),
-        dhs_n_public = sum(csb_public == 1, na.rm = TRUE),
-        dhs_n_private = sum(csb_private == 1, na.rm = TRUE),
-        dhs_n_none = sum(csb_no_treatment == 1, na.rm = TRUE),
-        dhs_n_trained = sum(csb_trained_provider == 1, na.rm = TRUE),
-        .groups = "drop"
-      )
-
-    csb_results <- csb_results |>
-      dplyr::left_join(
-        sample_sizes,
-        by = class_var
-      )
-  } else {
-    csb_results$dhs_n_fever <- nrow(kr_fever)
-    csb_results$dhs_n_public <- sum(
-      kr_fever$csb_public == 1, na.rm = TRUE
-    )
-    csb_results$dhs_n_private <- sum(
-      kr_fever$csb_private == 1, na.rm = TRUE
-    )
-    csb_results$dhs_n_none <- sum(
-      kr_fever$csb_no_treatment == 1, na.rm = TRUE
-    )
-    csb_results$dhs_n_trained <- sum(
-      kr_fever$csb_trained_provider == 1, na.rm = TRUE
-    )
-  }
-
-  # ---- 9. Format results -----------------------------------------------------
-
-  # Rename columns to standard output format
-  csb_results <- csb_results |>
-    dplyr::rename(
-      dhs_csb_public = csb_public,
-      dhs_csb_public_low = `ci_l.csb_public`,
-      dhs_csb_public_upp = `ci_u.csb_public`,
-      dhs_csb_private = csb_private,
-      dhs_csb_private_low = `ci_l.csb_private`,
-      dhs_csb_private_upp = `ci_u.csb_private`,
-      dhs_csb_none = csb_no_treatment,
-      dhs_csb_none_low = `ci_l.csb_no_treatment`,
-      dhs_csb_none_upp = `ci_u.csb_no_treatment`,
-      dhs_csb_trained = csb_trained_provider,
-      dhs_csb_trained_low = `ci_l.csb_trained_provider`,
-      dhs_csb_trained_upp = `ci_u.csb_trained_provider`
-    )
-
-  # Round proportions (keep as 0-1 scale, not percentages)
-  csb_cols <- names(csb_results)[grepl("^dhs_csb_", names(csb_results))]
-
-  csb_results <- csb_results |>
-    dplyr::mutate(
-      dplyr::across(
-        dplyr::all_of(csb_cols),
-        ~ round(.x, 2)
-      )
-    )
-
-  # Derive "any care" = 1 - none (by construction: any + none == 1)
-  csb_results <- csb_results |>
-    dplyr::mutate(
-      dhs_csb_any = 1 - dhs_csb_none,
-      # CI is inverted: low of "any" = 1 - high of "none"
-      dhs_csb_any_low = 1 - dhs_csb_none_upp,
-      dhs_csb_any_upp = 1 - dhs_csb_none_low
-    )
-
-  # Ensure confidence intervals stay within [0, 1]
-  csb_results <- csb_results |>
-    dplyr::mutate(
-      dplyr::across(
-        dplyr::matches("_low$"),
-        ~ pmax(0, .)
-      ),
-      dplyr::across(
-        dplyr::matches("_upp$"),
-        ~ pmin(1, .)
-      )
-    )
-
-  # Split admin_class back into individual admin columns if needed
-  if (!is.null(class_var) && class_var == "admin_class" && length(admin_level) > 1) {
-    admin_splits <- stringr::str_split(
-      csb_results$admin_class,
-      "_",
-      simplify = TRUE
-    )
-
-    for (i in seq_along(admin_level)) {
-      csb_results[[admin_level[i]]] <- admin_splits[, i]
+    admin_lvls <- attr(kr_fever, "admin_levels") %||% character(0)
+    for (lvl in admin_lvls) {
+      admin_hierarchy <- c(admin_hierarchy, list(
+        list(group_var = lvl, level_name = lvl)
+      ))
     }
   }
 
-  # Add admin name columns if available
-  if (!is.null(shapefile) && !is.null(admin_level)) {
-    admin_name_cols <- paste0(admin_level, "_name")
-    admin_name_cols <- admin_name_cols[
-      admin_name_cols %in% names(shapefile)
-    ]
+  if (!exists("geo_src")) geo_src <- "survey"
 
-    if (length(admin_name_cols) > 0) {
-      admin_lookup <- sf::st_drop_geometry(shapefile) |>
-        dplyr::select(
-          dplyr::all_of(c(admin_level, admin_name_cols))
-        ) |>
+  # ---- 6. Compute each CSB indicator (national + each admin level) ----------
+
+  options(survey.lonely.psu = "adjust")
+
+  dict <- .csb_wmr_conditions()
+
+  meta_cols <- tibble::tibble(
+    survey_id    = survey_meta$survey_id,
+    iso3        = survey_meta$iso3,
+    iso2        = survey_meta$iso2,
+    survey_type = survey_meta$survey_type,
+    survey_year  = survey_meta$survey_year,
+    adm0        = survey_meta$country_upper
+  )
+
+  .round_results <- function(tbl) {
+    tbl |>
+      dplyr::mutate(
+        point  = round(point, 3),
+        ci_l   = round(pmax(ci_l, 0, na.rm = TRUE), 3),
+        ci_u   = round(pmin(ci_u, 1, na.rm = TRUE), 3),
+        numerator   = as.integer(numerator),
+        denominator = as.integer(denominator)
+      )
+  }
+
+  # --- adm0 (national, no group_var) ---
+  national_results <- purrr::map_dfr(dict, function(cond) {
+    .compute_csb_indicator(
+      data      = kr_fever,
+      condition = cond,
+      group_var = NULL,
+      ci_method = "logit"
+    )
+  }) |> .round_results()
+
+  adm0_tbl <- dplyr::bind_cols(
+    meta_cols[rep(1, nrow(national_results)), ],
+    tibble::tibble(type = "survey_weighted", geo_source = geo_src),
+    national_results |> dplyr::select(-level, -location)
+  ) |>
+    tibble::as_tibble()
+
+  out <- list(adm0 = adm0_tbl)
+
+  # --- subnational tabs (one per admin level) ---
+  all_level_names <- vapply(admin_hierarchy, `[[`, character(1), "level_name")
+
+  for (i in seq_along(admin_hierarchy)) {
+    ah <- admin_hierarchy[[i]]
+    grp <- ah$group_var
+    lvl_name <- ah$level_name
+
+    sub_results <- purrr::map_dfr(dict, function(cond) {
+      .compute_csb_indicator(
+        data              = kr_fever,
+        condition         = cond,
+        group_var         = grp,
+        subnational_level = lvl_name,
+        ci_method         = "logit"
+      )
+    })
+
+    sub_results <- sub_results |>
+      dplyr::filter(level != "adm0")
+
+    if (nrow(sub_results) == 0) next
+
+    sub_results <- .round_results(sub_results)
+
+    # Add the current admin level column
+    sub_results <- sub_results |>
+      dplyr::mutate(!!lvl_name := toupper(location))
+
+    # Add parent admin columns (e.g., adm1 in the adm2 tab)
+    parent_levels <- all_level_names[seq_len(i - 1)]
+    parent_cols_in_data <- intersect(parent_levels, names(kr_fever))
+    if (length(parent_cols_in_data) > 0 && grp %in% names(kr_fever)) {
+      parent_lookup <- kr_fever |>
+        dplyr::select(dplyr::all_of(c(grp, parent_cols_in_data))) |>
+        dplyr::mutate(dplyr::across(dplyr::everything(), ~toupper(as.character(.)))) |>
         dplyr::distinct()
-
-      csb_results <- csb_results |>
-        dplyr::left_join(
-          admin_lookup,
-          by = intersect(names(csb_results), admin_level)
-        )
+      sub_results <- sub_results |>
+        dplyr::left_join(parent_lookup, by = stats::setNames(grp, lvl_name))
     }
-  } else {
-    admin_name_cols <- character(0)
+
+    admin_cols <- c(parent_cols_in_data, lvl_name)
+    admin_cols <- intersect(admin_cols, names(sub_results))
+
+    sub_tbl <- dplyr::bind_cols(
+      meta_cols[rep(1, nrow(sub_results)), ],
+      sub_results |>
+        dplyr::select(
+          dplyr::all_of(admin_cols), point, ci_l, ci_u,
+          numerator, denominator,
+          indicator, indicator_code,
+          numerator_description,
+          denominator_description, denominator_code
+        )
+    ) |>
+      dplyr::mutate(
+        type       = "survey_weighted",
+        geo_source = geo_src,
+        .after     = dplyr::all_of(lvl_name)
+      ) |>
+      tibble::as_tibble()
+
+    out[[lvl_name]] <- sub_tbl
   }
 
-  # Reorder columns - simplified to essential columns only
-  col_order <- c(
-    region_var,
-    admin_level,
-    admin_name_cols,
-    "dhs_n_fever",
-    "dhs_csb_any",
-    "dhs_csb_any_low",
-    "dhs_csb_any_upp",
-    "dhs_csb_public",
-    "dhs_csb_public_low",
-    "dhs_csb_public_upp",
-    "dhs_csb_private",
-    "dhs_csb_private_low",
-    "dhs_csb_private_upp",
-    "dhs_csb_trained",
-    "dhs_csb_trained_low",
-    "dhs_csb_trained_upp",
-    "dhs_csb_none",
-    "dhs_csb_none_low",
-    "dhs_csb_none_upp"
-  )
-
-  col_order <- intersect(col_order, names(csb_results))
-
-  # Ensure count columns are integers
-  count_cols <- c(
-    "dhs_n_fever", "dhs_n_public", "dhs_n_private",
-    "dhs_n_none", "dhs_n_trained"
-  )
-  count_cols <- intersect(count_cols, names(csb_results))
-
-  csb_results <- csb_results |>
-    dplyr::mutate(
-      dplyr::across(
-        dplyr::all_of(count_cols),
-        ~ as.integer(round(.x))
-      )
-    )
-
-  # Exclude admin_class from final output (keep sample sizes though)
-  exclude_cols <- c("admin_class")
-  other_cols <- setdiff(names(csb_results), c(col_order, exclude_cols))
-
-  csb_results <- csb_results |>
-    dplyr::select(
-      dplyr::all_of(c(col_order, other_cols))
-    )
-
-  tibble::as_tibble(csb_results)
+  out
 }
 
 #' Default WMR CSB classification
@@ -859,119 +507,305 @@ calc_csb_dhs_core <- function(
   result
 }
 
-#' Extract metadata from DHS KR dataset for care-seeking analysis
+#' Internal: CSB WMR indicator conditions (with filter expressions)
 #'
-#' Internal function to extract survey metadata from DHS children's recode
-#' data. Looks for standard DHS metadata columns and extracts key survey
-#' information relevant to care-seeking behavior analysis.
+#' Returns a list of indicator specifications following the same pattern
+#' as `.act_wmr_conditions()`. Each condition specifies the outcome variable,
+#' indicator metadata, and description.
 #'
-#' @param dhs_kr DHS children's recode dataset.
-#' @param survey_vars Named list of survey variable mappings.
-#'
-#' @return List containing survey metadata.
+#' @return List of named lists, each with: indicator, indicator_code,
+#'   indicator_title, outcome_var, num_desc, denom_desc, denom_code.
 #' @noRd
-extract_dhs_metadata_csb <- function(
-  dhs_kr,
-  survey_vars = NULL
-) {
-  metadata <- list()
+.csb_wmr_conditions <- function() {
+  denom <- "Under 5 with fever"
+  list(
+    list(
+      indicator      = "CSB_ANY",
+      indicator_code = "csb_any",
+      indicator_title = "Care seeking among under 5 with fever",
+      denom_code     = "feb_u5",
+      outcome_var    = "csb_any_treatment",
+      num_desc       = "Sought any treatment (public or private)",
+      denom_desc     = denom
+    ),
+    list(
+      indicator      = "CSB_NONE",
+      indicator_code = "csb_none",
+      indicator_title = "No care seeking among under 5 with fever",
+      denom_code     = "feb_u5",
+      outcome_var    = "csb_no_treatment",
+      num_desc       = "Did not seek any treatment",
+      denom_desc     = denom
+    ),
+    list(
+      indicator      = "CSB_PUBLIC",
+      indicator_code = "csb_public",
+      indicator_title = "Public sector care seeking among under 5 with fever",
+      denom_code     = "feb_u5",
+      outcome_var    = "csb_public",
+      num_desc       = "Sought public sector care (incl. CHW)",
+      denom_desc     = denom
+    ),
+    list(
+      indicator      = "CSB_PUBLIC_NOCHW",
+      indicator_code = "csb_pub_nochw",
+      indicator_title = "Public sector excl. CHW care seeking among under 5 with fever",
+      denom_code     = "feb_u5",
+      outcome_var    = "csb_public_nochw",
+      num_desc       = "Sought public sector care (excl. CHW)",
+      denom_desc     = denom
+    ),
+    list(
+      indicator      = "CSB_CHW",
+      indicator_code = "csb_chw",
+      indicator_title = "CHW care seeking among under 5 with fever",
+      denom_code     = "feb_u5",
+      outcome_var    = "csb_chw",
+      num_desc       = "Sought CHW care",
+      denom_desc     = denom
+    ),
+    list(
+      indicator      = "CSB_PRIVATE",
+      indicator_code = "csb_private",
+      indicator_title = "Private sector care seeking among under 5 with fever",
+      denom_code     = "feb_u5",
+      outcome_var    = "csb_private",
+      num_desc       = "Sought any private sector care",
+      denom_desc     = denom
+    ),
+    list(
+      indicator      = "CSB_PRIVATE_FORMAL",
+      indicator_code = "csb_priv_formal",
+      indicator_title = "Private formal care seeking among under 5 with fever",
+      denom_code     = "feb_u5",
+      outcome_var    = "csb_private_formal_ind",
+      num_desc       = "Sought private formal sector care",
+      denom_desc     = denom
+    ),
+    list(
+      indicator      = "CSB_PHARMACY",
+      indicator_code = "csb_pharmacy",
+      indicator_title = "Pharmacy care seeking among under 5 with fever",
+      denom_code     = "feb_u5",
+      outcome_var    = "csb_pharmacy",
+      num_desc       = "Sought pharmacy care",
+      denom_desc     = denom
+    ),
+    list(
+      indicator      = "CSB_PRIVATE_INFORMAL",
+      indicator_code = "csb_priv_informal",
+      indicator_title = "Private informal care seeking among under 5 with fever",
+      denom_code     = "feb_u5",
+      outcome_var    = "csb_private_informal",
+      num_desc       = "Sought private informal sector care",
+      denom_desc     = denom
+    ),
+    list(
+      indicator      = "CSB_PRIVATE_FORMAL_PHA",
+      indicator_code = "csb_priv_form_pha",
+      indicator_title = "Private formal or pharmacy care seeking among under 5 with fever",
+      denom_code     = "feb_u5",
+      outcome_var    = "csb_private_formal_pha",
+      num_desc       = "Sought private formal or pharmacy care",
+      denom_desc     = denom
+    ),
+    list(
+      indicator      = "CSB_TRAINED",
+      indicator_code = "csb_trained",
+      indicator_title = "Trained provider care seeking among under 5 with fever",
+      denom_code     = "feb_u5",
+      outcome_var    = "csb_trained_provider",
+      num_desc       = "Sought care from trained provider",
+      denom_desc     = denom
+    )
+  )
+}
 
-  # Extract country code
-  if ("v000" %in% names(dhs_kr)) {
-    metadata$country_code <- unique(dhs_kr$v000)[1]
-  } else if ("country_code" %in% names(dhs_kr)) {
-    metadata$country_code <- unique(dhs_kr$country_code)[1]
-  } else {
-    metadata$country_code <- NA_character_
+
+#' CSB WMR Indicator Dictionary
+#'
+#' Returns the full dictionary of WMR CSB indicators with metadata.
+#' Each indicator measures the proportion of febrile U5 children seeking
+#' care from a specific source type.
+#'
+#' @return Tibble with columns: indicator, indicator_code, indicator_title,
+#'   numerator_description, denominator_description, denominator_code.
+#'
+#' @examples
+#' csb_wmr_dictionary()
+#'
+#' @export
+csb_wmr_dictionary <- function() {
+  conds <- .csb_wmr_conditions()
+  tibble::tibble(
+    indicator               = vapply(conds, `[[`, character(1), "indicator"),
+    indicator_code          = vapply(conds, `[[`, character(1), "indicator_code"),
+    indicator_title         = vapply(conds, `[[`, character(1), "indicator_title"),
+    numerator_description   = vapply(conds, `[[`, character(1), "num_desc"),
+    denominator_description = vapply(conds, `[[`, character(1), "denom_desc"),
+    denominator_code        = vapply(conds, `[[`, character(1), "denom_code")
+  )
+}
+
+
+#' Compute a single CSB WMR indicator (national + optional regional)
+#'
+#' Same pattern as `.compute_wmr_indicator()` from ACT, but the outcome
+#' variable is specified by name instead of always being `has_act`.
+#'
+#' @param data Prepared febrile U5 dataset with CSB columns.
+#' @param condition List with indicator metadata and outcome_var.
+#' @param group_var Optional grouping variable for regional estimates.
+#' @param subnational_level Character admin level (e.g., "adm1").
+#' @param ci_method CI method for svyciprop. Default: "logit".
+#'
+#' @return Tibble with columns: level, location, point, ci_l, ci_u,
+#'   counts, denominator, indicator, indicator_code, etc.
+#' @noRd
+.compute_csb_indicator <- function(data, condition, group_var = NULL,
+                                    subnational_level = NULL,
+                                    ci_method = "logit") {
+
+  outcome_var <- condition$outcome_var
+
+  # Check outcome variable exists
+
+  if (!outcome_var %in% names(data)) {
+    return(tibble::tibble())
   }
 
-  # Extract survey year
-  if ("v007" %in% names(dhs_kr)) {
-    metadata$survey_year <- unique(dhs_kr$v007)[1]
-  } else if ("survey_year" %in% names(dhs_kr)) {
-    metadata$survey_year <- unique(dhs_kr$survey_year)[1]
-  } else {
-    metadata$survey_year <- NA_integer_
+  # All febrile U5 are the denominator (no filter needed for CSB)
+  filtered <- data
+  n_denom <- nrow(filtered)
+
+  if (n_denom == 0) {
+    return(tibble::tibble())
   }
 
-  # Extract survey ID
-  if ("survey_id" %in% names(dhs_kr)) {
-    metadata$survey_id <- unique(dhs_kr$survey_id)[1]
-  } else if ("v000" %in% names(dhs_kr)) {
-    metadata$survey_id <- unique(dhs_kr$v000)[1]
+  # Temporarily set has_act = outcome column for survey estimation
+  filtered$has_act <- filtered[[outcome_var]]
+
+  # Drop rows where outcome is NA
+  filtered <- filtered[!is.na(filtered$has_act), ]
+  n_denom <- nrow(filtered)
+  if (n_denom == 0) return(tibble::tibble())
+
+  # Weighted counts (matches WMR format: numerator/denominator ≈ point)
+  n_denom_w <- round(sum(filtered$survey_weight, na.rm = TRUE))
+  n_numer_w <- round(sum(
+    filtered$survey_weight * (filtered$has_act == 1), na.rm = TRUE
+  ))
+
+  # --- Survey design ---
+  use_strata <- dplyr::n_distinct(filtered$stratum_id) > 1
+
+  svy <- if (use_strata) {
+    survey::svydesign(
+      ids = ~cluster_id, strata = ~stratum_id,
+      weights = ~survey_weight, data = filtered, nest = TRUE
+    )
   } else {
-    metadata$survey_id <- NA_character_
-  }
-
-  metadata$survey_type <- "DHS"
-  metadata$file_type <- "KR"
-
-  metadata$total_records <- nrow(dhs_kr)
-
-  # Count clusters
-  cluster_var <- if (!is.null(survey_vars$cluster)) {
-    survey_vars$cluster
-  } else {
-    "v021"
-  }
-
-  if (cluster_var %in% names(dhs_kr)) {
-    metadata$total_clusters <- length(
-      unique(dhs_kr[[cluster_var]])
+    survey::svydesign(
+      ids = ~cluster_id, weights = ~survey_weight,
+      data = filtered, nest = TRUE
     )
   }
 
-  # Count children with fever
-  fever_var <- if (!is.null(survey_vars$fever)) {
-    survey_vars$fever
-  } else {
-    "h22"
+  # --- National estimate ---
+  national <- tryCatch({
+    est <- survey::svyciprop(~has_act, svy, method = ci_method, na.rm = TRUE)
+    ci  <- stats::confint(est)
+    tibble::tibble(
+      level       = "adm0",
+      location    = "National",
+      point       = as.numeric(est),
+      ci_l        = ci[1],
+      ci_u        = ci[2],
+      numerator   = n_numer_w,
+      denominator = n_denom_w
+    )
+  }, error = function(e) {
+    tibble::tibble(
+      level = "adm0", location = "National", point = NA_real_,
+      ci_l = NA_real_, ci_u = NA_real_, numerator = n_numer_w,
+      denominator = n_denom_w
+    )
+  })
+
+  # --- Regional estimates ---
+  regional <- tibble::tibble()
+  sub_level <- subnational_level %||% "adm1"
+
+  if (!is.null(group_var) && group_var %in% names(filtered)) {
+    group_formula <- stats::as.formula(paste("~", group_var))
+
+    regional <- tryCatch({
+      by_result <- survey::svyby(
+        ~has_act, by = group_formula, design = svy,
+        FUN = survey::svyciprop, vartype = "ci",
+        method = ci_method, na.rm = TRUE, keep.names = FALSE
+      ) |> tibble::as_tibble()
+
+      # Weighted numerator per group
+      region_num <- filtered |>
+        dplyr::group_by(.data[[group_var]]) |>
+        dplyr::summarise(
+          numerator = round(sum(
+            survey_weight * (has_act == 1), na.rm = TRUE
+          )),
+          .groups = "drop"
+        )
+
+      # Weighted denominator per group
+      region_denom <- filtered |>
+        dplyr::group_by(.data[[group_var]]) |>
+        dplyr::summarise(
+          denominator = round(sum(survey_weight, na.rm = TRUE)),
+          .groups = "drop"
+        )
+
+      names(by_result)[names(by_result) == "ci_l"] <- "ci_l.has_act"
+      names(by_result)[names(by_result) == "ci_u"] <- "ci_u.has_act"
+
+      by_result |>
+        dplyr::rename(
+          location = !!group_var,
+          point    = has_act,
+          ci_l     = `ci_l.has_act`,
+          ci_u     = `ci_u.has_act`
+        ) |>
+        dplyr::mutate(location = as.character(location)) |>
+        dplyr::left_join(
+          region_num |>
+            dplyr::mutate(location = as.character(.data[[group_var]])) |>
+            dplyr::select(location, numerator),
+          by = "location"
+        ) |>
+        dplyr::left_join(
+          region_denom |>
+            dplyr::mutate(location = as.character(.data[[group_var]])) |>
+            dplyr::select(location, denominator),
+          by = "location"
+        ) |>
+        dplyr::mutate(level = sub_level) |>
+        dplyr::select(level, location, point, ci_l, ci_u, numerator, denominator)
+
+    }, error = function(e) {
+      tibble::tibble()
+    })
   }
 
-  if (fever_var %in% names(dhs_kr)) {
-    age_var <- if (!is.null(survey_vars$age)) {
-      survey_vars$age
-    } else {
-      "hw1"
-    }
-
-    if (age_var %in% names(dhs_kr)) {
-      eligible <- dhs_kr[[age_var]] >= 0 & dhs_kr[[age_var]] <= 59
-      metadata$total_eligible_children <- sum(eligible, na.rm = TRUE)
-      metadata$total_fever_cases <- sum(
-        eligible & dhs_kr[[fever_var]] == 1,
-        na.rm = TRUE
-      )
-    } else {
-      metadata$total_fever_cases <- sum(
-        dhs_kr[[fever_var]] == 1,
-        na.rm = TRUE
-      )
-    }
-  }
-
-  metadata$processed_date <- Sys.Date()
-  metadata$processed_time <- Sys.time()
-
-  metadata$analysis_type <- "CSB (Care-Seeking Behavior)"
-  metadata$methodology <- "WHO World Malaria Report (WMR)"
-  metadata$age_group <- "0-59 months"
-  metadata$condition <- "Fever in last 2 weeks"
-
-  # Detect available h32 source variables
-  # Pattern includes digits for DHS-8 NGO sector variables (h32na, h32nb, etc.)
-  available_h32 <- grep("^h32[a-z0-9]+$", names(dhs_kr), value = TRUE)
-  metadata$h32_sources_detected <- available_h32
-  metadata$n_h32_sources <- length(available_h32)
-
-  # Check if alive variable is available
-  metadata$has_alive_var <- !is.null(survey_vars$alive) &&
-    survey_vars$alive %in% names(dhs_kr)
-
-  metadata$variable_mapping <- survey_vars
-
-  metadata
+  # --- Combine ---
+  dplyr::bind_rows(national, regional) |>
+    dplyr::mutate(
+      indicator               = condition$indicator_title,
+      indicator_code          = condition$indicator_code,
+      numerator_description   = condition$num_desc,
+      denominator_description = condition$denom_desc,
+      denominator_code        = condition$denom_code
+    )
 }
+
 
 #' Calculate Care-Seeking Behavior from DHS Data (WMR Methodology)
 #'
@@ -1054,14 +888,9 @@ calc_csb_dhs <- function(
   admin_level = NULL,
   join_nearest = TRUE
 ) {
-  # Extract metadata
-  metadata <- extract_dhs_metadata_csb(
-    dhs_kr = dhs_kr,
-    survey_vars = survey_vars
-  )
-
-  # Calculate CSB using core function
-  csb_data <- calc_csb_dhs_core(
+  # calc_csb_dhs is now a thin wrapper around calc_csb_dhs_core
+  # which returns the same named list structure as calc_act_dhs
+  calc_csb_dhs_core(
     dhs_kr = dhs_kr,
     survey_vars = survey_vars,
     csb_classification = csb_classification,
@@ -1072,40 +901,6 @@ calc_csb_dhs <- function(
     shapefile = shapefile,
     admin_level = admin_level,
     join_nearest = join_nearest
-  )
-
-  labels <- tibble::tribble(
-    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~dhs_recode, ~indicator_category, ~wmr_cascade_step, ~age_group, ~units, ~notes,
-    "dhs_csb_any", "Any care-seeking", "Recherche de soins (tout type)", "h32 series", "Febrile children who sought care", "Febrile children under 5", "h32*", "h22", "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Step 1 of WMR cascade; any + none = 1",
-    "dhs_csb_any_low", "Any care-seeking - lower 95% CI", "Recherche de soins - IC 95% inferieur", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_csb_any_upp", "Any care-seeking - upper 95% CI", "Recherche de soins - IC 95% superieur", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_csb_public", "Public sector care-seeking", "Recherche de soins au secteur public", "h32a-i, h32na-ne", "Febrile children seeking public care", "Febrile children under 5", "h32a-i", "h22", "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Step 1 of WMR cascade; includes CHW; overlapping with private",
-    "dhs_csb_public_low", "Public CSB - lower 95% CI", "CSB public - IC 95% inferieur", "h32a-i", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_csb_public_upp", "Public CSB - upper 95% CI", "CSB public - IC 95% superieur", "h32a-i", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_csb_private", "Private sector care-seeking", "Recherche de soins au secteur prive", "h32j-u", "Febrile children seeking private care", "Febrile children under 5", "h32j-u", "h22", "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Step 1 of WMR cascade; formal + informal + pharmacy; overlapping with public",
-    "dhs_csb_private_low", "Private CSB - lower 95% CI", "CSB prive - IC 95% inferieur", "h32j-u", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_csb_private_upp", "Private CSB - upper 95% CI", "CSB prive - IC 95% superieur", "h32j-u", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_csb_trained", "Trained provider care-seeking", "Recherche de soins aupres d'un prestataire forme", "h32 series", "Febrile children seeking trained provider", "Febrile children under 5", "h32*", "h22", "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Step 1 of WMR cascade; public + private formal + pharmacy",
-    "dhs_csb_trained_low", "Trained provider CSB - lower 95% CI", "CSB prestataire forme - IC 95% inferieur", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_csb_trained_upp", "Trained provider CSB - upper 95% CI", "CSB prestataire forme - IC 95% superieur", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_csb_none", "No care-seeking", "Pas de recherche de soins", "h32 series", "Febrile children who did not seek care", "Febrile children under 5", "1-any(h32*)", "h22", "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Step 1 of WMR cascade; complement of dhs_csb_any",
-    "dhs_csb_none_low", "No care-seeking - lower 95% CI", "Pas de soins - IC 95% inferieur", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_csb_none_upp", "No care-seeking - upper 95% CI", "Pas de soins - IC 95% superieur", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 1L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_n_fever", "Number of febrile children (denominator)", "Nombre d'enfants febriles (denominateur)", "h22", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", NA_integer_, "0-59 months", "count", "Unweighted count",
-    "dhs_n_public", "Number seeking public care", "Nombre recherchant des soins publics", "h32a-i", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", NA_integer_, "0-59 months", "count", "Unweighted count",
-    "dhs_n_private", "Number seeking private care", "Nombre recherchant des soins prives", "h32j-u", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", NA_integer_, "0-59 months", "count", "Unweighted count",
-    "dhs_n_trained", "Number seeking trained provider", "Nombre consultant un prestataire forme", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", NA_integer_, "0-59 months", "count", "Unweighted count",
-    "dhs_n_none", "Number not seeking care", "Nombre ne recherchant pas de soins", "h32 series", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", NA_integer_, "0-59 months", "count", "Unweighted count"
-  )
-
-  dict <- sntutils::build_dictionary(csb_data)
-  dict <- .enrich_dhs_dictionary(dict, labels)
-
-  # Return list with data, dictionary, and metadata
-  list(
-    data = csb_data,
-    dict = dict,
-    metadata = metadata
   )
 }
 

@@ -239,3 +239,139 @@
       csb_trained = as.numeric(csb_public == 1 | csb_private_formal_pha == 1)
     )
 }
+
+
+#' Detect CSB classification from haven variable labels
+#'
+#' Scans h32 variables for haven labels and classifies each into a CSB
+#' category (public, chw, private_formal, pharmacy, private_informal)
+#' based on label content. This is the same approach used for ACT detection
+#' in `.detect_act_vars()` — label-based, not slot-based.
+#'
+#' DHS variable slots change between survey versions (DHS-7 vs DHS-8), so
+#' hardcoded slot-to-category mappings break. Label detection works across
+#' all versions.
+#'
+#' @param dhs_kr Original DHS dataset with haven labels intact (pre-zap).
+#' @param fallback_classification Data frame with variable and csb columns.
+#'   Used as fallback for variables whose labels don't match any pattern.
+#'   If NULL, uses `.default_csb_classification()`.
+#'
+#' @return Data frame with columns: variable, csb — one row per classified
+#'   h32 variable found in the data. Excludes meta variables (h32y, h32z)
+#'   and unclassified/NA-prefix variables.
+#' @noRd
+.detect_csb_from_labels <- function(dhs_kr,
+                                     fallback_classification = NULL) {
+
+  available_h32 <- grep("^h32[a-z0-9]+$", names(dhs_kr), value = TRUE)
+  if (length(available_h32) == 0) return(data.frame(
+    variable = character(0), csb = character(0), stringsAsFactors = FALSE
+  ))
+
+  # Exclude meta variables (no treatment / medical treatment flags)
+  meta_vars <- c("h32y", "h32z")
+  available_h32 <- setdiff(available_h32, meta_vars)
+
+  if (is.null(fallback_classification)) {
+    fallback_classification <- .default_csb_classification()
+  }
+
+  # Label patterns — ordered from most specific to most general.
+  # Same philosophy as .detect_act_vars(): scan haven labels, not slot letters.
+  #
+  # CHW / community health worker / fieldworker
+  chw_pattern <- paste0(
+    "community.?health.?worker|\\bchw\\b|field.?worker|",
+    "community.oriented.resource|",
+    "agent.communautaire|relais.communautaire"
+  )
+  # Pharmacy / drug shop / chemist / PPMV
+  pharm_pattern <- paste0(
+    "\\bpharmac|drug.?shop|drug.?store|\\bchemist|\\bppmv\\b|",
+    "patent.medicine"
+  )
+  # NGO sector (treated as public for WMR)
+  ngo_pattern <- "\\bngo\\b|non.governmental|faith.based"
+  # Public sector (government / dispensary / health center / gov mobile clinic)
+  public_pattern <- paste0(
+    "government|\\bgov\\b|public.sector|other.public|dispensar|",
+    "health.center|health.centre|health.post|\\bmch\\b"
+  )
+  # Private formal (hospital / clinic / doctor / private mobile)
+  priv_formal_pattern <- paste0(
+    "private.hospital|private.clinic|private.doctor|",
+    "private.mobile|other.private"
+  )
+  # Private informal (shop / market / traditional / itinerant / drug seller)
+  priv_informal_pattern <- paste0(
+    "\\bshop\\b|\\bmarket\\b|traditional|\\bitinerant\\b|",
+    "drug.seller"
+  )
+
+  result <- data.frame(
+    variable = character(0), csb = character(0),
+    stringsAsFactors = FALSE
+  )
+
+  for (v in available_h32) {
+    lbl <- attr(dhs_kr[[v]], "label")
+
+    # Skip NA-prefixed labels (unused DHS country-specific slots)
+    if (!is.null(lbl) && is.character(lbl) && length(lbl) == 1 &&
+        grepl("^NA\\s*-", lbl)) {
+      next
+    }
+
+    csb_cat <- NA_character_
+
+    if (!is.null(lbl) && is.character(lbl) && length(lbl) == 1) {
+      # Match most specific first
+      if (grepl(chw_pattern, lbl, ignore.case = TRUE)) {
+        csb_cat <- "chw"
+      } else if (grepl(pharm_pattern, lbl, ignore.case = TRUE)) {
+        csb_cat <- "pharmacy"
+      } else if (grepl(ngo_pattern, lbl, ignore.case = TRUE)) {
+        # NGO treated as public sector for WMR purposes
+        csb_cat <- "public"
+      } else if (grepl(public_pattern, lbl, ignore.case = TRUE)) {
+        csb_cat <- "public"
+      } else if (grepl(priv_formal_pattern, lbl, ignore.case = TRUE)) {
+        csb_cat <- "private_formal"
+      } else if (grepl(priv_informal_pattern, lbl, ignore.case = TRUE,
+                        perl = TRUE)) {
+        csb_cat <- "private_informal"
+      }
+    }
+
+    # Fallback to hardcoded classification if label didn't match
+    if (is.na(csb_cat)) {
+      fb_row <- fallback_classification[
+        fallback_classification$variable == v, , drop = FALSE
+      ]
+      if (nrow(fb_row) == 1) {
+        csb_cat <- fb_row$csb
+      }
+    }
+
+    # Skip if still unclassified (unusual variables like h32x "other")
+    if (is.na(csb_cat)) next
+
+    result <- rbind(result, data.frame(
+      variable = v, csb = csb_cat, stringsAsFactors = FALSE
+    ))
+  }
+
+  if (nrow(result) > 0) {
+    # Log the classification
+    cats <- table(result$csb)
+    cat_str <- paste(
+      names(cats), cats, sep = ": ", collapse = ", "
+    )
+    cli::cli_alert_info(
+      "CSB classification from labels ({nrow(result)} vars): {cat_str}"
+    )
+  }
+
+  result
+}

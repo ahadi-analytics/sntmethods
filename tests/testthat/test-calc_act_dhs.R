@@ -51,7 +51,7 @@ test_that("calc_act_dhs returns named list with adm0 tab from h37e fallback", {
   expected_cols <- c(
     "survey_id", "iso3", "iso2", "survey_type",
     "survey_year", "adm0", "type", "geo_source",
-    "point", "ci_l", "ci_u", "counts", "denominator",
+    "point", "ci_l", "ci_u", "numerator", "denominator",
     "indicator", "indicator_code",
     "numerator_description",
     "denominator_description", "denominator_code"
@@ -70,17 +70,17 @@ test_that("calc_act_dhs returns named list with adm0 tab from h37e fallback", {
   # ACT_ANTIMALARIAL should have non-zero estimate
   act_am <- adm0[adm0$indicator_code == "act_antimal", ]
   expect_true(nrow(act_am) == 1)
-  expect_equal(act_am$indicator, "Act Antimalarial")
+  expect_equal(act_am$indicator, "Use of ACTs among antimalarial recipients")
   expect_true(act_am$point > 0,
     label = "ACT_ANTIMALARIAL point should be > 0 from h37e fallback")
-  expect_true(act_am$counts > 0)
+  expect_true(act_am$numerator > 0)
 
   # counts = numerator, denominator = condition-filtered subgroup
-  expect_true(act_am$counts <= act_am$denominator,
+  expect_true(act_am$numerator <= act_am$denominator,
     label = "counts (numerator) should be <= denominator")
   expect_true(act_am$denominator > 0)
   # All indicators should satisfy counts <= denominator
-  expect_true(all(adm0$counts <= adm0$denominator, na.rm = TRUE))
+  expect_true(all(adm0$numerator <= adm0$denominator, na.rm = TRUE))
 })
 
 
@@ -119,7 +119,7 @@ test_that("calc_act_dhs works with plain ml13e data", {
   act_am <- adm0[adm0$indicator_code == "act_antimal", ]
   expect_true(nrow(act_am) == 1)
   expect_true(act_am$point > 0)
-  expect_true(act_am$counts > 0)
+  expect_true(act_am$numerator > 0)
 })
 
 
@@ -402,16 +402,18 @@ test_that("calc_act_dhs excludes artemisinin monotherapies from composite ACT", 
 })
 
 
-test_that("act_wmr_dictionary returns all 10 indicators", {
+test_that("act_wmr_dictionary returns all 11 indicators with titles", {
   dict <- act_wmr_dictionary()
   expect_s3_class(dict, "tbl_df")
-  expect_equal(nrow(dict), 10)
+  expect_equal(nrow(dict), 11)
   expect_true(all(
-    c("indicator", "indicator_code",
+    c("indicator", "indicator_code", "indicator_title",
       "numerator_description",
       "denominator_description",
       "denominator_code") %in% names(dict)
   ))
+  # All titles should contain "ACTs"
+  expect_true(all(grepl("ACTs", dict$indicator_title)))
 })
 
 
@@ -443,8 +445,8 @@ test_that("calc_act_dhs indicators parameter filters correctly", {
   result <- calc_act_dhs(kr_data, indicators = "ACT_ANTIMALARIAL")
 
   adm0 <- result$adm0
-  # Should only have Act Antimalarial
-  expect_equal(unique(adm0$indicator), "Act Antimalarial")
+  # Should only have ACT_ANTIMALARIAL
+  expect_equal(unique(adm0$indicator), "Use of ACTs among antimalarial recipients")
   expect_equal(unique(adm0$indicator_code), "act_antimal")
   expect_equal(nrow(adm0), 1)  # national only
 })

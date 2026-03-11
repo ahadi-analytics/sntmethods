@@ -72,7 +72,7 @@
 #'     \item `geo_source`: Source of admin names ("survey" or "gps")
 #'     \item `point`: Survey-weighted proportion (0-1 scale)
 #'     \item `ci_l`, `ci_u`: Lower and upper 95\% CI bounds
-#'     \item `counts`: Unweighted numerator count
+#'     \item `numerator`: Unweighted numerator count
 #'       (has_act == 1 in filtered subgroup)
 #'     \item `denominator`: Unweighted denominator count
 #'       (condition-filtered subgroup size)
@@ -258,7 +258,7 @@ calc_act_dhs <- function(
     attr(kr_fever, "act_var_used") %||% (survey_vars$act %||% "ml13e")
 
   cli::cli_alert_success(
-    "Febrile U5: {format(nrow(kr_fever), big.mark = ',')} children"
+    "Under 5 with fever: {format(nrow(kr_fever), big.mark = ',')} children"
   )
 
   # ---- 4. Add antimalarial composite ----
@@ -267,7 +267,10 @@ calc_act_dhs <- function(
   # from labels, excluding non-drug responses (don't know, other, etc.), then
   # build composite directly from kr_fever's own columns.
 
-  am_exclude <- "don.t know|\\bdk\\b|\\bother\\b|\\bnone\\b|\\bno \\b|\\bmissing\\b"
+  am_exclude <- paste0(
+    "don.t know|\\bdk\\b|\\bother\\b",
+    "|\\bnone\\b|\\bno \\b|\\bmissing\\b"
+  )
 
   if (length(raw_am_vars) > 0) {
     # Gold standard path: antimalarial vars detected from dhs_kr_raw labels
@@ -301,12 +304,14 @@ calc_act_dhs <- function(
       ml13_slots <- grep("^ml13[a-h]$", names(kr_fever), value = TRUE)
       h37_slots  <- grep("^h37[a-h]$", names(kr_fever), value = TRUE)
 
-      ml13_has_pos <- length(ml13_slots) > 0 && any(sapply(ml13_slots, function(v) {
-        any(kr_fever[[v]] == 1, na.rm = TRUE)
-      }))
-      h37_has_pos <- length(h37_slots) > 0 && any(sapply(h37_slots, function(v) {
-        any(kr_fever[[v]] == 1, na.rm = TRUE)
-      }))
+      ml13_has_pos <- length(ml13_slots) > 0 &&
+        any(sapply(ml13_slots, function(v) {
+          any(kr_fever[[v]] == 1, na.rm = TRUE)
+        }))
+      h37_has_pos <- length(h37_slots) > 0 &&
+        any(sapply(h37_slots, function(v) {
+          any(kr_fever[[v]] == 1, na.rm = TRUE)
+        }))
 
       if (ml13_has_pos) {
         antimalarial_vars <- ml13_slots
@@ -334,7 +339,9 @@ calc_act_dhs <- function(
     })
     n_am <- sum(kr_fever$received_antimalarial == 1, na.rm = TRUE)
     cli::cli_alert_info(
-      "Antimalarial composite ({length(am_cols)} vars: {paste(am_cols, collapse = ', ')}): {n_am}/{nrow(kr_fever)}"
+      "Antimalarial composite ({length(am_cols)} vars: \
+      {paste(am_cols, collapse = ', ')}): \
+      {n_am}/{nrow(kr_fever)}"
     )
   } else {
     cli::cli_alert_warning("No antimalarial variables found")
@@ -343,8 +350,13 @@ calc_act_dhs <- function(
 
   # ---- 5. Add care-seeking behaviour (CSB) indicators ----
 
+  # Detect CSB classification from haven labels (same approach as ACT detection)
+  # Uses original dhs_kr (pre-zap) for label access; kr_fever has been zapped
+  label_source <- dhs_kr_raw %||% dhs_kr
+  csb_class <- .detect_csb_from_labels(label_source)
+
   kr_fever_csb <- tryCatch(
-    .classify_csb_from_h32(kr_fever),
+    .classify_csb_from_h32(kr_fever, csb_classification = csb_class),
     error = function(e) {
       cli::cli_alert_warning("CSB classification failed: {e$message}")
       NULL
@@ -372,9 +384,16 @@ calc_act_dhs <- function(
   group_var <- NULL
   subnational_level <- NULL
 
-  # Fallback: admin_level requested without GPS data → use v024
-  if (is.null(region_var) && !is.null(admin_level) &&
-      (is.null(gps_data) || is.null(shapefile))) {
+  # Auto-fallback to v024 when no spatial parameters provided
+  if (is.null(region_var) && is.null(gps_data) && is.null(shapefile)) {
+    if ("v024" %in% names(dhs_kr)) {
+      region_var <- "v024"
+      cli::cli_alert_info(
+        "No region_var/GPS/shapefile specified; defaulting to {.var v024} for adm1"
+      )
+    }
+  } else if (is.null(region_var) && !is.null(admin_level) &&
+             (is.null(gps_data) || is.null(shapefile))) {
     cli::cli_alert_warning(
       "{.var admin_level} = {.val {admin_level}} \\
       requested but {.var gps_data}/{.var shapefile} \\
@@ -390,26 +409,25 @@ calc_act_dhs <- function(
     }
   }
 
+  # admin_hierarchy: list of list(group_var, level_name) for each admin level
+  admin_hierarchy <- list()
+
   if (!is.null(region_var)) {
     # Get human-readable labels from haven; fall back to kr_fever's own values
-    # kr_fever already has region_var from .prepare_act_data (all cols preserved)
     region_values <- tryCatch({
-      # Try haven labels from original dhs_kr, indexed to febrile rows
       lbls <- as.character(haven::as_factor(dhs_kr[[region_var]]))
-      # Match to kr_fever rows via the zapped numeric values
       raw_vals <- as.vector(haven::zap_labels(dhs_kr[[region_var]]))
       febrile_raw <- kr_fever[[region_var]]
-      # Build lookup from raw value → label
       lookup <- stats::setNames(lbls, raw_vals)
       unname(lookup[as.character(febrile_raw)])
     }, error = function(e) {
       as.character(kr_fever[[region_var]])
     })
 
-    kr_fever$region <- region_values
+    kr_fever$region <- toupper(region_values)
+    admin_hierarchy <- list(list(group_var = "region", level_name = "adm1"))
+    geo_src <- "survey"
 
-    group_var <- "region"
-    subnational_level <- "adm1"
     cli::cli_alert_info(
       "Grouping by {.var {region_var}}: \\
       {paste(unique(kr_fever$region), collapse = ', ')}"
@@ -424,9 +442,15 @@ calc_act_dhs <- function(
       admin_level = admin_level,
       join_nearest = join_nearest
     )
-    group_var <- attr(kr_fever, "group_var")
-    subnational_level <- attr(kr_fever, "admin_level_label") %||%
-      if (!is.null(admin_level)) admin_level[1] else "adm1"
+    geo_src <- "gps"
+
+    # Build hierarchy from all admin levels attached by spatial join
+    admin_lvls <- attr(kr_fever, "admin_levels") %||% character(0)
+    for (lvl in admin_lvls) {
+      admin_hierarchy <- c(admin_hierarchy, list(
+        list(group_var = lvl, level_name = lvl)
+      ))
+    }
   }
 
   # ---- 7. Get indicator dictionary and filter ----
@@ -450,46 +474,13 @@ calc_act_dhs <- function(
     cli::cli_abort("No valid indicators to compute.")
   }
 
-  # ---- 8. Compute each indicator ----
+  # ---- 8. Compute each indicator (national + each admin level) ----
 
   options(survey.lonely.psu = "adjust")
 
-  results <- purrr::map_dfr(dict, function(cond) {
-    .compute_wmr_indicator(
-      data              = kr_fever,
-      condition         = cond,
-      group_var         = group_var,
-      subnational_level = subnational_level,
-      ci_method         = ci_method
-    )
-  })
-
-  # ---- 9. Add febrile RDT indicators if PR provided ----
-
-  if (!is.null(dhs_pr)) {
-    rdt_results <- .compute_rdt_indicators(
-      kr_fever          = kr_fever,
-      dhs_pr            = dhs_pr,
-      group_var         = group_var,
-      subnational_level = subnational_level,
-      ci_method         = ci_method
-    )
-    if (nrow(rdt_results) > 0) {
-      results <- dplyr::bind_rows(results, rdt_results)
-    }
+  if (!exists("geo_src")) {
+    geo_src <- if (!is.null(gps_data) && !is.null(shapefile)) "gps" else "survey"
   }
-
-  # ---- 10. Format and return as named list ----
-
-  # Round proportions, clamp CIs
-  results <- results |>
-    dplyr::mutate(
-      point  = round(point, 3),
-      ci_l   = round(pmax(ci_l, 0, na.rm = TRUE), 3),
-      ci_u   = round(pmin(ci_u, 1, na.rm = TRUE), 3),
-      counts      = as.integer(counts),
-      denominator = as.integer(denominator)
-    )
 
   # Common metadata columns
   meta_cols <- tibble::tibble(
@@ -501,39 +492,120 @@ calc_act_dhs <- function(
     adm0        = survey_meta$country_upper
   )
 
-  # Determine geo_source once
-  geo_src <- if (!is.null(gps_data) && !is.null(shapefile)) "gps" else "survey"
+  .round_results <- function(tbl) {
+    tbl |>
+      dplyr::mutate(
+        point  = round(point, 3),
+        ci_l   = round(pmax(ci_l, 0, na.rm = TRUE), 3),
+        ci_u   = round(pmin(ci_u, 1, na.rm = TRUE), 3),
+        numerator   = as.integer(numerator),
+        denominator = as.integer(denominator)
+      )
+  }
 
-  # --- adm0 tab (national) ---
-  national_rows <- results |>
-    dplyr::filter(level == "adm0") |>
-    dplyr::select(-level, -location)
+  # --- adm0 (national, no group_var) ---
+  national_results <- purrr::map_dfr(dict, function(cond) {
+    .compute_wmr_indicator(
+      data      = kr_fever,
+      condition = cond,
+      group_var = NULL,
+      ci_method = ci_method
+    )
+  })
+
+  # ---- 9. Add febrile RDT indicators if PR provided ----
+
+  if (!is.null(dhs_pr)) {
+    rdt_results <- .compute_rdt_indicators(
+      kr_fever  = kr_fever,
+      dhs_pr    = dhs_pr,
+      group_var = NULL,
+      ci_method = ci_method
+    )
+    if (nrow(rdt_results) > 0) {
+      national_results <- dplyr::bind_rows(national_results, rdt_results)
+    }
+  }
+
+  national_results <- .round_results(national_results)
 
   adm0_tbl <- dplyr::bind_cols(
-    meta_cols[rep(1, nrow(national_rows)), ],
+    meta_cols[rep(1, nrow(national_results)), ],
     tibble::tibble(type = "survey_weighted", geo_source = geo_src),
-    national_rows
+    national_results |> dplyr::select(-level, -location)
   ) |>
     tibble::as_tibble()
 
   out <- list(adm0 = adm0_tbl)
 
-  # --- subnational tab(s) ---
-  regional_rows <- results |>
-    dplyr::filter(level != "adm0")
+  # --- subnational tabs (one per admin level) ---
+  # Collect all admin level names for parent-column lookups
+  all_level_names <- vapply(admin_hierarchy, `[[`, character(1), "level_name")
 
-  if (nrow(regional_rows) > 0) {
-    admin_col <- subnational_level %||% "adm1"
+  for (i in seq_along(admin_hierarchy)) {
+    ah <- admin_hierarchy[[i]]
+    grp <- ah$group_var
+    lvl_name <- ah$level_name
+
+    sub_results <- purrr::map_dfr(dict, function(cond) {
+      .compute_wmr_indicator(
+        data              = kr_fever,
+        condition         = cond,
+        group_var         = grp,
+        subnational_level = lvl_name,
+        ci_method         = ci_method
+      )
+    })
+
+    # RDT indicators at subnational level
+    if (!is.null(dhs_pr)) {
+      rdt_sub <- .compute_rdt_indicators(
+        kr_fever          = kr_fever,
+        dhs_pr            = dhs_pr,
+        group_var         = grp,
+        subnational_level = lvl_name,
+        ci_method         = ci_method
+      )
+      if (nrow(rdt_sub) > 0) {
+        sub_results <- dplyr::bind_rows(sub_results, rdt_sub)
+      }
+    }
+
+    # Filter to regional rows only (drop the national duplicate)
+    sub_results <- sub_results |>
+      dplyr::filter(level != "adm0")
+
+    if (nrow(sub_results) == 0) next
+
+    sub_results <- .round_results(sub_results)
+
+    # Add the current admin level column
+    sub_results <- sub_results |>
+      dplyr::mutate(!!lvl_name := toupper(location))
+
+    # Add parent admin columns (e.g., adm1 in the adm2 tab)
+    parent_levels <- all_level_names[seq_len(i - 1)]
+    parent_cols_in_data <- intersect(parent_levels, names(kr_fever))
+    if (length(parent_cols_in_data) > 0 && grp %in% names(kr_fever)) {
+      # Build lookup: current level value → parent level values
+      parent_lookup <- kr_fever |>
+        dplyr::select(dplyr::all_of(c(grp, parent_cols_in_data))) |>
+        dplyr::mutate(dplyr::across(dplyr::everything(), ~toupper(as.character(.)))) |>
+        dplyr::distinct()
+      sub_results <- sub_results |>
+        dplyr::left_join(parent_lookup, by = stats::setNames(grp, lvl_name))
+    }
+
+    # Select columns in proper order: parent admins, then current admin
+    admin_cols <- c(parent_cols_in_data, lvl_name)
+    admin_cols <- intersect(admin_cols, names(sub_results))
 
     sub_tbl <- dplyr::bind_cols(
-      meta_cols[rep(1, nrow(regional_rows)), ],
-      regional_rows |>
-        dplyr::mutate(
-          !!admin_col := toupper(location)
-        ) |>
+      meta_cols[rep(1, nrow(sub_results)), ],
+      sub_results |>
         dplyr::select(
-          dplyr::all_of(admin_col), point, ci_l, ci_u,
-          counts, denominator,
+          dplyr::all_of(admin_cols), point, ci_l, ci_u,
+          numerator, denominator,
           indicator, indicator_code,
           numerator_description,
           denominator_description, denominator_code
@@ -542,11 +614,11 @@ calc_act_dhs <- function(
       dplyr::mutate(
         type       = "survey_weighted",
         geo_source = geo_src,
-        .after     = dplyr::all_of(admin_col)
+        .after     = dplyr::all_of(lvl_name)
       ) |>
       tibble::as_tibble()
 
-    out[[admin_col]] <- sub_tbl
+    out[[lvl_name]] <- sub_tbl
   }
 
   out
@@ -564,7 +636,7 @@ calc_act_dhs <- function(
 #' ACT within a specific subpopulation.
 #'
 #' @return Tibble with columns: indicator,
-#'   indicator_code, numerator_description,
+#'   indicator_code, indicator_title, numerator_description,
 #'   denominator_description, denominator_code,
 #'   wmr_cascade_step, requires_csb, requires_am.
 #'
@@ -573,8 +645,10 @@ calc_act_dhs <- function(
 #'
 #' @export
 act_wmr_dictionary <- function() {
+  n <- 11L
   tibble::tibble(
     indicator = c(
+      "ACT_CARE_SEEKERS",
       "ACT_ANTIMALARIAL",
       "ACT_ANY_TREATMENT",
       "ACT_TRAINED_ANTIMALARIAL",
@@ -587,60 +661,76 @@ act_wmr_dictionary <- function() {
       "ACT_PRIVATE_FORMAL_PHA_ANTIMALARIAL"
     ),
     indicator_code = c(
+      "act_care_seek",
       "act_antimal", "act_any_tx",
       "act_trained", "act_pub",
       "act_pub_nochw", "act_chw",
       "act_priv_formal", "act_priv_pharm",
       "act_priv_informal", "act_priv_form_pha"
     ),
+    indicator_title = c(
+      "Use of ACTs among care seekers",
+      "Use of ACTs among antimalarial recipients",
+      "Use of ACTs among care seekers treated with antimalarial",
+      "Use of ACTs among trained provider + antimalarial",
+      "Use of ACTs among public sector + antimalarial",
+      "Use of ACTs among public sector excl. CHW + antimalarial",
+      "Use of ACTs among CHW + antimalarial",
+      "Use of ACTs among private formal + antimalarial",
+      "Use of ACTs among pharmacy + antimalarial",
+      "Use of ACTs among private informal + antimalarial",
+      "Use of ACTs among private formal or pharmacy + antimalarial"
+    ),
     numerator_description = rep(
-      "Received ACT treatment", 10L
+      "Received ACT treatment", n
     ),
     denominator_description = c(
-      "Febrile U5 who received any antimalarial",
+      "Under 5 with fever who sought any treatment (public or private)",
+      "Under 5 with fever who received any antimalarial",
       paste0(
-        "Febrile U5 who sought any treatment ",
+        "Under 5 with fever who sought any treatment ",
         "(public or private) and received ",
         "antimalarial"
       ),
       paste0(
-        "Febrile U5 who saw trained provider ",
+        "Under 5 with fever who saw trained provider ",
         "and received antimalarial"
       ),
       paste0(
-        "Febrile U5 who sought public sector ",
+        "Under 5 with fever who sought public sector ",
         "care (incl. CHW) and received ",
         "antimalarial"
       ),
       paste0(
-        "Febrile U5 who sought public sector ",
+        "Under 5 with fever who sought public sector ",
         "care (excl. CHW) and received ",
         "antimalarial"
       ),
       paste0(
-        "Febrile U5 who sought CHW care and ",
+        "Under 5 with fever who sought CHW care and ",
         "received antimalarial"
       ),
       paste0(
-        "Febrile U5 who sought private formal ",
+        "Under 5 with fever who sought private formal ",
         "sector care and received antimalarial"
       ),
       paste0(
-        "Febrile U5 who sought pharmacy care ",
+        "Under 5 with fever who sought pharmacy care ",
         "and received antimalarial"
       ),
       paste0(
-        "Febrile U5 who sought private ",
+        "Under 5 with fever who sought private ",
         "informal sector care and received ",
         "antimalarial"
       ),
       paste0(
-        "Febrile U5 who sought private formal ",
+        "Under 5 with fever who sought private formal ",
         "or pharmacy care and received ",
         "antimalarial"
       )
     ),
     denominator_code = c(
+      "feb_u5_any_tx",
       "feb_u5_am", "feb_u5_any_tx_am",
       "feb_u5_trained_am", "feb_u5_pub_am",
       "feb_u5_pub_nochw_am", "feb_u5_chw_am",
@@ -649,12 +739,14 @@ act_wmr_dictionary <- function() {
       "feb_u5_priv_informal_am",
       "feb_u5_priv_form_pha_am"
     ),
-    wmr_cascade_step = rep(4L, 10L),
+    wmr_cascade_step = c(3L, rep(4L, 10L)),
     requires_csb = c(
-      FALSE, TRUE, TRUE, TRUE, TRUE,
+      TRUE, FALSE, TRUE, TRUE, TRUE, TRUE,
       TRUE, TRUE, TRUE, TRUE, TRUE
     ),
-    requires_am = rep(TRUE, 10L)
+    requires_am = c(
+      FALSE, rep(TRUE, 10L)
+    )
   )
 }
 
@@ -674,143 +766,145 @@ act_wmr_dictionary <- function() {
 
   list(
     list(
+      indicator      = "ACT_CARE_SEEKERS",
+      indicator_code = "act_care_seek",
+      indicator_title = "Use of ACTs among care seekers",
+      denom_code     = "feb_u5_any_tx",
+      filter_expr    = quote(csb_any_treatment == 1),
+      num_desc       = num,
+      denom_desc     = "Under 5 with fever who sought any treatment (public or private)"
+    ),
+    list(
       indicator      = "ACT_ANTIMALARIAL",
       indicator_code = "act_antimal",
+      indicator_title = "Use of ACTs among antimalarial recipients",
       denom_code     = "feb_u5_am",
-      filter_expr    = quote(
-        received_antimalarial == 1
-      ),
-      num_desc   = num,
-      denom_desc = paste0(
-        "Febrile U5 who received any ",
-        "antimalarial"
-      )
+      filter_expr    = quote(received_antimalarial == 1),
+      num_desc       = num,
+      denom_desc     = "Under 5 with fever who received any antimalarial"
     ),
     list(
       indicator      = "ACT_ANY_TREATMENT",
       indicator_code = "act_any_tx",
+      indicator_title = paste0(
+        "Use of ACTs among care seekers ",
+        "treated with antimalarial"),
       denom_code     = "feb_u5_any_tx_am",
       filter_expr    = quote(
         csb_any_treatment == 1 &
-          received_antimalarial == 1
-      ),
-      num_desc   = num,
-      denom_desc = paste0(
-        "Febrile U5 who sought any treatment",
-        " (public or private)", am1
-      )
+          received_antimalarial == 1),
+      num_desc       = num,
+      denom_desc     = paste0(
+        "Under 5 with fever who sought any treatment ",
+        "(public or private) and received ",
+        "antimalarial")
     ),
     list(
       indicator      = "ACT_TRAINED_ANTIMALARIAL",
       indicator_code = "act_trained",
+      indicator_title = "Use of ACTs among trained provider + antimalarial",
       denom_code     = "feb_u5_trained_am",
       filter_expr    = quote(
         csb_trained_provider == 1 &
-          received_antimalarial == 1
-      ),
-      num_desc   = num,
-      denom_desc = paste0(
-        "Febrile U5 who saw trained ",
-        "provider", am1
-      )
+          received_antimalarial == 1),
+      num_desc       = num,
+      denom_desc     = paste0(
+        "Under 5 with fever who saw trained ",
+        "provider and received antimalarial")
     ),
     list(
       indicator      = "ACT_PUBLIC_ANTIMALARIAL",
       indicator_code = "act_pub",
+      indicator_title = "Use of ACTs among public sector + antimalarial",
       denom_code     = "feb_u5_pub_am",
-      filter_expr    = quote(
-        csb_public == 1 &
-          received_antimalarial == 1
-      ),
-      num_desc   = num,
-      denom_desc = paste0(
-        "Febrile U5 who sought public ",
-        "sector care (incl. CHW)", am1
-      )
+      filter_expr    = quote(csb_public == 1 & received_antimalarial == 1),
+      num_desc       = num,
+      denom_desc     = paste0(
+        "Under 5 with fever who sought public ",
+        "sector care (incl. CHW) and ",
+        "received antimalarial")
     ),
     list(
       indicator      = "ACT_PUBLIC_NOCHW_ANTIMALARIAL",
       indicator_code = "act_pub_nochw",
+      indicator_title = paste0(
+        "Use of ACTs among public sector ",
+        "excl. CHW + antimalarial"),
       denom_code     = "feb_u5_pub_nochw_am",
       filter_expr    = quote(
         csb_public_nochw == 1 &
-          received_antimalarial == 1
-      ),
-      num_desc   = num,
-      denom_desc = paste0(
-        "Febrile U5 who sought public ",
-        "sector care (excl. CHW)", am1
-      )
+          received_antimalarial == 1),
+      num_desc       = num,
+      denom_desc     = paste0(
+        "Under 5 with fever who sought public ",
+        "sector care (excl. CHW) and ",
+        "received antimalarial")
     ),
     list(
       indicator      = "ACT_PUBLIC_CHW_ANTIMALARIAL",
       indicator_code = "act_chw",
+      indicator_title = "Use of ACTs among CHW + antimalarial",
       denom_code     = "feb_u5_chw_am",
-      filter_expr    = quote(
-        csb_chw == 1 &
-          received_antimalarial == 1
-      ),
-      num_desc   = num,
-      denom_desc = paste0(
-        "Febrile U5 who sought CHW care",
-        am1
-      )
+      filter_expr    = quote(csb_chw == 1 & received_antimalarial == 1),
+      num_desc       = num,
+      denom_desc     = paste0(
+        "Under 5 with fever who sought CHW care ",
+        "and received antimalarial")
     ),
     list(
       indicator      = "ACT_PRIVATE_FORMAL_ANTIMALARIAL",
       indicator_code = "act_priv_formal",
+      indicator_title = "Use of ACTs among private formal + antimalarial",
       denom_code     = "feb_u5_priv_formal_am",
       filter_expr    = quote(
         csb_private_formal_ind == 1 &
-          received_antimalarial == 1
-      ),
-      num_desc   = num,
-      denom_desc = paste0(
-        "Febrile U5 who sought private ",
-        "formal sector care", am1
-      )
+          received_antimalarial == 1),
+      num_desc       = num,
+      denom_desc     = paste0(
+        "Under 5 with fever who sought private ",
+        "formal sector care and ",
+        "received antimalarial")
     ),
     list(
       indicator      = "ACT_PRIVATE_PHARMACY_ANTIMALARIAL",
       indicator_code = "act_priv_pharm",
+      indicator_title = "Use of ACTs among pharmacy + antimalarial",
       denom_code     = "feb_u5_priv_pharm_am",
-      filter_expr    = quote(
-        csb_pharmacy == 1 &
-          received_antimalarial == 1
-      ),
-      num_desc   = num,
-      denom_desc = paste0(
-        "Febrile U5 who sought pharmacy ",
-        "care", am1
-      )
+      filter_expr    = quote(csb_pharmacy == 1 & received_antimalarial == 1),
+      num_desc       = num,
+      denom_desc     = paste0(
+        "Under 5 with fever who sought pharmacy ",
+        "care and received antimalarial")
     ),
     list(
       indicator      = "ACT_PRIVATE_INFORMAL_ANTIMALARIAL",
       indicator_code = "act_priv_informal",
+      indicator_title = "Use of ACTs among private informal + antimalarial",
       denom_code     = "feb_u5_priv_informal_am",
       filter_expr    = quote(
         csb_private_informal == 1 &
-          received_antimalarial == 1
-      ),
-      num_desc   = num,
-      denom_desc = paste0(
-        "Febrile U5 who sought private ",
-        "informal sector care", am1
-      )
+          received_antimalarial == 1),
+      num_desc       = num,
+      denom_desc     = paste0(
+        "Under 5 with fever who sought private ",
+        "informal sector care and ",
+        "received antimalarial")
     ),
     list(
       indicator      = "ACT_PRIVATE_FORMAL_PHA_ANTIMALARIAL",
       indicator_code = "act_priv_form_pha",
+      indicator_title = paste0(
+        "Use of ACTs among private formal ",
+        "or pharmacy + antimalarial"),
       denom_code     = "feb_u5_priv_form_pha_am",
       filter_expr    = quote(
         csb_private_formal_pha == 1 &
-          received_antimalarial == 1
-      ),
-      num_desc   = num,
-      denom_desc = paste0(
-        "Febrile U5 who sought private ",
-        "formal or pharmacy care", am1
-      )
+          received_antimalarial == 1),
+      num_desc       = num,
+      denom_desc     = paste0(
+        "Under 5 with fever who sought private ",
+        "formal or pharmacy care and ",
+        "received antimalarial")
     )
   )
 }
@@ -872,16 +966,44 @@ act_wmr_dictionary <- function() {
     }
   }
 
-  # Detect survey type from v000 suffix
-  survey_type <- "DHS"
-  if (!is.na(v000) && nchar(v000) >= 3) {
-    suffix <- substr(v000, 3, nchar(v000))
-    if (grepl("[Ii]", suffix)) survey_type <- "MIS"
-    else if (grepl("[Aa]", suffix)) survey_type <- "AIS"
+  # Detect survey type: priority order:
+  # 1. survey_type column (from dhs_read() preprocessing)
+  # 2. surveyid column (e.g. "TG2017MIS")
+  # 3. v000 suffix fallback
+  survey_type <- NA_character_
+  survey_year <- if (!is.na(v007)) as.integer(v007) else NA_integer_
+
+  # 1. Check for survey_type column directly (from dhs_read() or user-added)
+  if ("survey_type" %in% names(dhs_kr)) {
+    st <- unique(as.character(haven::zap_labels(dhs_kr$survey_type)))
+    st <- st[!is.na(st) & nchar(st) > 0][1]
+    if (!is.na(st)) {
+      survey_type <- toupper(st)
+    }
+  }
+
+  # 2. Check surveyid column (common in pre-processed DHS data)
+  if (is.na(survey_type) && "surveyid" %in% names(dhs_kr)) {
+    sid <- unique(as.character(haven::zap_labels(dhs_kr$surveyid)))
+    sid <- sid[!is.na(sid)][1]
+    if (!is.na(sid)) {
+      if (grepl("MIS", sid, ignore.case = TRUE)) survey_type <- "MIS"
+      else if (grepl("AIS", sid, ignore.case = TRUE)) survey_type <- "AIS"
+      else if (grepl("DHS", sid, ignore.case = TRUE)) survey_type <- "DHS"
+    }
+  }
+
+  # 3. Fall back to v000 suffix detection
+  if (is.na(survey_type)) {
+    survey_type <- "DHS"
+    if (!is.na(v000) && nchar(v000) >= 3) {
+      suffix <- substr(v000, 3, nchar(v000))
+      if (grepl("[Ii]", suffix)) survey_type <- "MIS"
+      else if (grepl("[Aa]", suffix)) survey_type <- "AIS"
+    }
   }
 
   # Build survey_id: iso2 + year + survey_type
-  survey_year <- if (!is.na(v007)) as.integer(v007) else NA_integer_
   survey_id <- if (!is.na(iso2) && !is.na(survey_year)) {
     paste0(iso2, survey_year, survey_type)
   } else {
@@ -929,8 +1051,8 @@ act_wmr_dictionary <- function() {
 #'   grouped rows (e.g., "adm1").
 #' @param ci_method CI method for svyciprop. Default: "logit".
 #'
-#' @return Tibble with columns: level, location, point, ci_l, ci_u, counts,
-#'   indicator, numerator_description, denominator_description.
+#' @return Tibble with columns: level, location, point, ci_l, ci_u, numerator,
+#'   denominator, indicator, numerator_description, denominator_description.
 #' @noRd
 .compute_wmr_indicator <- function(data, condition, group_var = NULL,
                                     subnational_level = NULL,
@@ -942,37 +1064,11 @@ act_wmr_dictionary <- function() {
     error = function(e) tibble::tibble()
   )
 
-  ind_title <- .indicator_title(condition$indicator)
+  ind_title <- condition$indicator_title
   n_denom <- nrow(filtered)  # denominator (matches denominator_description)
   if (n_denom == 0) {
-    # Return NA row(s) so all indicators appear even with 0 observations
-    empty_national <- tibble::tibble(
-      level = "adm0", location = "National",
-      point = NA_real_, ci_l = NA_real_, ci_u = NA_real_,
-      counts = 0L, denominator = 0L,
-      indicator = ind_title,
-      indicator_code = condition$indicator_code,
-      numerator_description = condition$num_desc,
-      denominator_description = condition$denom_desc,
-      denominator_code = condition$denom_code
-    )
-    empty_regional <- tibble::tibble()
-    if (!is.null(group_var) && group_var %in% names(data)) {
-      sub_level <- subnational_level %||% "adm1"
-      regions <- unique(as.character(data[[group_var]]))
-      empty_regional <- tibble::tibble(
-        level = rep(sub_level, length(regions)),
-        location = regions,
-        point = NA_real_, ci_l = NA_real_, ci_u = NA_real_,
-        counts = 0L, denominator = 0L,
-        indicator = ind_title,
-        indicator_code = condition$indicator_code,
-        numerator_description = condition$num_desc,
-        denominator_description = condition$denom_desc,
-        denominator_code = condition$denom_code
-      )
-    }
-    return(dplyr::bind_rows(empty_national, empty_regional))
+    # Drop indicators with 0 observations — no estimate possible
+    return(tibble::tibble())
   }
 
   # --- Survey design ---
@@ -991,7 +1087,11 @@ act_wmr_dictionary <- function() {
   }
 
   # --- National estimate ---
-  n_numerator <- sum(filtered$has_act == 1, na.rm = TRUE)
+  # Weighted counts (matches WMR format: numerator/denominator ≈ point)
+  n_denom_w <- round(sum(filtered$survey_weight, na.rm = TRUE))
+  n_numer_w <- round(sum(
+    filtered$survey_weight * (filtered$has_act == 1), na.rm = TRUE
+  ))
 
   national <- tryCatch({
     est <- survey::svyciprop(~has_act, svy, method = ci_method, na.rm = TRUE)
@@ -1002,15 +1102,15 @@ act_wmr_dictionary <- function() {
       point       = as.numeric(est),
       ci_l        = ci[1],
       ci_u        = ci[2],
-      counts      = n_numerator,
-      denominator = n_denom
+      numerator   = n_numer_w,
+      denominator = n_denom_w
     )
   }, error = function(e) {
     cli::cli_alert_warning("    {ind_title} national: {e$message}")
     tibble::tibble(
       level = "adm0", location = "National", point = NA_real_,
-      ci_l = NA_real_, ci_u = NA_real_, counts = n_numerator,
-      denominator = n_denom
+      ci_l = NA_real_, ci_u = NA_real_, numerator = n_numer_w,
+      denominator = n_denom_w
     )
   })
 
@@ -1035,18 +1135,23 @@ act_wmr_dictionary <- function() {
       ) |>
         tibble::as_tibble()
 
-      # Numerator per group (has_act == 1 in condition-filtered data)
+      # Weighted numerator per group
       region_num <- filtered |>
         dplyr::group_by(.data[[group_var]]) |>
         dplyr::summarise(
-          counts = sum(has_act == 1, na.rm = TRUE),
+          numerator = round(sum(
+            survey_weight * (has_act == 1), na.rm = TRUE
+          )),
           .groups = "drop"
         )
 
-      # Denominator per group (condition-filtered subgroup size)
+      # Weighted denominator per group
       region_denom <- filtered |>
         dplyr::group_by(.data[[group_var]]) |>
-        dplyr::summarise(denominator = dplyr::n(), .groups = "drop")
+        dplyr::summarise(
+          denominator = round(sum(survey_weight, na.rm = TRUE)),
+          .groups = "drop"
+        )
 
       # Normalize CI column names (svyby names vary)
       names(by_result)[names(by_result) == "ci_l"] <- "ci_l.has_act"
@@ -1063,7 +1168,7 @@ act_wmr_dictionary <- function() {
         dplyr::left_join(
           region_num |>
             dplyr::mutate(location = as.character(.data[[group_var]])) |>
-            dplyr::select(location, counts),
+            dplyr::select(location, numerator),
           by = "location"
         ) |>
         dplyr::left_join(
@@ -1073,7 +1178,7 @@ act_wmr_dictionary <- function() {
           by = "location"
         ) |>
         dplyr::mutate(level = sub_level) |>
-        dplyr::select(level, location, point, ci_l, ci_u, counts, denominator)
+        dplyr::select(level, location, point, ci_l, ci_u, numerator, denominator)
 
     }, error = function(e) {
       cli::cli_alert_warning(
@@ -1088,7 +1193,7 @@ act_wmr_dictionary <- function() {
   # --- Combine ---
   dplyr::bind_rows(national, regional) |>
     dplyr::mutate(
-      indicator               = .indicator_title(condition$indicator),
+      indicator               = condition$indicator_title,
       indicator_code          = condition$indicator_code,
       numerator_description   = condition$num_desc,
       denominator_description = condition$denom_desc,
@@ -1144,12 +1249,34 @@ act_wmr_dictionary <- function() {
     sf::st_transform(4326) |>
     sf::st_make_valid()
 
-  if (is.null(admin_level)) {
-    available_admins <- names(shapefile)[grep("^adm[0-9]+$", names(shapefile))]
-    if (length(available_admins) == 0) {
-      cli::cli_abort("No admin columns (adm0, adm1, ...) found in shapefile.")
-    }
-    admin_level <- available_admins
+  # Auto-detect available admin columns in shapefile
+  available_admins <- sort(
+    names(shapefile)[grep("^adm[0-9]+$", names(shapefile))]
+  )
+  if (length(available_admins) == 0) {
+    cli::cli_abort("No admin columns (adm0, adm1, ...) found in shapefile.")
+  }
+
+  # Expand admin_level to include all intermediate levels
+
+  # e.g., admin_level = "adm2" → include adm1, adm2 (all levels in shapefile up to adm2)
+  if (!is.null(admin_level) && length(admin_level) == 1) {
+    target_num <- as.integer(sub("^adm", "", admin_level))
+    all_cols <- available_admins[
+      as.integer(sub("^adm", "", available_admins)) >= 1 &
+        as.integer(sub("^adm", "", available_admins)) <= target_num
+    ]
+    admin_level <- if (length(all_cols) > 0) all_cols else admin_level
+  } else if (is.null(admin_level)) {
+    # Use all available admin levels (excluding adm0 which is national)
+    admin_level <- available_admins[available_admins != "adm0"]
+    if (length(admin_level) == 0) admin_level <- available_admins
+  }
+
+  # Ensure requested columns exist in shapefile
+  admin_level <- intersect(admin_level, available_admins)
+  if (length(admin_level) == 0) {
+    cli::cli_abort("Requested admin columns not found in shapefile.")
   }
 
   cluster_admin <- sf::st_join(
@@ -1180,26 +1307,14 @@ act_wmr_dictionary <- function() {
   kr_fever <- kr_fever |>
     dplyr::left_join(cluster_admin_df, by = "cluster_id")
 
-  # Set grouping variable
-  if (length(admin_level) > 1) {
-    kr_fever$admin_class <- apply(
-      kr_fever[, admin_level, drop = FALSE], 1, paste, collapse = "_"
-    )
-    grp <- "admin_class"
-  } else {
-    grp <- admin_level[1]
+  # UPPERCASE all admin columns
+  for (col in admin_level) {
+    kr_fever[[col]] <- toupper(as.character(kr_fever[[col]]))
   }
 
-  # Map admin codes to region/region_label for display
-  kr_fever$region <- kr_fever[[grp]]
-  kr_fever$region_label <- as.character(kr_fever$region)
-
-  attr(kr_fever, "group_var") <- "region"
-  attr(kr_fever, "admin_level_label") <- if (length(admin_level) == 1) {
-    admin_level[1]
-  } else {
-    paste(admin_level, collapse = "_")
-  }
+  # Store the full admin hierarchy as attribute (e.g., c("adm1", "adm2"))
+  attr(kr_fever, "admin_levels") <- admin_level
+  attr(kr_fever, "geo_source") <- "gps"
   kr_fever
 }
 
@@ -1235,8 +1350,8 @@ act_wmr_dictionary <- function() {
     indicator_code = "feb_rdt_pos",
     denom_code     = "feb_u5_rdt_valid",
     filter_expr    = quote(TRUE),
-    num_desc       = "RDT positive among febrile U5 with valid test",
-    denom_desc     = "Febrile U5 with valid RDT result"
+    num_desc       = "RDT positive among under 5 with fever with valid test",
+    denom_desc     = "Under 5 with fever with valid RDT result"
   )
 
   # For RDT positivity, the outcome is has_rdt_pos instead of has_act
@@ -1260,8 +1375,8 @@ act_wmr_dictionary <- function() {
       indicator_code = "act_feb_rdt_pos",
       denom_code     = "feb_u5_rdt_pos",
       filter_expr    = quote(TRUE),
-      num_desc       = "Received ACT among febrile RDT-positive U5",
-      denom_desc     = "Febrile U5 with positive RDT result"
+      num_desc       = "Received ACT among RDT-positive under 5 with fever",
+      denom_desc     = "Under 5 with fever with positive RDT result"
     )
     rdt_act <- .compute_wmr_indicator(
       kr_rdt_pos, rdt_act_cond, group_var, subnational_level, ci_method

@@ -87,27 +87,50 @@ test_that("calc_csb_dhs_core works with multiple h32 sources", {
 
   result <- calc_csb_dhs_core(kr_data)
 
-  # Check structure of results
-  expect_s3_class(result, "tbl_df")
-  expect_true("dhs_csb_any" %in% names(result))
-  expect_true("dhs_csb_public" %in% names(result))
-  expect_true("dhs_csb_private" %in% names(result))
-  expect_true("dhs_csb_none" %in% names(result))
-  expect_true("dhs_n_fever" %in% names(result))
+  # Result is now a named list with adm0
+  expect_type(result, "list")
+  expect_true("adm0" %in% names(result))
 
-  # Check that all proportions are between 0 and 1
-  expect_true(all(result$dhs_csb_any >= 0 & result$dhs_csb_any <= 1, na.rm = TRUE))
-  expect_true(all(result$dhs_csb_public >= 0 & result$dhs_csb_public <= 1, na.rm = TRUE))
-  expect_true(all(result$dhs_csb_private >= 0 & result$dhs_csb_private <= 1, na.rm = TRUE))
-  expect_true(all(result$dhs_csb_none >= 0 & result$dhs_csb_none <= 1, na.rm = TRUE))
+  adm0 <- result$adm0
+  expect_s3_class(adm0, "tbl_df")
+
+  # Expected columns in adm0 tab
+  expected_cols <- c(
+    "survey_id", "iso3", "iso2", "survey_type",
+    "survey_year", "adm0", "type", "geo_source",
+    "point", "ci_l", "ci_u", "numerator", "denominator",
+    "indicator", "indicator_code",
+    "numerator_description",
+    "denominator_description", "denominator_code"
+  )
+  expect_true(all(expected_cols %in% names(adm0)))
+
+  # Check key indicators are present
+  expect_true("csb_any" %in% adm0$indicator_code)
+  expect_true("csb_public" %in% adm0$indicator_code)
+  expect_true("csb_private" %in% adm0$indicator_code)
+  expect_true("csb_none" %in% adm0$indicator_code)
+
+  # Check that all point estimates are between 0 and 1
+  csb_any_row <- adm0[adm0$indicator_code == "csb_any", ]
+  csb_pub_row <- adm0[adm0$indicator_code == "csb_public", ]
+  csb_prv_row <- adm0[adm0$indicator_code == "csb_private", ]
+  csb_none_row <- adm0[adm0$indicator_code == "csb_none", ]
+
+  expect_true(all(adm0$point >= 0 & adm0$point <= 1, na.rm = TRUE))
 
   # Check that confidence intervals are within bounds
-  expect_true(all(result$dhs_csb_any_low >= 0, na.rm = TRUE))
-  expect_true(all(result$dhs_csb_any_upp <= 1, na.rm = TRUE))
+  expect_true(all(csb_any_row$ci_l >= 0, na.rm = TRUE))
+  expect_true(all(csb_any_row$ci_u <= 1, na.rm = TRUE))
 
-  # Check that sought_any + sought_none approximately equals 1
-  # (allowing for rounding)
-  expect_true(all(abs(result$dhs_csb_any + result$dhs_csb_none - 1) < 0.01, na.rm = TRUE))
+  # Check that csb_any + csb_none approximately equals 1
+  expect_true(
+    abs(csb_any_row$point + csb_none_row$point - 1) < 0.01
+  )
+
+  # adm1 tab auto-produced via v024 fallback (data has v024)
+  expect_false(is.null(result$adm1))
+  expect_s3_class(result$adm1, "tbl_df")
 })
 
 test_that("calc_csb_dhs_core excludes deceased children (b5 == 0)", {
@@ -139,7 +162,9 @@ test_that("calc_csb_dhs_core excludes deceased children (b5 == 0)", {
   result <- calc_csb_dhs_core(kr_data)
 
   # The sample size should only include alive children with fever
-  expect_equal(result$dhs_n_fever, expected_fever)
+  adm0 <- result$adm0
+  csb_any_row <- adm0[adm0$indicator_code == "csb_any", ]
+  expect_equal(csb_any_row$denominator, expected_fever)
 })
 
 test_that("calc_csb_dhs_core handles custom source_config", {
@@ -183,10 +208,16 @@ test_that("calc_csb_dhs_core handles custom source_config", {
     )
   )
 
-  expect_s3_class(result, "tbl_df")
-  expect_true("dhs_csb_any" %in% names(result))
-  expect_true("dhs_csb_public" %in% names(result))
-  expect_true("dhs_csb_private" %in% names(result))
+  expect_type(result, "list")
+  expect_true("adm0" %in% names(result))
+
+  adm0 <- result$adm0
+  expect_s3_class(adm0, "tbl_df")
+
+  # Check key indicator codes are present
+  expect_true("csb_any" %in% adm0$indicator_code)
+  expect_true("csb_public" %in% adm0$indicator_code)
+  expect_true("csb_private" %in% adm0$indicator_code)
 })
 
 test_that("calc_csb_dhs_core handles children without fever correctly", {
@@ -211,9 +242,8 @@ test_that("calc_csb_dhs_core handles children without fever correctly", {
   )
 })
 
-test_that("calc_csb_dhs returns list with data, dict, and metadata", {
+test_that("calc_csb_dhs wrapper returns same named list structure", {
   skip_if_not_installed("survey")
-  skip_if_not_installed("sntutils")
 
   # Create mock KR data
   set.seed(456)
@@ -238,200 +268,39 @@ test_that("calc_csb_dhs returns list with data, dict, and metadata", {
 
   result <- calc_csb_dhs(kr_data)
 
-  # Check that result is a list with expected components
+  # Result is now a named list with adm0, same as calc_csb_dhs_core
   expect_type(result, "list")
-  expect_named(result, c("data", "dict", "metadata"))
+  expect_true("adm0" %in% names(result))
 
-  # Check data component
-  expect_s3_class(result$data, "tbl_df")
-  expect_true("dhs_csb_any" %in% names(result$data))
-  expect_true("dhs_csb_public" %in% names(result$data))
-  expect_true("dhs_csb_private" %in% names(result$data))
+  adm0 <- result$adm0
+  expect_s3_class(adm0, "tbl_df")
 
-  # Check metadata component
-  expect_type(result$metadata, "list")
-  expect_equal(result$metadata$country_code, "SL7")
-  expect_equal(result$metadata$survey_year, 2019)
-  expect_equal(result$metadata$file_type, "KR")
-  expect_equal(result$metadata$analysis_type, "CSB (Care-Seeking Behavior)")
-  expect_equal(result$metadata$age_group, "0-59 months")
-  expect_true(result$metadata$n_h32_sources > 0)
-
-  # Check dictionary component
-  expect_s3_class(result$dict, "data.frame")
-  expect_true("variable" %in% names(result$dict))
-})
-
-test_that("extract_dhs_metadata_csb extracts correct metadata", {
-  kr_data <- data.frame(
-    v000 = rep("GH8", 150),
-    v007 = rep(2021, 150),
-    v021 = rep(1:15, each = 10),
-    hw1 = sample(0:59, 150, replace = TRUE),
-    h22 = sample(c(0, 1), 150, replace = TRUE, prob = c(0.6, 0.4)),
-    b5 = rep(1, 150),
-    h32a = sample(c(0, 1, NA), 150, replace = TRUE),
-    h32b = sample(c(0, 1, NA), 150, replace = TRUE),
-    h32j = sample(c(0, 1, NA), 150, replace = TRUE)
+  # Expected columns
+  expected_cols <- c(
+    "survey_id", "iso3", "iso2", "survey_type",
+    "survey_year", "adm0", "type", "geo_source",
+    "point", "ci_l", "ci_u", "numerator", "denominator",
+    "indicator", "indicator_code",
+    "numerator_description",
+    "denominator_description", "denominator_code"
   )
+  expect_true(all(expected_cols %in% names(adm0)))
 
-  metadata <- extract_dhs_metadata_csb(
-    kr_data,
-    survey_vars = list(
-      cluster = "v021",
-      age = "hw1",
-      fever = "h22",
-      alive = "b5"
-    )
-  )
+  # Check key indicator codes are present
+  expect_true("csb_any" %in% adm0$indicator_code)
+  expect_true("csb_public" %in% adm0$indicator_code)
+  expect_true("csb_private" %in% adm0$indicator_code)
 
-  expect_equal(metadata$country_code, "GH8")
-  expect_equal(metadata$survey_year, 2021)
-  expect_equal(metadata$file_type, "KR")
-  expect_equal(metadata$total_records, 150)
-  expect_equal(metadata$total_clusters, 15)
-  expect_equal(metadata$total_eligible_children, 150)
-  expect_true(metadata$total_fever_cases > 0)
-  expect_equal(metadata$n_h32_sources, 3)
-  expect_true(metadata$has_alive_var)
-})
+  # Check survey metadata is populated from v000/v007
+  expect_equal(adm0$survey_id[1], "SL2019DHS")
+  expect_equal(adm0$iso2[1], "SL")
+  expect_equal(adm0$survey_year[1], 2019)
 
-test_that("calc_csb_dhs_core handles multiple admin levels", {
-  skip_if_not_installed("survey")
-  skip_if_not_installed("sf")
+  # type column should always be survey_weighted
+  expect_true(all(adm0$type == "survey_weighted"))
 
-  # Create mock data
-  set.seed(789)
-  n_children <- 200
-
-  kr_data <- data.frame(
-    v021 = rep(1:20, each = 10),
-    v005 = rep(1000000, n_children),
-    v022 = rep(1:4, each = 50),
-    hw1 = sample(0:59, n_children, replace = TRUE),
-    h22 = sample(c(0, 1), n_children, replace = TRUE, prob = c(0.7, 0.3)),
-    b5 = rep(1, n_children)
-  )
-
-  # Add h32 sources
-  kr_data$h32a <- ifelse(kr_data$h22 == 1, sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE), NA)
-  kr_data$h32j <- ifelse(kr_data$h22 == 1, sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE), NA)
-
-  # Create mock GPS data
-  gps_data <- data.frame(
-    DHSCLUST = 1:20,
-    LATNUM = runif(20, -9, -8),
-    LONGNUM = runif(20, -12, -11)
-  )
-
-  # Create mock shapefile with admin levels
-  library(sf)
-  polygons <- st_sfc(
-    st_polygon(list(
-      cbind(c(-12.5, -12.5, -11.5, -11.5, -12.5),
-            c(-9.5, -8.5, -8.5, -9.5, -9.5))
-    )),
-    st_polygon(list(
-      cbind(c(-11.5, -11.5, -10.5, -10.5, -11.5),
-            c(-9.5, -8.5, -8.5, -9.5, -9.5))
-    )),
-    st_polygon(list(
-      cbind(c(-12.5, -12.5, -11.5, -11.5, -12.5),
-            c(-8.5, -7.5, -7.5, -8.5, -8.5))
-    )),
-    st_polygon(list(
-      cbind(c(-11.5, -11.5, -10.5, -10.5, -11.5),
-            c(-8.5, -7.5, -7.5, -8.5, -8.5))
-    ))
-  )
-
-  shapefile <- st_sf(
-    adm1 = c("NORTH", "NORTH", "SOUTH", "SOUTH"),
-    adm2 = c("DISTRICT1", "DISTRICT2", "DISTRICT3", "DISTRICT4"),
-    adm1_name = c("Northern Province", "Northern Province",
-                  "Southern Province", "Southern Province"),
-    adm2_name = c("District One", "District Two",
-                  "District Three", "District Four"),
-    geometry = polygons,
-    crs = 4326
-  )
-
-  result <- calc_csb_dhs_core(
-    kr_data,
-    gps_data = gps_data,
-    shapefile = shapefile,
-    admin_level = c("adm1", "adm2")
-  )
-
-  # Check that admin columns are properly split
-  expect_true("adm1" %in% names(result))
-  expect_true("adm2" %in% names(result))
-  expect_false("admin_class" %in% names(result))  # Should be removed
-
-  # Check that admin name columns are included
-  expect_true("adm1_name" %in% names(result))
-  expect_true("adm2_name" %in% names(result))
-
-  # Check that results are grouped by both admin levels
-  expect_true(length(unique(result$adm1)) <= 2)
-  expect_true(length(unique(result$adm2)) <= 4)
-})
-
-test_that("aggregate_csb_admin works with mock data", {
-  skip_if_not_installed("sf")
-
-  # Create mock cluster results (proportions 0-1)
-  cluster_results <- data.frame(
-    cluster_id = 1:6,
-    lat = c(-8.5, -8.3, -8.7, -8.4, -8.6, -8.2),
-    lon = c(-11.2, -11.0, -11.5, -11.3, -11.1, -11.4),
-    dhs_csb_any = c(0.652, 0.721, 0.583, 0.705, 0.628, 0.689),
-    dhs_csb_public = c(0.255, 0.302, 0.221, 0.287, 0.243, 0.275),
-    dhs_csb_private = c(0.452, 0.501, 0.385, 0.483, 0.412, 0.468),
-    dhs_csb_none = c(0.348, 0.279, 0.417, 0.295, 0.372, 0.311),
-    dhs_n_fever = c(25, 30, 28, 22, 26, 24)
-  )
-
-  # Create mock shapefile
-  library(sf)
-  polygons <- st_sfc(
-    st_polygon(list(
-      cbind(c(-11.6, -11.6, -11.0, -11.0, -11.6),
-            c(-8.8, -8.2, -8.2, -8.8, -8.8))
-    )),
-    st_polygon(list(
-      cbind(c(-11.0, -11.0, -10.4, -10.4, -11.0),
-            c(-8.8, -8.2, -8.2, -8.8, -8.8))
-    ))
-  )
-
-  shapefile <- st_sf(
-    adm1 = c("REGION1", "REGION2"),
-    adm1_name = c("Region One", "Region Two"),
-    geometry = polygons,
-    crs = 4326
-  )
-
-  # Test aggregation
-  result <- aggregate_csb_admin(
-    cluster_results,
-    shapefile,
-    admin_level = "adm1",
-    weighted = TRUE
-  )
-
-  expect_s3_class(result, "sf")
-  expect_true("dhs_csb_any" %in% names(result))
-  expect_true("dhs_csb_public" %in% names(result))
-  expect_true("dhs_csb_private" %in% names(result))
-  expect_true("dhs_n_fever" %in% names(result))
-  expect_true("adm1" %in% names(result))
-  expect_true("adm1_name" %in% names(result))
-  expect_equal(nrow(result), 2)  # Two regions
-
-  # Check that aggregated values are reasonable (proportions 0-1)
-  expect_true(all(result$dhs_csb_any >= 0 & result$dhs_csb_any <= 1))
-  expect_true(all(result$dhs_n_fever > 0))
+  # geo_source should be "survey" when no GPS data
+  expect_true(all(adm0$geo_source == "survey"))
 })
 
 test_that("calc_csb_dhs_core produces consistent results", {
@@ -457,11 +326,24 @@ test_that("calc_csb_dhs_core produces consistent results", {
   result1 <- calc_csb_dhs_core(kr_data)
   result2 <- calc_csb_dhs_core(kr_data)
 
+  adm0_1 <- result1$adm0
+  adm0_2 <- result2$adm0
+
   # Results should be identical for the same input
-  expect_equal(result1$dhs_csb_any, result2$dhs_csb_any)
-  expect_equal(result1$dhs_csb_public, result2$dhs_csb_public)
-  expect_equal(result1$dhs_csb_private, result2$dhs_csb_private)
-  expect_equal(result1$dhs_n_fever, result2$dhs_n_fever)
+  csb_any_1 <- adm0_1[adm0_1$indicator_code == "csb_any", ]
+  csb_any_2 <- adm0_2[adm0_2$indicator_code == "csb_any", ]
+  expect_equal(csb_any_1$point, csb_any_2$point)
+
+  csb_pub_1 <- adm0_1[adm0_1$indicator_code == "csb_public", ]
+  csb_pub_2 <- adm0_2[adm0_2$indicator_code == "csb_public", ]
+  expect_equal(csb_pub_1$point, csb_pub_2$point)
+
+  csb_prv_1 <- adm0_1[adm0_1$indicator_code == "csb_private", ]
+  csb_prv_2 <- adm0_2[adm0_2$indicator_code == "csb_private", ]
+  expect_equal(csb_prv_1$point, csb_prv_2$point)
+
+  # Denominator should match
+  expect_equal(csb_any_1$denominator, csb_any_2$denominator)
 })
 
 test_that("calc_csb_dhs_core calculates overlapping indicators (standard DHS methodology)", {
@@ -488,6 +370,13 @@ test_that("calc_csb_dhs_core calculates overlapping indicators (standard DHS met
   )
 
   result <- calc_csb_dhs_core(kr_data)
+  adm0 <- result$adm0
+
+  # Extract point estimates by indicator_code
+  csb_public <- adm0[adm0$indicator_code == "csb_public", "point"][[1]]
+  csb_private <- adm0[adm0$indicator_code == "csb_private", "point"][[1]]
+  csb_none <- adm0[adm0$indicator_code == "csb_none", "point"][[1]]
+  csb_any <- adm0[adm0$indicator_code == "csb_any", "point"][[1]]
 
   # With OVERLAPPING indicators (standard DHS methodology):
   # - Public: children 1,2,3,7,8 = 5/10 = 0.5
@@ -495,15 +384,15 @@ test_that("calc_csb_dhs_core calculates overlapping indicators (standard DHS met
   # - None: children 9,10 = 2/10 = 0.2
   # - Any: all who visited any = 8/10 = 0.8
 
-  expect_equal(result$dhs_csb_public, 0.5)
-  expect_equal(result$dhs_csb_private, 0.5)  # Overlapping - includes children 7,8
+  expect_equal(csb_public, 0.5)
+  expect_equal(csb_private, 0.5)  # Overlapping - includes children 7,8
 
-  expect_equal(result$dhs_csb_none, 0.2)
-  expect_equal(result$dhs_csb_any, 0.8)
+  expect_equal(csb_none, 0.2)
+  expect_equal(csb_any, 0.8)
 
   # NOTE: With overlapping indicators, public + private + none does NOT need to sum to 1
   # (public + private can exceed 1 when children visit both sectors)
-  expect_equal(result$dhs_csb_public + result$dhs_csb_private + result$dhs_csb_none, 1.2)
+  expect_equal(csb_public + csb_private + csb_none, 1.2)
 })
 
 test_that("overlapping indicators - all visited both sectors", {
@@ -523,19 +412,25 @@ test_that("overlapping indicators - all visited both sectors", {
   )
 
   result <- calc_csb_dhs_core(kr_data)
+  adm0 <- result$adm0
+
+  csb_public <- adm0[adm0$indicator_code == "csb_public", "point"][[1]]
+  csb_private <- adm0[adm0$indicator_code == "csb_private", "point"][[1]]
+  csb_none <- adm0[adm0$indicator_code == "csb_none", "point"][[1]]
+  csb_any <- adm0[adm0$indicator_code == "csb_any", "point"][[1]]
 
   # With overlapping indicators (standard DHS methodology):
   # ALL children are counted in BOTH public AND private
-  expect_equal(result$dhs_csb_public, 1)
-  expect_equal(result$dhs_csb_private, 1)  # Also 1 - overlapping!
-  expect_equal(result$dhs_csb_none, 0)
-  expect_equal(result$dhs_csb_any, 1)
+  expect_equal(csb_public, 1)
+  expect_equal(csb_private, 1)  # Also 1 - overlapping!
+  expect_equal(csb_none, 0)
+  expect_equal(csb_any, 1)
 
   # With overlapping indicators, sum exceeds 1 when children visit both sectors
-  expect_equal(result$dhs_csb_public + result$dhs_csb_private + result$dhs_csb_none, 2)
+  expect_equal(csb_public + csb_private + csb_none, 2)
 })
 
-test_that("calc_csb_dhs_core with region_var puts region column first", {
+test_that("calc_csb_dhs_core with region_var returns adm0 + adm1 tabs", {
   skip_if_not_installed("survey")
 
   set.seed(321)
@@ -558,11 +453,37 @@ test_that("calc_csb_dhs_core with region_var puts region column first", {
 
   result <- calc_csb_dhs_core(kr_data, region_var = "v024")
 
-  # v024 should be the first column
+  # Should have both adm0 and adm1 tabs
+  expect_type(result, "list")
+  expect_true(all(c("adm0", "adm1") %in% names(result)))
 
-  expect_equal(names(result)[1], "v024")
-  # Should have region values
-  expect_true(all(c("REGION1", "REGION2") %in% result$v024))
+  adm0 <- result$adm0
+  adm1 <- result$adm1
+
+  # adm0: 1 row per indicator (national)
+  csb_any_nat <- adm0[adm0$indicator_code == "csb_any", ]
+  expect_true(nrow(csb_any_nat) == 1)
+
+  # adm1: 2 rows per indicator (REGION1 + REGION2)
+  csb_any_sub <- adm1[adm1$indicator_code == "csb_any", ]
+  expect_true(nrow(csb_any_sub) == 2)
+
+  # adm1 column should exist and be UPPERCASE
+  expect_true("adm1" %in% names(adm1))
+  expect_true(all(adm1$adm1 == toupper(adm1$adm1)))
+  expect_true(all(c("REGION1", "REGION2") %in% csb_any_sub$adm1))
+
+  # geo_source should be "survey" for both tabs
+  expect_true(all(adm0$geo_source == "survey"))
+  expect_true(all(adm1$geo_source == "survey"))
+
+  # adm0 column present in both tabs
+  expect_true("adm0" %in% names(adm0))
+  expect_true("adm0" %in% names(adm1))
+
+  # All point estimates should be valid
+  expect_true(all(adm0$point >= 0, na.rm = TRUE))
+  expect_true(all(adm1$point >= 0, na.rm = TRUE))
 })
 
 test_that("calc_csb_dhs_core errors when region_var column not found", {
@@ -603,4 +524,120 @@ test_that("calc_csb_dhs_core errors when region_var is not a single string", {
     calc_csb_dhs_core(kr_data, region_var = 123),
     "single character string"
   )
+})
+
+test_that("calc_csb_dhs_core returns all 11 CSB indicators at adm0 level", {
+  skip_if_not_installed("survey")
+
+  set.seed(42)
+  n_children <- 200
+
+  kr_data <- data.frame(
+    v021 = rep(1:20, each = 10),
+    v005 = rep(1000000, n_children),
+    v022 = rep(1:4, each = 50),
+    hw1 = sample(0:59, n_children, replace = TRUE),
+    h22 = sample(c(0, 1), n_children, replace = TRUE, prob = c(0.6, 0.4)),
+    b5 = rep(1, n_children)
+  )
+
+  # Add public, CHW, private formal, pharmacy, private informal sources
+  kr_data$h32a <- ifelse(kr_data$h22 == 1, sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE, prob = c(0.7, 0.3)), NA)
+  kr_data$h32b <- ifelse(kr_data$h22 == 1, sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE, prob = c(0.8, 0.2)), NA)
+  kr_data$h32na <- ifelse(kr_data$h22 == 1, sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE, prob = c(0.9, 0.1)), NA)  # CHW
+  kr_data$h32j <- ifelse(kr_data$h22 == 1, sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE, prob = c(0.6, 0.4)), NA)  # private formal
+  kr_data$h32n <- ifelse(kr_data$h22 == 1, sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE, prob = c(0.7, 0.3)), NA)  # pharmacy
+  kr_data$h32s <- ifelse(kr_data$h22 == 1, sample(c(0, 1), sum(kr_data$h22 == 1), replace = TRUE, prob = c(0.85, 0.15)), NA)  # private informal
+
+  result <- calc_csb_dhs_core(kr_data)
+  adm0 <- result$adm0
+
+  # All 11 CSB indicator codes should be present
+  expected_codes <- c(
+    "csb_any", "csb_none", "csb_public", "csb_pub_nochw",
+    "csb_chw", "csb_private", "csb_priv_formal", "csb_pharmacy",
+    "csb_priv_informal", "csb_priv_form_pha", "csb_trained"
+  )
+  for (code in expected_codes) {
+    expect_true(
+      code %in% adm0$indicator_code,
+      info = paste("Missing indicator_code:", code)
+    )
+  }
+
+  # Each indicator should have exactly 1 row at adm0
+  expect_equal(nrow(adm0), length(expected_codes))
+
+  # counts should always be <= denominator
+  expect_true(all(adm0$numerator <= adm0$denominator, na.rm = TRUE))
+})
+
+test_that("csb_wmr_dictionary returns all 11 indicators with metadata", {
+  dict <- csb_wmr_dictionary()
+  expect_s3_class(dict, "tbl_df")
+  expect_equal(nrow(dict), 11)
+  expect_true(all(
+    c("indicator", "indicator_code", "indicator_title",
+      "numerator_description",
+      "denominator_description",
+      "denominator_code") %in% names(dict)
+  ))
+})
+
+test_that("aggregate_csb_admin works with new output format", {
+  skip_if_not_installed("sf")
+
+  # aggregate_csb_admin still expects old-style column names (dhs_csb_any, etc.)
+  # Create mock cluster results matching the column names aggregate_csb_admin expects
+  cluster_results <- data.frame(
+    cluster_id = 1:6,
+    lat = c(-8.5, -8.3, -8.7, -8.4, -8.6, -8.2),
+    lon = c(-11.2, -11.0, -11.5, -11.3, -11.1, -11.4),
+    dhs_csb_any = c(0.652, 0.721, 0.583, 0.705, 0.628, 0.689),
+    dhs_csb_public = c(0.255, 0.302, 0.221, 0.287, 0.243, 0.275),
+    dhs_csb_private = c(0.452, 0.501, 0.385, 0.483, 0.412, 0.468),
+    dhs_csb_none = c(0.348, 0.279, 0.417, 0.295, 0.372, 0.311),
+    dhs_n_fever = c(25, 30, 28, 22, 26, 24)
+  )
+
+  # Create mock shapefile
+  library(sf)
+  polygons <- st_sfc(
+    st_polygon(list(
+      cbind(c(-11.6, -11.6, -11.0, -11.0, -11.6),
+            c(-8.8, -8.2, -8.2, -8.8, -8.8))
+    )),
+    st_polygon(list(
+      cbind(c(-11.0, -11.0, -10.4, -10.4, -11.0),
+            c(-8.8, -8.2, -8.2, -8.8, -8.8))
+    ))
+  )
+
+  shapefile <- st_sf(
+    adm1 = c("REGION1", "REGION2"),
+    adm1_name = c("Region One", "Region Two"),
+    geometry = polygons,
+    crs = 4326
+  )
+
+  # Test aggregation (aggregate_csb_admin still uses old column names internally)
+  result <- aggregate_csb_admin(
+    cluster_results,
+    shapefile,
+    admin_level = "adm1",
+    weighted = TRUE
+  )
+
+  expect_s3_class(result, "sf")
+  expect_true("dhs_csb_any" %in% names(result))
+  expect_true("dhs_csb_public" %in% names(result))
+  expect_true("dhs_csb_private" %in% names(result))
+  expect_true("dhs_n_fever" %in% names(result))
+  expect_true("adm1" %in% names(result))
+  expect_true("adm1_name" %in% names(result))
+  expect_equal(nrow(result), 2)  # Two regions
+
+  # Check that aggregated values are reasonable (proportions 0-1)
+  expect_true(all(result$dhs_csb_any >= 0 & result$dhs_csb_any <= 1))
+  expect_true(all(result$dhs_n_fever > 0))
 })
