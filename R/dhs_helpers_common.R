@@ -1,3 +1,281 @@
+# =============================================================================
+# Shared DHS survey-weighted indicator computation helpers
+# =============================================================================
+
+#' Compute a single DHS indicator in standardized long format
+#'
+#' Generic helper used by all DHS indicator functions. Applies optional filtering,
+#' creates survey design, computes svyciprop nationally and optionally by region,
+#' and returns a standardized tibble with indicator metadata.
+#'
+#' @param data Prepared dataset with standardized column names:
+#'   `cluster_id`, `stratum_id`, `survey_weight`, and the outcome column.
+#' @param condition Named list with indicator specification:
+#'   \itemize{
+#'     \item `indicator_title`: Human-readable indicator name
+#'     \item `indicator_code`: Short code (e.g., "fever")
+#'     \item `denom_code`: Denominator code
+#'     \item `filter_expr`: Quoted filter expression or NULL
+#'     \item `outcome_var`: Column name of the binary 0/1 outcome
+#'     \item `num_desc`: Numerator description
+#'     \item `denom_desc`: Denominator description
+#'   }
+#' @param group_var Optional grouping variable name for regional estimates.
+#' @param subnational_level Admin level name for grouped rows (e.g., "adm1").
+#' @param ci_method CI method for svyciprop. Default: "logit".
+#'
+#' @return Tibble with columns: level, location, point, ci_l, ci_u, numerator,
+#'   denominator, indicator, indicator_code, numerator_description,
+#'   denominator_description, denominator_code.
+#' @noRd
+.compute_dhs_indicator_generic <- function(data, condition, group_var = NULL,
+                                            subnational_level = NULL,
+                                            ci_method = "logit") {
+
+  outcome_var <- condition$outcome_var
+  ind_title   <- condition$indicator_title
+
+  # Apply filter
+  if (is.null(condition$filter_expr)) {
+    filtered <- data
+  } else {
+    filtered <- tryCatch(
+      dplyr::filter(data, !!condition$filter_expr),
+      error = function(e) tibble::tibble()
+    )
+  }
+
+  if (!outcome_var %in% names(filtered)) {
+    return(tibble::tibble())
+  }
+
+  filtered$.dhs_outcome <- filtered[[outcome_var]]
+  filtered <- filtered[!is.na(filtered$.dhs_outcome), ]
+
+  n_denom <- nrow(filtered)
+  if (n_denom == 0) return(tibble::tibble())
+
+  # Survey design
+  n_clusters <- dplyr::n_distinct(filtered$cluster_id)
+  use_strata <- dplyr::n_distinct(filtered$stratum_id) > 1
+
+  # Weighted counts
+  n_denom_w <- round(sum(filtered$survey_weight, na.rm = TRUE))
+  n_numer_w <- round(sum(
+    filtered$survey_weight * (filtered$.dhs_outcome == 1), na.rm = TRUE
+  ))
+
+  # Single-cluster guard
+  if (n_clusters < 2) {
+    point_est <- n_numer_w / n_denom_w
+    national <- tibble::tibble(
+      level = "adm0", location = "National",
+      point = point_est, ci_l = NA_real_, ci_u = NA_real_,
+      numerator = n_numer_w, denominator = n_denom_w
+    )
+    return(
+      national |>
+        dplyr::mutate(
+          indicator               = condition$indicator_title,
+          indicator_code          = condition$indicator_code,
+          numerator_description   = condition$num_desc,
+          denominator_description = condition$denom_desc,
+          denominator_code        = condition$denom_code
+        )
+    )
+  }
+
+  svy <- tryCatch({
+    if (use_strata) {
+      survey::svydesign(
+        ids = ~cluster_id, strata = ~stratum_id,
+        weights = ~survey_weight, data = filtered, nest = TRUE
+      )
+    } else {
+      survey::svydesign(
+        ids = ~cluster_id, weights = ~survey_weight,
+        data = filtered, nest = TRUE
+      )
+    }
+  }, error = function(e) {
+    survey::svydesign(
+      ids = ~cluster_id, weights = ~survey_weight,
+      data = filtered, nest = TRUE
+    )
+  })
+
+  # National estimate
+  old_opts <- options(survey.lonely.psu = "certainty")
+  on.exit(options(old_opts), add = TRUE)
+
+  national <- tryCatch({
+    est <- survey::svyciprop(~.dhs_outcome, svy, method = ci_method,
+                              na.rm = TRUE)
+    ci  <- stats::confint(est)
+    tibble::tibble(
+      level = "adm0", location = "National",
+      point = as.numeric(est), ci_l = ci[1], ci_u = ci[2],
+      numerator = n_numer_w, denominator = n_denom_w
+    )
+  }, error = function(e) {
+    cli::cli_alert_warning("    {ind_title} national: {e$message}")
+    tibble::tibble(
+      level = "adm0", location = "National", point = NA_real_,
+      ci_l = NA_real_, ci_u = NA_real_,
+      numerator = n_numer_w, denominator = n_denom_w
+    )
+  })
+
+  # Regional estimates
+  regional <- tibble::tibble()
+  sub_level <- subnational_level %||% "adm1"
+
+  if (!is.null(group_var) && group_var %in% names(filtered)) {
+    group_formula <- stats::as.formula(paste("~", group_var))
+
+    regional <- tryCatch({
+      by_result <- survey::svyby(
+        ~.dhs_outcome, by = group_formula, design = svy,
+        FUN = survey::svyciprop, vartype = "ci",
+        method = ci_method, na.rm = TRUE, keep.names = FALSE
+      ) |> tibble::as_tibble()
+
+      region_num <- filtered |>
+        dplyr::group_by(.data[[group_var]]) |>
+        dplyr::summarise(
+          numerator = round(sum(
+            survey_weight * (.dhs_outcome == 1), na.rm = TRUE
+          )), .groups = "drop"
+        )
+
+      region_denom <- filtered |>
+        dplyr::group_by(.data[[group_var]]) |>
+        dplyr::summarise(
+          denominator = round(sum(survey_weight, na.rm = TRUE)),
+          .groups = "drop"
+        )
+
+      names(by_result)[names(by_result) == "ci_l"] <- "ci_l..dhs_outcome"
+      names(by_result)[names(by_result) == "ci_u"] <- "ci_u..dhs_outcome"
+
+      by_result |>
+        dplyr::rename(
+          location = !!group_var, point = .dhs_outcome,
+          ci_l = `ci_l..dhs_outcome`, ci_u = `ci_u..dhs_outcome`
+        ) |>
+        dplyr::mutate(location = as.character(location)) |>
+        dplyr::left_join(
+          region_num |>
+            dplyr::mutate(
+              location = as.character(.data[[group_var]])
+            ) |>
+            dplyr::select(location, numerator),
+          by = "location"
+        ) |>
+        dplyr::left_join(
+          region_denom |>
+            dplyr::mutate(
+              location = as.character(.data[[group_var]])
+            ) |>
+            dplyr::select(location, denominator),
+          by = "location"
+        ) |>
+        dplyr::mutate(level = sub_level) |>
+        dplyr::select(
+          level, location, point, ci_l, ci_u, numerator, denominator
+        )
+    }, error = function(e) {
+      cli::cli_alert_warning("    {ind_title} by group: {e$message}")
+      tibble::tibble()
+    })
+  }
+
+  dplyr::bind_rows(national, regional) |>
+    dplyr::mutate(
+      indicator               = condition$indicator_title,
+      indicator_code          = condition$indicator_code,
+      numerator_description   = condition$num_desc,
+      denominator_description = condition$denom_desc,
+      denominator_code        = condition$denom_code
+    )
+}
+
+
+#' Assemble standardized DHS output list
+#'
+#' Takes national and optional regional results in long format and assembles
+#' the standardized `list(adm0 = ..., adm1 = ...)` return structure with
+#' survey metadata columns prepended.
+#'
+#' @param national_results Tibble of national results with level/location columns.
+#' @param regional_results Tibble of regional results (or NULL/empty tibble).
+#' @param survey_meta Named list from `.extract_survey_meta()` or
+#'   `.extract_survey_meta_hv()`.
+#' @param geo_source Character. geo_source value for regional rows
+#'   (e.g., "survey", "gps"). Default: NA.
+#' @param admin_col Character. Column name for the admin level (e.g., "adm1").
+#'
+#' @return Named list with `adm0` tibble and optionally `adm1` (or other) tibble.
+#' @noRd
+.assemble_dhs_output <- function(national_results, regional_results = NULL,
+                                  survey_meta, geo_source = NA_character_,
+                                  admin_col = "adm1") {
+
+  meta_cols <- tibble::tibble(
+    survey_id   = survey_meta$survey_id,
+    iso3        = survey_meta$iso3,
+    iso2        = survey_meta$iso2,
+    survey_type = survey_meta$survey_type,
+    survey_year = survey_meta$survey_year,
+    adm0        = survey_meta$country_upper
+  )
+
+  # Assemble adm0
+  adm0_data <- national_results |>
+    dplyr::filter(level == "adm0") |>
+    dplyr::select(-level, -location)
+
+  adm0_tbl <- dplyr::bind_cols(
+    meta_cols[rep(1, nrow(adm0_data)), ],
+    tibble::tibble(type = "survey_weighted", geo_source = NA_character_),
+    adm0_data
+  ) |> tibble::as_tibble()
+
+  out <- list(adm0 = adm0_tbl)
+
+  # Assemble subnational
+  if (!is.null(regional_results) && nrow(regional_results) > 0) {
+    sub_data <- regional_results |>
+      dplyr::filter(level != "adm0")
+
+    if (nrow(sub_data) > 0) {
+      sub_tbl <- dplyr::bind_cols(
+        meta_cols[rep(1, nrow(sub_data)), ],
+        sub_data |>
+          dplyr::transmute(
+            !!admin_col := toupper(location),
+            type       = "survey_weighted",
+            geo_source = geo_source,
+            point, ci_l, ci_u,
+            numerator, denominator,
+            indicator, indicator_code,
+            numerator_description,
+            denominator_description, denominator_code
+          )
+      ) |> tibble::as_tibble()
+
+      out[[admin_col]] <- sub_tbl
+    }
+  }
+
+  out
+}
+
+
+# =============================================================================
+# MBG helpers
+# =============================================================================
+
 #' Prepare GPS Data for MBG Analysis
 #'
 #' Shared GPS cleaning used by all MBG functions. Extracts cluster coordinates,
