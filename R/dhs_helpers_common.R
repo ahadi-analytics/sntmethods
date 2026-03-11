@@ -273,6 +273,243 @@
 
 
 # =============================================================================
+# Master DHS indicator dictionary
+# =============================================================================
+
+#' Master DHS Indicator Dictionary
+#'
+#' Returns a single consolidated tibble with every DHS indicator across all
+#' domains (ACT, ITN, fever, etc.). Use this as a pre-analysis reference to
+#' know what indicators are available, what DHS variables are needed, and
+#' what each numerator/denominator represents.
+#'
+#' @return A tibble with one row per indicator and columns:
+#'   \describe{
+#'     \item{domain}{Topic area (e.g., "act", "itn", "fever")}
+#'     \item{dhs_recode}{DHS file type needed (KR, IR, HR, PR, HR+PR)}
+#'     \item{calc_function}{R function to call}
+#'     \item{indicator_code}{Unique indicator identifier}
+#'     \item{indicator}{Short indicator name}
+#'     \item{indicator_title}{Full descriptive title}
+#'     \item{numerator_code}{Auto-derived numerator code (n_<indicator_code>)}
+#'     \item{numerator_description}{What the numerator counts}
+#'     \item{denominator_code}{Short code for the denominator}
+#'     \item{denominator_description}{What the denominator counts}
+#'     \item{eligibility}{Who is eligible / inclusion criteria}
+#'     \item{data_level}{Default admin level (adm0, household, person)}
+#'     \item{dhs_variables}{Key DHS variables needed (per domain)}
+#'     \item{notes}{Additional context, caveats, or methodology notes}
+#'   }
+#'
+#' @export
+#' @examples
+#' \dontrun{
+#' # Browse all indicators
+#' dhs_dictionary()
+#'
+#' # Filter to a specific domain
+#' dhs_dictionary() |> dplyr::filter(domain == "itn")
+#'
+#' # Find which DHS recode files you need
+#' dhs_dictionary() |> dplyr::distinct(domain, dhs_recode, calc_function)
+#' }
+dhs_dictionary <- function() {
+
+  # Domain specifications: dictionary function, metadata, DHS variables
+
+  domain_specs <- list(
+    list(
+      fn          = act_dictionary,
+      domain      = "act",
+      dhs_recode  = "KR",
+      calc_fn     = "calc_act_dhs",
+      eligibility = "Children 0-59 months with fever (h22==1), alive (b5==1)",
+      dhs_vars    = "h22, ml13e, ml13a-g, b5, hw1, h32a-r",
+      notes       = NA_character_
+    ),
+    list(
+      fn          = antimalarial_dictionary,
+      domain      = "antimalarial",
+      dhs_recode  = "KR",
+      calc_fn     = "calc_antimalarial_dhs",
+      eligibility = "Children 0-59 months with fever (h22==1), alive (b5==1)",
+      dhs_vars    = "h22, ml13a-g, h37a-h, b5, hw1",
+      notes       = "ml13a-g primary; h37a-h fallback for older surveys"
+    ),
+    list(
+      fn          = anc_dictionary,
+      domain      = "anc",
+      dhs_recode  = "IR",
+      calc_fn     = "calc_anc_dhs",
+      eligibility = "Women 15-49 with a birth in last 2-5 years",
+      dhs_vars    = "m14_1, v008, b3_01",
+      notes       = NA_character_
+    ),
+    list(
+      fn          = case_management_dictionary,
+      domain      = "case_management",
+      dhs_recode  = "KR",
+      calc_fn     = "calc_case_management_dhs",
+      eligibility = "Children 0-59 months with fever (h22==1), alive (b5==1)",
+      dhs_vars    = "h22, ml13e, ml13a, b5, hw1, h32a-r",
+      notes       = "Composite indicator: P(test) x P(ACT|positive)"
+    ),
+    list(
+      fn          = csb_dictionary,
+      domain      = "csb",
+      dhs_recode  = "KR",
+      calc_fn     = "calc_csb_dhs",
+      eligibility = "Children 0-59 months with fever (h22==1), alive (b5==1)",
+      dhs_vars    = "h22, b5, hw1, h32a-r",
+      notes       = NA_character_
+    ),
+    list(
+      fn          = epi_dictionary,
+      domain      = "epi",
+      dhs_recode  = "KR",
+      calc_fn     = "calc_epi_dhs",
+      eligibility = "Children 12-23 months",
+      dhs_vars    = "h2, h3-h8, h9, h33, h50-h68, hw1",
+      notes       = "Card + maternal recall"
+    ),
+    list(
+      fn          = fever_dictionary,
+      domain      = "fever",
+      dhs_recode  = "KR",
+      calc_fn     = "calc_fever_dhs",
+      eligibility = "Children 0-59 months, alive (b5==1)",
+      dhs_vars    = "h22, b5, hw1",
+      notes       = NA_character_
+    ),
+    list(
+      fn          = iptp_dictionary,
+      domain      = "iptp",
+      dhs_recode  = "IR",
+      calc_fn     = "calc_iptp_dhs",
+      eligibility = "Women 15-49 with a birth in last 2-5 years",
+      dhs_vars    = "ml1_1, m49a_1, v008, b3_01, b19_01",
+      notes       = NA_character_
+    ),
+    list(
+      fn          = irs_dictionary,
+      domain      = "irs",
+      dhs_recode  = "HR",
+      calc_fn     = "calc_irs_dhs",
+      eligibility = "All surveyed households",
+      dhs_vars    = "hv253",
+      notes       = NA_character_
+    ),
+    list(
+      fn          = itn_dictionary,
+      domain      = "itn",
+      dhs_recode  = "HR+PR",
+      calc_fn     = "calc_itn_dhs",
+      eligibility = "HH for ownership indicators; de facto persons for use indicators",
+      dhs_vars    = "hml10_1-n, hml12, hv013, hv105, hv104, hml18, hv270, hv025",
+      notes       = "data_level distinguishes household vs person indicators"
+    ),
+    list(
+      fn          = malaria_dx_dictionary,
+      domain      = "malaria_dx",
+      dhs_recode  = "KR",
+      calc_fn     = "calc_malaria_dx_dhs",
+      eligibility = "Children 0-59 months with fever (h22==1), alive (b5==1)",
+      dhs_vars    = "h22, h47, b5, hw1",
+      notes       = NA_character_
+    ),
+    list(
+      fn          = pfpr_dictionary,
+      domain      = "pfpr",
+      dhs_recode  = "PR",
+      calc_fn     = "calc_pfpr_dhs",
+      eligibility = "Children tested for malaria (RDT or microscopy)",
+      dhs_vars    = "hml32, hml35, hc1, hv103, hv042",
+      notes       = NA_character_
+    ),
+    list(
+      fn          = severe_anemia_dictionary,
+      domain      = "severe_anemia",
+      dhs_recode  = "PR",
+      calc_fn     = "calc_severe_anemia_dhs",
+      eligibility = "Children 6-59 months tested for hemoglobin",
+      dhs_vars    = "hc56, hw53, hc1, hv103, hv042",
+      notes       = "Altitude-adjusted Hb preferred (hw53)"
+    ),
+    list(
+      fn          = smc_dictionary,
+      domain      = "smc",
+      dhs_recode  = "KR",
+      calc_fn     = "calc_smc_dhs",
+      eligibility = "Children 3-59 months in SMC-eligible areas",
+      dhs_vars    = "hml43, ml13g, hw1",
+      notes       = "hml43 primary; ml13g fallback"
+    ),
+    list(
+      fn          = u5mr_dictionary,
+      domain      = "u5mr",
+      dhs_recode  = "KR",
+      calc_fn     = "calc_u5mr_dhs",
+      eligibility = "Live births in recall period (last 5 years)",
+      dhs_vars    = "v008, b3, b7, b5",
+      notes       = "Rate per 1000 live births; uses DHS.rates::chmort()"
+    ),
+    list(
+      fn          = wealth_dictionary,
+      domain      = "wealth",
+      dhs_recode  = "HR",
+      calc_fn     = "calc_wealth_dhs",
+      eligibility = "All surveyed households",
+      dhs_vars    = "hv270, hv271, hv012",
+      notes       = NA_character_
+    )
+  )
+
+  # Build consolidated tibble
+  result_list <- lapply(domain_specs, function(spec) {
+    dict <- spec$fn()
+
+    # Standardize data_level: use existing if present, else "adm0"
+    if (!"data_level" %in% names(dict)) {
+      dict$data_level <- "adm0"
+    }
+
+    # Keep only the core columns from individual dictionaries
+    core_cols <- c("indicator", "indicator_code", "indicator_title",
+                   "numerator_description", "denominator_description",
+                   "denominator_code", "data_level")
+    keep <- intersect(core_cols, names(dict))
+    dict <- dict[, keep, drop = FALSE]
+
+    # Add domain metadata
+    dict$domain        <- spec$domain
+    dict$dhs_recode    <- spec$dhs_recode
+    dict$calc_function <- spec$calc_fn
+    dict$eligibility   <- spec$eligibility
+    dict$dhs_variables <- spec$dhs_vars
+    dict$notes         <- spec$notes
+
+    dict
+  })
+
+  out <- do.call(rbind, result_list)
+
+  # Derive numerator_code
+  out$numerator_code <- paste0("n_", out$indicator_code)
+
+  # Reorder columns
+  out <- out[, c(
+    "domain", "dhs_recode", "calc_function",
+    "indicator_code", "indicator", "indicator_title",
+    "numerator_code", "numerator_description",
+    "denominator_code", "denominator_description",
+    "eligibility", "data_level", "dhs_variables", "notes"
+  ), drop = FALSE]
+
+  tibble::as_tibble(out)
+}
+
+
+# =============================================================================
 # MBG helpers
 # =============================================================================
 
