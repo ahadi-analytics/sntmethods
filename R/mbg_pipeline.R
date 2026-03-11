@@ -95,9 +95,11 @@ NULL
 #'   Default: FALSE.
 #' @return A list containing:
 #'   \itemize{
-#'     \item final_dataset: Combined dataset with all indicators at the specified
-#'       aggregation level (ADM2 by default, or ADM3 if `aggregation_level = "adm3"`)
-#'     \item adm1_estimates: Survey-weighted ADM1 estimates (if available)
+#'     \item final_dataset: Named list with `adm0`, `adm1`, and `adm2` (or `adm3`)
+#'       tibbles in long format. Each tibble has standard columns: survey_id, iso3,
+#'       iso2, survey_type, survey_year, adm0, [adm1], [adm2], type, geo_source,
+#'       point, ci_l, ci_u, numerator, denominator, indicator, indicator_code,
+#'       numerator_description, denominator_description, denominator_code.
 #'     \item mbg_estimates: MBG predictions at the specified aggregation level
 #'       (if MBG was run)
 #'     \item cluster_data: Raw cluster-level data
@@ -464,10 +466,16 @@ run_mbg_pipeline <- function(
     )
   }
 
-  # Determine which file types we need based on indicators
+  # Determine which DHS file types we need based on requested indicators.
+  # Individual indicator codes (e.g. "use_itn", "pfpr_rdt_u5") are resolved
+
+  # via .mbg_indicator_meta() which derives file types from the recode field.
+  # Category shorthand names (e.g. "itn", "pfpr") are not in the dictionary
+  # so they use a static map. Note: u5mr uses BR in the pipeline but the
+  # dictionary says KR, so the category map is authoritative for categories.
   file_types_needed <- c("GE")  # Always need GPS
 
-  file_type_map <- list(
+  category_file_types <- list(
     pfpr = "PR",
     itn = c("HR", "PR"),
     irs = "HR",
@@ -478,12 +486,23 @@ run_mbg_pipeline <- function(
     iptp = "IR",
     epi = "KR",
     u5mr = "BR",
-    smc = "KR"
+    smc = "KR",
+    fever = "KR",
+    antimalarial = "KR",
+    eff_cm = "KR"
   )
 
   for (ind in indicators) {
-    if (ind %in% names(file_type_map)) {
-      file_types_needed <- c(file_types_needed, file_type_map[[ind]])
+    if (ind %in% names(category_file_types)) {
+      file_types_needed <- c(file_types_needed, category_file_types[[ind]])
+    } else {
+      # Individual indicator code — resolve via DHS indicator dictionary
+      meta <- .mbg_indicator_meta(ind)
+      if (!is.na(meta$recode)) {
+        # Parse recode field: "HR/PR" -> c("HR", "PR"), "KR+PR" -> c("KR", "PR")
+        ft <- unlist(strsplit(meta$recode, "[/+]"))
+        file_types_needed <- c(file_types_needed, ft)
+      }
     }
   }
 
@@ -503,12 +522,17 @@ run_mbg_pipeline <- function(
 
   all_survey_results <- list()
 
+  cli::cli_progress_bar(
+    total = nrow(surveys_to_process),
+    format = "{cli::pb_bar} Survey {cli::pb_current}/{cli::pb_total} | {current_survey_type} {current_year}"
+  )
+
   for (i in seq_len(nrow(surveys_to_process))) {
     current_year <- surveys_to_process$DHSYEAR[i]
     current_survey_type <- surveys_to_process$survey_type[i]
     survey_key <- paste(tolower(current_survey_type), current_year, sep = "_")
 
-    cli::cli_h2("Processing survey: {current_survey_type} {current_year}")
+    cli::cli_progress_update()
 
     # ---- Load survey data for this survey using dhs_read() ----
 
@@ -638,8 +662,13 @@ run_mbg_pipeline <- function(
     derived_indicators <- c("eff_cm")
     primary_indicators <- setdiff(indicators, derived_indicators)
 
+    cli::cli_progress_bar(
+      total = length(primary_indicators),
+      format = "{cli::pb_bar} Indicator {cli::pb_current}/{cli::pb_total} | {ind_category}"
+    )
+
     for (ind_category in primary_indicators) {
-      cli::cli_h3("Processing: {ind_category}")
+      cli::cli_progress_update()
 
       tryCatch({
         ind_results <- .process_indicator_category(
@@ -777,35 +806,34 @@ run_mbg_pipeline <- function(
     )
 
     if (isTRUE(debug)) {
-      cli::cli_alert_info(
-        "Debug: year_dataset nrow={.val {nrow(year_dataset)}}, ncol={.val {ncol(year_dataset)}}"
-      )
-      cli::cli_alert_info(
-        "Debug: columns: {paste(names(year_dataset), collapse = ', ')}"
-      )
-    }
-
-    # Ensure output_basename is a single character string
-    if (length(output_basename) != 1) {
-      cli::cli_alert_danger(
-        "output_basename has unexpected length: {length(output_basename)}"
-      )
-      cli::cli_alert_info("Values: {paste(output_basename, collapse = ', ')}")
-      output_basename <- as.character(output_basename)[1]
-      cli::cli_alert_warning("Using first element: {.val {output_basename}}")
+      for (lvl in names(year_dataset)) {
+        nr <- nrow(year_dataset[[lvl]])
+        nc <- ncol(year_dataset[[lvl]])
+        cli::cli_alert_info(
+          "Debug: year_dataset${lvl} nrow={.val {nr}}, ncol={.val {nc}}"
+        )
+      }
     }
 
     # Coerce to plain character to avoid glue class issues
     output_basename <- as.character(output_basename)
 
-    # Build data dictionary
-    year_data_dict <- sntutils::build_dictionary(
-      data = year_dataset
-    )
+    # Ensure output_basename is a single character string
+    if (length(output_basename) != 1) {
+      output_basename <- output_basename[1]
+    }
 
-    # Write with data dictionary as second tab (versioned with date)
+    # Write each admin level as a named tab (xlsx) + full list (qs2)
+    write_obj <- year_dataset
+    # Add data dictionary based on the primary admin level
+    primary_key <- if (aggregation_level == "adm3") "adm3" else "adm2"
+    primary_df <- year_dataset[[primary_key]]
+    if (!is.null(primary_df) && nrow(primary_df) > 0) {
+      write_obj[["data_dict"]] <- sntutils::build_dictionary(data = primary_df)
+    }
+
     sntutils::write_snt_data(
-      obj = list(data = year_dataset, data_dict = year_data_dict),
+      obj = write_obj,
       path = output_dirs$tables,
       data_name = output_basename,
       file_formats = c("xlsx", "qs2"),
@@ -837,42 +865,45 @@ run_mbg_pipeline <- function(
 
   cli::cli_h2("Building combined dataset")
 
-  # Combine all surveys into one dataset (survey_year and survey_type already set
-  # by .build_final_dataset())
-  combined_datasets <- lapply(names(all_survey_results), function(key) {
-    df <- all_survey_results[[key]]$dataset
-    if (!is.null(df) && nrow(df) > 0) {
-      df
-    } else {
-      NULL
-    }
+  # Combine all surveys into one dataset per admin level
+  # Each year_dataset is a list(adm0 = ..., adm1 = ..., adm2 = ...)
+  all_year_lists <- lapply(names(all_survey_results), function(key) {
+    all_survey_results[[key]]$dataset
   })
 
-  combined_datasets <- combined_datasets[!sapply(combined_datasets, is.null)]
+  # Collect admin level names across all surveys
+  all_levels <- unique(unlist(lapply(all_year_lists, names)))
+  all_levels <- all_levels[nzchar(all_levels)]
 
-  if (length(combined_datasets) > 0) {
-    results$final_dataset <- dplyr::bind_rows(combined_datasets)
+  if (length(all_levels) > 0) {
+    # Bind rows per admin level across surveys
+    results$final_dataset <- lapply(stats::setNames(all_levels, all_levels), function(lvl) {
+      dfs <- lapply(all_year_lists, function(ds) ds[[lvl]])
+      dfs <- dfs[!sapply(dfs, is.null)]
+      dfs <- dfs[sapply(dfs, function(d) nrow(d) > 0)]
+      if (length(dfs) == 0) return(tibble::tibble())
+      dplyr::bind_rows(dfs)
+    })
 
-    # Apply smart rounding to combined dataset
+    # Apply smart rounding
     results$final_dataset <- .round_mbg_output(results$final_dataset)
 
     # Save combined dataset when processing multiple surveys
     if (nrow(surveys_to_process) > 1) {
-      combined_basename <- glue::glue(
+      combined_basename <- as.character(glue::glue(
         "{tolower(country_iso3)}_mbg_indicators_combined"
-      )
+      ))
 
-      # Coerce to plain character to avoid glue class issues
-      combined_basename <- as.character(combined_basename)
+      # Write list as multi-tab xlsx + qs2
+      write_obj <- results$final_dataset
+      primary_key <- if (aggregation_level == "adm3") "adm3" else "adm2"
+      primary_df <- results$final_dataset[[primary_key]]
+      if (!is.null(primary_df) && nrow(primary_df) > 0) {
+        write_obj[["data_dict"]] <- sntutils::build_dictionary(data = primary_df)
+      }
 
-      # Build data dictionary for combined dataset
-      combined_data_dict <- sntutils::build_dictionary(
-        data = results$final_dataset
-      )
-
-      # Write with data dictionary as second tab (versioned with date)
       sntutils::write_snt_data(
-        obj = list(data = results$final_dataset, data_dict = combined_data_dict),
+        obj = write_obj,
         path = output_dirs$tables,
         data_name = combined_basename,
         file_formats = c("xlsx", "qs2"),
@@ -887,7 +918,7 @@ run_mbg_pipeline <- function(
       )
     }
   } else {
-    results$final_dataset <- data.frame()
+    results$final_dataset <- list(adm0 = tibble::tibble(), adm1 = tibble::tibble(), adm2 = tibble::tibble())
     cli::cli_alert_warning("No data could be processed")
   }
 
@@ -963,12 +994,16 @@ run_mbg_pipeline <- function(
   verbose,
   debug = FALSE
 ) {
-  # Use u5 population raster for u5-specific indicators, fall back to total
-  use_u5 <- category %in% c("pfpr", "itn") && !is.null(pop_rast_u5)
+  # Select population raster based on indicator's target population
+  ind_pop_type <- .mbg_indicator_pop_type(category)
+  use_u5 <- ind_pop_type == "u5" && !is.null(pop_rast_u5)
   pop_for_indicator <- if (use_u5) pop_rast_u5 else pop_rast
 
   # Log which population raster is being used (debug only)
   if (isTRUE(debug)) {
+    cli::cli_alert_info(
+      "Indicator {.val {category}} pop_type={.val {ind_pop_type}}"
+    )
     if (use_u5) {
       pop_src <- terra::sources(pop_rast_u5)
       cli::cli_alert_info("Using u5 population raster: {.file {basename(pop_src)}}")
@@ -1350,9 +1385,15 @@ run_mbg_pipeline <- function(
       return(results)
     }
 
-    for (ind_name in names(cluster_data)) {
-      # Skip combined tables — they are reference data, not MBG inputs
-      if (grepl("^pfpr_combined_", ind_name)) next
+    mbg_indicators <- names(cluster_data)
+    mbg_indicators <- mbg_indicators[!grepl("^pfpr_combined_", mbg_indicators)]
+    cli::cli_progress_bar(
+      total = length(mbg_indicators),
+      format = "{cli::pb_bar} MBG {cli::pb_current}/{cli::pb_total} | {ind_name}"
+    )
+
+    for (ind_name in mbg_indicators) {
+      cli::cli_progress_update()
 
       # Skip indicators with too few clusters for MBG
       dt <- cluster_data[[ind_name]]
@@ -1364,7 +1405,9 @@ run_mbg_pipeline <- function(
         next
       }
 
-      cli::cli_alert_info("Running MBG for {ind_name} ({n_clusters} clusters)...")
+      if (isTRUE(debug)) {
+        cli::cli_alert_info("Running MBG for {ind_name} ({n_clusters} clusters)...")
+      }
 
       mbg_result <- tryCatch({
         .run_single_mbg(
@@ -1597,7 +1640,7 @@ run_mbg_pipeline <- function(
   )
 
   # Determine primary polygon based on aggregation level
-  cli::cli_alert_info("MBG aggregation level: {.val {aggregation_level}}")
+  if (isTRUE(debug)) cli::cli_alert_info("MBG aggregation level: {.val {aggregation_level}}")
   if (aggregation_level == "adm3") {
     primary_sf <- adm3_sf
     polygon_id_field <- "adm3"
@@ -1631,7 +1674,7 @@ run_mbg_pipeline <- function(
     ))
 
     if (all_rasters_exist) {
-      cli::cli_alert_info("Using cached prediction rasters for {.val {indicator_name}}")
+      if (isTRUE(debug)) cli::cli_alert_info("Using cached prediction rasters for {.val {indicator_name}}")
 
       cached_rasters <- lapply(expected_raster_paths, terra::rast)
 
@@ -1681,17 +1724,19 @@ run_mbg_pipeline <- function(
   )
 
   if (isTRUE(cache) && fs::file_exists(id_raster_file)) {
-    cli::cli_alert_info("Using cached ID raster ({cache_suffix})")
+    if (isTRUE(debug)) cli::cli_alert_info("Using cached ID raster ({cache_suffix})")
     id_raster <- terra::rast(id_raster_file)
   } else {
-    cli::cli_alert_info("Building ID raster ({cache_suffix})...")
+    if (isTRUE(debug)) cli::cli_alert_info("Building ID raster ({cache_suffix})...")
     id_raster <- mbg::build_id_raster(
       polygons = primary_vect,
       template_raster = pop_rast
     )
     terra::writeRaster(id_raster, id_raster_file, overwrite = TRUE)
-    rel_path <- .relative_path(id_raster_file)
-    cli::cli_alert_success("Saved ID raster: {.file {rel_path}}")
+    if (isTRUE(debug)) {
+      rel_path <- .relative_path(id_raster_file)
+      cli::cli_alert_success("Saved ID raster: {.file {rel_path}}")
+    }
   }
 
   if (isTRUE(debug)) {
@@ -1710,10 +1755,10 @@ run_mbg_pipeline <- function(
   )
 
   if (isTRUE(cache) && fs::file_exists(agg_file)) {
-    cli::cli_alert_info("Using cached aggregation table ({cache_suffix})")
+    if (isTRUE(debug)) cli::cli_alert_info("Using cached aggregation table ({cache_suffix})")
     aggregation_table <- arrow::read_parquet(agg_file)
   } else {
-    cli::cli_alert_info("Building aggregation table ({cache_suffix})...")
+    if (isTRUE(debug)) cli::cli_alert_info("Building aggregation table ({cache_suffix})...")
     aggregation_table <- mbg::build_aggregation_table(
       polygons = primary_vect,
       id_raster = id_raster,
@@ -1721,8 +1766,10 @@ run_mbg_pipeline <- function(
       verbose = FALSE
     )
     arrow::write_parquet(aggregation_table, agg_file)
-    rel_path <- .relative_path(agg_file)
-    cli::cli_alert_success("Saved aggregation table: {.file {rel_path}}")
+    if (isTRUE(debug)) {
+      rel_path <- .relative_path(agg_file)
+      cli::cli_alert_success("Saved aggregation table: {.file {rel_path}}")
+    }
   }
 
   if (isTRUE(debug)) {
@@ -1730,7 +1777,7 @@ run_mbg_pipeline <- function(
   }
 
   # Run MBG
-  cli::cli_alert_info("Running MBG model...")
+  if (isTRUE(debug)) cli::cli_alert_info("Running MBG model...")
   model_runner <- mbg::MbgModelRunner$new(
     input_data = cluster_dt,
     id_raster = id_raster,
@@ -1740,8 +1787,15 @@ run_mbg_pipeline <- function(
     population_raster = pop_rast
   )
 
-  model_runner$run_mbg_pipeline()
-  cli::cli_alert_success("MBG model complete")
+  if (isTRUE(debug)) {
+    model_runner$run_mbg_pipeline()
+  } else {
+    invisible(utils::capture.output(
+      model_runner$run_mbg_pipeline(),
+      type = "output"
+    ))
+  }
+  if (isTRUE(debug)) cli::cli_alert_success("MBG model complete")
 
   # Extract predictions and ensure they are SpatRaster objects
   cell_preds <- model_runner$grid_cell_predictions
@@ -1770,8 +1824,10 @@ run_mbg_pipeline <- function(
         expected_raster_paths[[rast_name]],
         overwrite = TRUE
       )
-      rel_path <- .relative_path(expected_raster_paths[[rast_name]])
-      cli::cli_alert_success("Saved raster ({rast_name}): {.file {rel_path}}")
+      if (isTRUE(debug)) {
+        rel_path <- .relative_path(expected_raster_paths[[rast_name]])
+        cli::cli_alert_success("Saved raster ({rast_name}): {.file {rel_path}}")
+      }
     }
   }
 
@@ -2149,8 +2205,16 @@ run_mbg_pipeline <- function(
 }
 
 
-#' Build Final Dataset
+#' Build Final Dataset (Long Format)
 #'
+#' Converts wide-format MBG estimates and cluster data into a long-format
+#' list of tibbles matching the DHS output structure: one row per indicator
+#' per admin unit, with standard columns (survey_id, iso3, iso2, type,
+#' geo_source, point, ci_l, ci_u, numerator, denominator, indicator,
+#' indicator_code, numerator_description, denominator_description,
+#' denominator_code).
+#'
+#' @return Named list with `adm0`, `adm1`, and `adm2` (or `adm3`) tibbles.
 #' @noRd
 .build_final_dataset <- function(
   adm2_sf,
@@ -2164,182 +2228,267 @@ run_mbg_pipeline <- function(
   aggregation_level = "adm2",
   cluster_interview_months = NULL
 ) {
-  # Determine base sf object based on aggregation level
   base_sf <- if (aggregation_level == "adm3") adm3_sf else adm2_sf
+  primary_col <- if (aggregation_level == "adm3") "adm3" else "adm2"
 
-  # Start with base sf
+  # ---- Resolve admin column names in shapefile ----
 
-  final <- base_sf |>
+  admin_df <- base_sf |>
     sf::st_drop_geometry() |>
     tibble::as_tibble()
 
-  # ---- Add standard identifier columns ----
-
-  # Add country codes if provided (uppercase)
-  if (!is.null(country_iso3)) {
-    final$iso3_code <- toupper(country_iso3)
-  }
-
-  if (!is.null(country_iso2)) {
-    final$dhs_code <- toupper(country_iso2)
-  }
-
-  # Ensure adm0, adm1, adm2 columns exist (try common names)
-  if (!"adm0" %in% names(final)) {
-    # Try to find adm0 from other column names
-    adm0_candidates <- c(
-      "ADM0_NAME", "ADMIN0", "country", "Country", "NAME_0"
-    )
-    for (col in adm0_candidates) {
-      if (col %in% names(final)) {
-        final$adm0 <- final[[col]]
-        break
+  # Discover standard admin columns if missing
+  .find_col <- function(df, target, candidates) {
+    if (target %in% names(df)) return(df)
+    for (col in candidates) {
+      if (col %in% names(df)) {
+        df[[target]] <- df[[col]]
+        return(df)
       }
     }
+    df
   }
 
-  if (!"adm1" %in% names(final)) {
-    # Try to find adm1 from other column names
-    adm1_candidates <- c(
-      "ADM1_NAME", "ADMIN1", "province", "Province",
-      "NAME_1", "region", "Region"
-    )
-    for (col in adm1_candidates) {
-      if (col %in% names(final)) {
-        final$adm1 <- final[[col]]
-        break
-      }
-    }
+  admin_df <- .find_col(admin_df, "adm0", c("ADM0_NAME", "ADMIN0", "country", "Country", "NAME_0"))
+  admin_df <- .find_col(admin_df, "adm1", c("ADM1_NAME", "ADMIN1", "province", "Province", "NAME_1", "region", "Region"))
+  admin_df <- .find_col(admin_df, "adm2", c("ADM2_NAME", "ADMIN2", "district", "District", "NAME_2"))
+
+  if (aggregation_level == "adm3") {
+    admin_df <- .find_col(admin_df, "adm3", c("ADM3_NAME", "ADMIN3", "commune", "Commune", "NAME_3", "subdistrict", "Subdistrict", "ward", "Ward"))
   }
 
-  if (!"adm2" %in% names(final)) {
-    # Try to find adm2 from other column names
-    adm2_candidates <- c(
-      "ADM2_NAME", "ADMIN2", "district", "District", "NAME_2"
-    )
-    for (col in adm2_candidates) {
-      if (col %in% names(final)) {
-        final$adm2 <- final[[col]]
-        break
-      }
-    }
-  }
+  # Build admin hierarchy lookup (primary_col → adm0, adm1, ...)
+  admin_cols <- c("adm0", "adm1", "adm2")
+  if (aggregation_level == "adm3") admin_cols <- c(admin_cols, "adm3")
+  admin_cols <- intersect(admin_cols, names(admin_df))
+  admin_lookup <- admin_df |>
+    dplyr::select(dplyr::all_of(admin_cols)) |>
+    dplyr::distinct()
 
-  # If aggregation_level is adm3, ensure adm3 column exists
-  if (aggregation_level == "adm3" && !"adm3" %in% names(final)) {
-    adm3_candidates <- c(
-      "ADM3_NAME", "ADMIN3", "commune", "Commune", "NAME_3",
-      "subdistrict", "Subdistrict", "ward", "Ward"
-    )
-    for (col in adm3_candidates) {
-      if (col %in% names(final)) {
-        final$adm3 <- final[[col]]
-        break
-      }
-    }
-  }
+  # ---- Aggregate cluster data to primary admin level (long format) ----
 
-  # Add survey year and type
-  final$survey_year <- survey_year
-  final$survey_type <- survey_type
-
-  # Determine merge key based on aggregation level
-  merge_key <- if (aggregation_level == "adm3") "adm3" else "adm2"
-
-  # ---- Add median survey month per admin unit ----
-  if (!is.null(cluster_interview_months) && nrow(cluster_interview_months) > 0) {
-    month_agg <- .aggregate_interview_month_to_admin(
-      cluster_months = cluster_interview_months,
-      admin_sf = base_sf,
-      admin_col = merge_key
-    )
-    if (!is.null(month_agg) && nrow(month_agg) > 0) {
-      final <- final |>
-        dplyr::left_join(month_agg, by = merge_key)
-    }
-  }
-
-  # ---- Merge MBG estimates ----
-
-  # Warn if merge key column not found in final dataset
-  if (!merge_key %in% names(final)) {
-    cli::cli_alert_warning(
-      "Column '{merge_key}' not found in shapefile - MBG estimates cannot be merged"
-    )
-  }
-
-  for (name in names(mbg_estimates)) {
-    est <- mbg_estimates[[name]]
-
-    if (!is.null(est) && nrow(est) > 0) {
-      # Find columns to merge (exclude admin columns already present)
-      merge_cols <- setdiff(names(est), names(final))
-
-      if (merge_key %in% names(est) && merge_key %in% names(final)) {
-        final <- final |>
-          dplyr::left_join(
-            est |> dplyr::select(dplyr::all_of(merge_key), dplyr::all_of(merge_cols)),
-            by = merge_key
-          )
-      } else if (!merge_key %in% names(est)) {
-        cli::cli_alert_warning(
-          "MBG estimates for '{name}' missing '{merge_key}' column - skipping merge"
-        )
-      }
-    }
-  }
-
-  # ---- Aggregate cluster data to admin level ----
-
+  cluster_counts <- NULL
   if (!is.null(cluster_data) && length(cluster_data) > 0) {
-    # Filter out combined tables (different column structure)
     cluster_data_for_agg <- cluster_data[
       !grepl("^pfpr_combined_", names(cluster_data))
     ]
 
-    cluster_stats <- .aggregate_cluster_to_admin(
-      cluster_data = cluster_data_for_agg,
-      admin_sf = base_sf,
-      admin_col = merge_key,
-      join_nearest = TRUE
-    )
+    cluster_rows <- list()
+    for (ind_name in names(cluster_data_for_agg)) {
+      dt <- cluster_data_for_agg[[ind_name]]
+      if (is.null(dt) || nrow(dt) == 0) next
+      if (!all(c("x", "y", "indicator", "samplesize") %in% names(dt))) next
 
-    if (!is.null(cluster_stats) && nrow(cluster_stats) > 0) {
-      # Merge cluster stats into final
-      cluster_cols <- setdiff(names(cluster_stats), names(final))
-      if (length(cluster_cols) > 0 && merge_key %in% names(cluster_stats)) {
-        final <- final |>
-          dplyr::left_join(
-            cluster_stats |> dplyr::select(
-              dplyr::all_of(merge_key),
-              dplyr::all_of(cluster_cols)
-            ),
-            by = merge_key
-          )
+      # Spatial join clusters to admin polygons
+      cluster_sf <- dt |>
+        tibble::as_tibble() |>
+        dplyr::filter(!is.na(x), !is.na(y), x != 0, y != 0) |>
+        sf::st_as_sf(coords = c("x", "y"), crs = 4326, remove = FALSE)
+
+      admin_crs <- sf::st_crs(base_sf)
+      if (!is.na(admin_crs)) {
+        cluster_sf <- sf::st_transform(cluster_sf, admin_crs)
       }
+
+      joined <- sf::st_join(
+        cluster_sf,
+        base_sf |> dplyr::select(dplyr::all_of(primary_col)),
+        join = sf::st_within,
+        left = TRUE
+      )
+
+      # Snap unmatched clusters to nearest polygon
+      unmatched <- is.na(joined[[primary_col]])
+      if (any(unmatched)) {
+        nearest_idx <- sf::st_nearest_feature(joined[unmatched, ], base_sf)
+        joined[[primary_col]][unmatched] <- base_sf[[primary_col]][nearest_idx]
+      }
+
+      agg <- sf::st_drop_geometry(joined) |>
+        dplyr::filter(!is.na(.data[[primary_col]])) |>
+        dplyr::group_by(dplyr::across(dplyr::all_of(primary_col))) |>
+        dplyr::summarise(
+          numerator = sum(indicator, na.rm = TRUE),
+          denominator = sum(samplesize, na.rm = TRUE),
+          .groups = "drop"
+        ) |>
+        dplyr::mutate(indicator_code = ind_name)
+
+      cluster_rows[[ind_name]] <- agg
+    }
+
+    if (length(cluster_rows) > 0) {
+      cluster_counts <- dplyr::bind_rows(cluster_rows)
     }
   }
 
-  # ---- Select and reorder final columns ----
+  # ---- Median interview month per admin unit ----
 
-  # Define required identifier columns (include adm3 if aggregation_level is adm3)
-  if (aggregation_level == "adm3") {
-    id_cols <- c("iso3_code", "dhs_code", "adm0", "adm1", "adm2", "adm3", "survey_year", "survey_type", "median_survey_month")
-  } else {
-    id_cols <- c("iso3_code", "dhs_code", "adm0", "adm1", "adm2", "survey_year", "survey_type", "median_survey_month")
+  month_lookup <- NULL
+  if (!is.null(cluster_interview_months) && nrow(cluster_interview_months) > 0) {
+    month_lookup <- .aggregate_interview_month_to_admin(
+      cluster_months = cluster_interview_months,
+      admin_sf = base_sf,
+      admin_col = primary_col
+    )
   }
-  id_cols_present <- intersect(id_cols, names(final))
 
-  # Identify indicator columns (MBG estimates and cluster statistics)
-  mbg_cols <- names(final)[grepl("_(mean|lower|upper)$", names(final))]
-  cluster_stat_cols <- names(final)[grepl("^(n_tested_|n_pos_|n_clusters_|.*_raw$)", names(final))]
-  indicator_cols <- c(mbg_cols, cluster_stat_cols)
+  # ---- Build long-format rows for each indicator ----
 
-  # Select only required columns (drop GUIDs, hashes, etc.)
-  final <- final |>
-    dplyr::select(dplyr::all_of(c(id_cols_present, indicator_cols)))
+  survey_id <- paste0(toupper(country_iso2), survey_year, toupper(survey_type))
+  iso3_upper <- toupper(country_iso3)
+  iso2_upper <- toupper(country_iso2)
 
-  final
+  indicator_rows <- list()
+
+  for (ind_name in names(mbg_estimates)) {
+    est <- mbg_estimates[[ind_name]]
+    if (is.null(est) || nrow(est) == 0) next
+
+    mean_col <- paste0(ind_name, "_mean")
+    lower_col <- paste0(ind_name, "_lower")
+    upper_col <- paste0(ind_name, "_upper")
+    if (!mean_col %in% names(est)) next
+
+    # Get indicator metadata
+    meta <- .mbg_indicator_meta(ind_name)
+    ind_desc <- .mbg_indicator_label(ind_name)
+
+    # Pivot from wide to long
+    ind_df <- est |>
+      dplyr::select(dplyr::all_of(c(primary_col, mean_col, lower_col, upper_col))) |>
+      dplyr::rename(
+        point = dplyr::all_of(mean_col),
+        ci_l  = dplyr::all_of(lower_col),
+        ci_u  = dplyr::all_of(upper_col)
+      ) |>
+      dplyr::mutate(
+        indicator                = ind_desc$indicator,
+        indicator_code           = ind_name,
+        numerator_description    = ind_desc$numerator_description,
+        denominator_description  = ind_desc$denominator_description,
+        denominator_code         = ind_desc$denominator_code
+      )
+
+    # Join cluster-level numerator/denominator
+    if (!is.null(cluster_counts)) {
+      ind_counts <- cluster_counts |>
+        dplyr::filter(indicator_code == ind_name) |>
+        dplyr::select(dplyr::all_of(primary_col), numerator, denominator)
+      if (nrow(ind_counts) > 0) {
+        ind_df <- ind_df |>
+          dplyr::left_join(ind_counts, by = primary_col)
+      }
+    }
+
+    # Ensure numerator/denominator columns exist
+    if (!"numerator" %in% names(ind_df)) {
+      ind_df$numerator <- NA_integer_
+    }
+    if (!"denominator" %in% names(ind_df)) {
+      ind_df$denominator <- NA_integer_
+    }
+
+    indicator_rows[[ind_name]] <- ind_df
+  }
+
+  if (length(indicator_rows) == 0) {
+    out <- list(adm0 = tibble::tibble(), adm1 = tibble::tibble())
+    out[[primary_col]] <- tibble::tibble()
+    return(out)
+  }
+
+  # Stack all indicators at primary admin level
+  primary_long <- dplyr::bind_rows(indicator_rows)
+
+  # Join admin hierarchy
+  primary_long <- primary_long |>
+    dplyr::left_join(admin_lookup, by = primary_col)
+
+  # Join median survey month
+  if (!is.null(month_lookup) && nrow(month_lookup) > 0) {
+    primary_long <- primary_long |>
+      dplyr::left_join(month_lookup, by = primary_col)
+  }
+
+  # Add metadata columns
+  primary_long <- primary_long |>
+    dplyr::mutate(
+      survey_id   = survey_id,
+      iso3        = iso3_upper,
+      iso2        = iso2_upper,
+      survey_type = survey_type,
+      survey_year = as.integer(survey_year),
+      type        = "mbg",
+      geo_source  = "gps"
+    )
+
+  # ---- Build adm1 and adm0 by aggregation ----
+
+  meta_cols <- c("survey_id", "iso3", "iso2", "survey_type", "survey_year",
+                 "type", "geo_source")
+  desc_cols <- c("indicator", "indicator_code", "numerator_description",
+                 "denominator_description", "denominator_code")
+
+  # adm1: population-weighted mean of primary-level estimates
+  adm1_long <- primary_long |>
+    dplyr::group_by(
+      dplyr::across(dplyr::all_of(c(meta_cols, "adm0", "adm1", desc_cols)))
+    ) |>
+    dplyr::summarise(
+      point       = stats::weighted.mean(point, denominator, na.rm = TRUE),
+      ci_l        = stats::weighted.mean(ci_l, denominator, na.rm = TRUE),
+      ci_u        = stats::weighted.mean(ci_u, denominator, na.rm = TRUE),
+      numerator   = sum(numerator, na.rm = TRUE),
+      denominator = sum(denominator, na.rm = TRUE),
+      .groups = "drop"
+    )
+
+  # adm0: population-weighted mean of all primary-level estimates
+  adm0_long <- primary_long |>
+    dplyr::group_by(
+      dplyr::across(dplyr::all_of(c(meta_cols, "adm0", desc_cols)))
+    ) |>
+    dplyr::summarise(
+      point       = stats::weighted.mean(point, denominator, na.rm = TRUE),
+      ci_l        = stats::weighted.mean(ci_l, denominator, na.rm = TRUE),
+      ci_u        = stats::weighted.mean(ci_u, denominator, na.rm = TRUE),
+      numerator   = sum(numerator, na.rm = TRUE),
+      denominator = sum(denominator, na.rm = TRUE),
+      .groups = "drop"
+    )
+
+  # ---- Standardise column order (matching DHS output) ----
+
+  .order_cols <- function(df, admin_cols) {
+    col_order <- c(
+      "survey_id", "iso3", "iso2", "survey_type", "survey_year",
+      "adm0", admin_cols,
+      "type", "geo_source",
+      "point", "ci_l", "ci_u",
+      "numerator", "denominator",
+      "indicator", "indicator_code",
+      "numerator_description", "denominator_description", "denominator_code"
+    )
+    # Keep median_survey_month at the end if present
+    extra <- setdiff(names(df), col_order)
+    present <- intersect(c(col_order, extra), names(df))
+    df |> dplyr::select(dplyr::all_of(present))
+  }
+
+  primary_admin_cols <- if (aggregation_level == "adm3") {
+    c("adm1", "adm2", "adm3")
+  } else {
+    c("adm1", "adm2")
+  }
+
+  out <- list(
+    adm0 = .order_cols(adm0_long, character(0)),
+    adm1 = .order_cols(adm1_long, "adm1")
+  )
+  out[[primary_col]] <- .order_cols(primary_long, primary_admin_cols)
+
+  out
 }
 
 
@@ -2621,6 +2770,11 @@ run_mbg_pipeline <- function(
 #'
 #' @noRd
 .round_mbg_output <- function(df) {
+
+  # Handle list output (adm0/adm1/adm2 format)
+  if (is.list(df) && !is.data.frame(df)) {
+    return(lapply(df, .round_mbg_output))
+  }
 
   if (is.null(df) || nrow(df) == 0) return(df)
 
