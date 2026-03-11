@@ -145,13 +145,34 @@ calc_irs_dhs_core <- function(
   tibble::as_tibble(irs_results)
 }
 
-#' Calculate IRS Coverage from DHS Data (with metadata)
+#' Calculate IRS Coverage from DHS Data
 #'
-#' Wrapper around calc_irs_dhs_core() that also returns metadata and
-#' data dictionary.
+#' Computes IRS coverage among households from DHS Household Records (HR)
+#' data. Returns survey-weighted proportions with logit confidence intervals
+#' in standardized long format.
 #'
 #' @inheritParams calc_irs_dhs_core
-#' @return List with data, dict, and metadata.
+#' @param ci_method Method for confidence intervals. Default: "logit".
+#'
+#' @return Named list with:
+#'   \describe{
+#'     \item{`adm0`}{National-level estimates (always present)}
+#'     \item{`adm1`}{Admin-1 estimates (when `region_var` provided)}
+#'   }
+#'   Each tibble contains standardized columns: survey_id, iso3, iso2,
+#'   survey_type, survey_year, adm0, [adm1], type, geo_source, point,
+#'   ci_l, ci_u, numerator, denominator, indicator, indicator_code,
+#'   numerator_description, denominator_description, denominator_code.
+#'
+#' @examples
+#' \dontrun{
+#' irs <- calc_irs_dhs(dhs_hr = hr_data, region_var = "hv024")
+#' irs$adm0
+#' irs$adm1
+#' }
+#'
+#' @seealso [irs_dictionary()] for indicator metadata,
+#'   [calc_irs_dhs_core()] for legacy wide-format output
 #' @export
 calc_irs_dhs <- function(
   dhs_hr,
@@ -162,46 +183,121 @@ calc_irs_dhs <- function(
     irs = "hv253"
   ),
   region_var = NULL,
-  gps_data = NULL,
-  gps_vars = list(
-    cluster = "DHSCLUST",
-    lat = "LATNUM",
-    lon = "LONGNUM"
-  ),
-  shapefile = NULL,
-  admin_level = NULL,
-  join_nearest = TRUE
+  ci_method = "logit"
 ) {
-  irs_data <- calc_irs_dhs_core(
+  # ---- 1. Extract survey metadata (HR data uses hv-prefix) ----
+  survey_meta <- .extract_survey_meta_hv(dhs_hr)
+
+  # ---- 2. Prepare data ----
+  hr <- .prepare_irs_data(
     dhs_hr = dhs_hr,
     survey_vars = survey_vars,
-    region_var = region_var,
-    gps_data = gps_data,
-    gps_vars = gps_vars,
-    shapefile = shapefile,
-    admin_level = admin_level,
-    join_nearest = join_nearest
+    include_survey_vars = TRUE
   )
 
-  labels <- tibble::tribble(
-    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~notes,
-    "dhs_irs", "IRS coverage", "Couverture de la PID", "hv253", "Households sprayed in last 12 months", "All households", "hv253", NA_character_, "HR module; household-level IRS in last 12 months",
-    "dhs_irs_low", "IRS - lower 95% CI", "PID - IC 95% inferieur", "hv253", NA_character_, NA_character_, NA_character_, NA_character_, "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_irs_upp", "IRS - upper 95% CI", "PID - IC 95% superieur", "hv253", NA_character_, NA_character_, NA_character_, NA_character_, "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_n_households_irs", "Number of households (denominator)", "Nombre de menages (denominateur)", NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, "Unweighted count",
-    "dhs_n_sprayed", "Number of households sprayed (numerator)", "Nombre de menages pulverises (numerateur)", "hv253", NA_character_, NA_character_, NA_character_, NA_character_, "Unweighted count"
-  )
+  # ---- 3. Resolve region labels ----
+  group_var <- NULL
+  geo_src <- NA_character_
 
-  dict <- sntutils::build_dictionary(irs_data)
-  dict <- .enrich_dhs_dictionary(dict, labels)
-
-  list(
-    data = irs_data,
-    dict = dict,
-    metadata = list(
-      analysis_type = "IRS (Indoor Residual Spraying)",
-      file_type = "HR",
-      processed_date = Sys.Date()
+  if (!is.null(region_var)) {
+    if (!region_var %in% names(dhs_hr)) {
+      cli::cli_abort("Column {.var {region_var}} not found in `dhs_hr`.")
+    }
+    hr$region <- .resolve_region_labels(
+      dhs_hr[[region_var]], region_var
     )
+    group_var <- "region"
+    geo_src <- "survey"
+  }
+
+  # ---- 4. Get conditions ----
+  conditions <- .irs_conditions()
+
+  # ---- 5. Compute national results ----
+  national_results <- purrr::map_dfr(conditions, function(cond) {
+    .compute_dhs_indicator_generic(
+      data = hr,
+      condition = cond,
+      group_var = NULL,
+      ci_method = ci_method
+    )
+  })
+
+  # ---- 6. Compute regional results ----
+  regional_results <- tibble::tibble()
+  if (!is.null(group_var)) {
+    regional_results <- purrr::map_dfr(conditions, function(cond) {
+      .compute_dhs_indicator_generic(
+        data = hr,
+        condition = cond,
+        group_var = group_var,
+        subnational_level = "adm1",
+        ci_method = ci_method
+      )
+    })
+    # Keep only regional rows
+    regional_results <- regional_results |>
+      dplyr::filter(level != "adm0")
+  }
+
+  # ---- 7. Assemble output ----
+  .assemble_dhs_output(
+    national_results = national_results,
+    regional_results = regional_results,
+    survey_meta = survey_meta,
+    geo_source = geo_src,
+    admin_col = "adm1"
+  )
+}
+
+
+# =============================================================================
+# Indicator conditions
+# =============================================================================
+
+#' Internal: IRS indicator conditions
+#'
+#' @return List of named lists, each with indicator specification.
+#' @noRd
+.irs_conditions <- function() {
+  list(
+    list(
+      indicator       = "IRS",
+      indicator_code  = "irs",
+      indicator_title = "IRS coverage among households",
+      denom_code      = "all_hh",
+      filter_expr     = NULL,
+      outcome_var     = "sprayed",
+      num_desc        = "Households sprayed in last 12 months",
+      denom_desc      = "All households"
+    )
+  )
+}
+
+
+# =============================================================================
+# Indicator Dictionary
+# =============================================================================
+
+#' IRS Indicator Dictionary
+#'
+#' Returns the dictionary of IRS indicators with metadata.
+#'
+#' @return Tibble with columns: indicator, indicator_code, indicator_title,
+#'   numerator_description, denominator_description, denominator_code.
+#'
+#' @examples
+#' irs_dictionary()
+#'
+#' @export
+irs_dictionary <- function() {
+  conds <- .irs_conditions()
+  tibble::tibble(
+    indicator               = vapply(conds, `[[`, character(1), "indicator"),
+    indicator_code          = vapply(conds, `[[`, character(1), "indicator_code"),
+    indicator_title         = vapply(conds, `[[`, character(1), "indicator_title"),
+    numerator_description   = vapply(conds, `[[`, character(1), "num_desc"),
+    denominator_description = vapply(conds, `[[`, character(1), "denom_desc"),
+    denominator_code        = vapply(conds, `[[`, character(1), "denom_code")
   )
 }

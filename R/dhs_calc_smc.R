@@ -140,10 +140,34 @@ calc_smc_dhs_core <- function(
   tibble::as_tibble(smc_results)
 }
 
-#' Calculate SMC Coverage from DHS Data (with metadata)
+#' Calculate SMC Coverage from DHS Data
+#'
+#' Computes SMC coverage among eligible children from DHS Children's
+#' Recode (KR) data. Returns survey-weighted proportions with logit
+#' confidence intervals in standardized long format.
 #'
 #' @inheritParams calc_smc_dhs_core
-#' @return List with data, dict, and metadata.
+#' @param ci_method Method for confidence intervals. Default: "logit".
+#'
+#' @return Named list with:
+#'   \describe{
+#'     \item{`adm0`}{National-level estimates (always present)}
+#'     \item{`adm1`}{Admin-1 estimates (when `region_var` provided)}
+#'   }
+#'   Each tibble contains standardized columns: survey_id, iso3, iso2,
+#'   survey_type, survey_year, adm0, [adm1], type, geo_source, point,
+#'   ci_l, ci_u, numerator, denominator, indicator, indicator_code,
+#'   numerator_description, denominator_description, denominator_code.
+#'
+#' @examples
+#' \dontrun{
+#' smc <- calc_smc_dhs(dhs_kr = kr_data, region_var = "v024")
+#' smc$adm0
+#' smc$adm1
+#' }
+#'
+#' @seealso [smc_dictionary()] for indicator metadata,
+#'   [calc_smc_dhs_core()] for legacy wide-format output
 #' @export
 calc_smc_dhs <- function(
   dhs_kr,
@@ -156,46 +180,126 @@ calc_smc_dhs <- function(
     smc_alt = "ml13g"
   ),
   region_var = NULL,
-  gps_data = NULL,
-  gps_vars = list(
-    cluster = "DHSCLUST",
-    lat = "LATNUM",
-    lon = "LONGNUM"
-  ),
-  shapefile = NULL,
-  admin_level = NULL,
-  join_nearest = TRUE
+  ci_method = "logit"
 ) {
-  smc_data <- calc_smc_dhs_core(
+  # ---- 1. Extract survey metadata ----
+  survey_meta <- .extract_survey_meta(dhs_kr)
+
+  # ---- 2. Prepare data ----
+  kr <- .prepare_smc_data(
     dhs_kr = dhs_kr,
     survey_vars = survey_vars,
-    region_var = region_var,
-    gps_data = gps_data,
-    gps_vars = gps_vars,
-    shapefile = shapefile,
-    admin_level = admin_level,
-    join_nearest = join_nearest
+    include_survey_vars = TRUE
   )
 
-  labels <- tibble::tribble(
-    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~notes,
-    "dhs_smc", "SMC coverage", "Couverture CPS", "hml43 (or ml13g)", "Children receiving SMC", "SMC-eligible children", "hml43/ml13g", NA_character_, "Variable availability varies by survey; hml43 preferred",
-    "dhs_smc_low", "SMC - lower 95% CI", "CPS - IC 95% inferieur", "hml43 (or ml13g)", NA_character_, NA_character_, NA_character_, NA_character_, "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_smc_upp", "SMC - upper 95% CI", "CPS - IC 95% superieur", "hml43 (or ml13g)", NA_character_, NA_character_, NA_character_, NA_character_, "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_n_smc_eligible", "Number of SMC-eligible children (denominator)", "Nombre d'enfants eligibles a la CPS (denominateur)", NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, "Unweighted count",
-    "dhs_n_smc_received", "Number receiving SMC (numerator)", "Nombre recevant la CPS (numerateur)", "hml43 (or ml13g)", NA_character_, NA_character_, NA_character_, NA_character_, "Unweighted count"
-  )
+  # .prepare_smc_data may return NULL if SMC variable not found
+  if (is.null(kr)) {
+    cli::cli_abort("SMC data preparation failed; SMC variable not available.")
+  }
 
-  dict <- sntutils::build_dictionary(smc_data)
-  dict <- .enrich_dhs_dictionary(dict, labels)
+  # ---- 3. Resolve region labels ----
+  group_var <- NULL
+  geo_src <- NA_character_
 
-  list(
-    data = smc_data,
-    dict = dict,
-    metadata = list(
-      analysis_type = "SMC (Seasonal Malaria Chemoprevention)",
-      file_type = "KR",
-      processed_date = Sys.Date()
+  if (!is.null(region_var)) {
+    if (!region_var %in% names(dhs_kr)) {
+      cli::cli_abort("Column {.var {region_var}} not found in `dhs_kr`.")
+    }
+    kr$region <- .resolve_region_labels(
+      dhs_kr[[region_var]], region_var
     )
+    group_var <- "region"
+    geo_src <- "survey"
+  }
+
+  # ---- 4. Get conditions ----
+  conditions <- .smc_conditions()
+
+  # ---- 5. Compute national results ----
+  national_results <- purrr::map_dfr(conditions, function(cond) {
+    .compute_dhs_indicator_generic(
+      data = kr,
+      condition = cond,
+      group_var = NULL,
+      ci_method = ci_method
+    )
+  })
+
+  # ---- 6. Compute regional results ----
+  regional_results <- tibble::tibble()
+  if (!is.null(group_var)) {
+    regional_results <- purrr::map_dfr(conditions, function(cond) {
+      .compute_dhs_indicator_generic(
+        data = kr,
+        condition = cond,
+        group_var = group_var,
+        subnational_level = "adm1",
+        ci_method = ci_method
+      )
+    })
+    # Keep only regional rows
+    regional_results <- regional_results |>
+      dplyr::filter(level != "adm0")
+  }
+
+  # ---- 7. Assemble output ----
+  .assemble_dhs_output(
+    national_results = national_results,
+    regional_results = regional_results,
+    survey_meta = survey_meta,
+    geo_source = geo_src,
+    admin_col = "adm1"
+  )
+}
+
+
+# =============================================================================
+# Indicator conditions
+# =============================================================================
+
+#' Internal: SMC indicator conditions
+#'
+#' @return List of named lists, each with indicator specification.
+#' @noRd
+.smc_conditions <- function() {
+  list(
+    list(
+      indicator       = "SMC",
+      indicator_code  = "smc",
+      indicator_title = "SMC coverage among eligible children",
+      denom_code      = "smc_eligible",
+      filter_expr     = NULL,
+      outcome_var     = "received_smc",
+      num_desc        = "Children who received SMC",
+      denom_desc      = "SMC-eligible children"
+    )
+  )
+}
+
+
+# =============================================================================
+# Indicator Dictionary
+# =============================================================================
+
+#' SMC Indicator Dictionary
+#'
+#' Returns the dictionary of SMC indicators with metadata.
+#'
+#' @return Tibble with columns: indicator, indicator_code, indicator_title,
+#'   numerator_description, denominator_description, denominator_code.
+#'
+#' @examples
+#' smc_dictionary()
+#'
+#' @export
+smc_dictionary <- function() {
+  conds <- .smc_conditions()
+  tibble::tibble(
+    indicator               = vapply(conds, `[[`, character(1), "indicator"),
+    indicator_code          = vapply(conds, `[[`, character(1), "indicator_code"),
+    indicator_title         = vapply(conds, `[[`, character(1), "indicator_title"),
+    numerator_description   = vapply(conds, `[[`, character(1), "num_desc"),
+    denominator_description = vapply(conds, `[[`, character(1), "denom_desc"),
+    denominator_code        = vapply(conds, `[[`, character(1), "denom_code")
   )
 }

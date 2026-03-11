@@ -108,9 +108,8 @@ test_that("calc_smc_dhs_core handles NA and invalid responses", {
   expect_equal(result$dhs_n_smc_received, 2L)
 })
 
-test_that("calc_smc_dhs returns list with metadata", {
+test_that("calc_smc_dhs returns named list with adm0", {
   skip_if_not_installed("survey")
-  skip_if_not_installed("sntutils")
 
   kr_data <- data.frame(
     v021 = rep(1:5, each = 10),
@@ -124,7 +123,58 @@ test_that("calc_smc_dhs returns list with metadata", {
   result <- calc_smc_dhs(kr_data)
 
   expect_type(result, "list")
-  expect_named(result, c("data", "dict", "metadata"))
-  expect_equal(result$metadata$analysis_type, "SMC (Seasonal Malaria Chemoprevention)")
-  expect_equal(result$metadata$file_type, "KR")
+  expect_true("adm0" %in% names(result))
+  expect_s3_class(result$adm0, "tbl_df")
+})
+
+test_that("calc_smc_dhs adm0 has correct column structure", {
+  skip_if_not_installed("survey")
+
+  kr_data <- data.frame(
+    v021 = rep(1:5, each = 10),
+    v005 = rep(1000000, 50),
+    v022 = rep(1:2, each = 25),
+    v024 = rep("REGION1", 50),
+    hw1 = sample(6:48, 50, replace = TRUE),
+    hml43 = sample(c(0, 1), 50, replace = TRUE)
+  )
+
+  result <- calc_smc_dhs(kr_data)
+
+  expected_cols <- c(
+    "survey_id", "iso3", "iso2", "survey_type", "survey_year",
+    "adm0", "type", "geo_source",
+    "point", "ci_l", "ci_u", "numerator", "denominator",
+    "indicator", "indicator_code",
+    "numerator_description", "denominator_description", "denominator_code"
+  )
+  expect_true(all(expected_cols %in% names(result$adm0)))
+})
+
+test_that("calc_smc_dhs adm0 contains smc indicator", {
+  skip_if_not_installed("survey")
+
+  kr_data <- data.frame(
+    v021 = rep(1:5, each = 10),
+    v005 = rep(1000000, 50),
+    v022 = rep(1:2, each = 25),
+    v024 = rep("REGION1", 50),
+    hw1 = sample(6:48, 50, replace = TRUE),
+    hml43 = sample(c(0, 1), 50, replace = TRUE)
+  )
+
+  result <- calc_smc_dhs(kr_data)
+
+  expect_true("smc" %in% result$adm0$indicator_code)
+})
+
+test_that("smc_dictionary returns correct structure", {
+  dict <- smc_dictionary()
+
+  expect_s3_class(dict, "tbl_df")
+  expect_true("indicator_code" %in% names(dict))
+  expect_true("indicator" %in% names(dict))
+  expect_true("numerator_description" %in% names(dict))
+  expect_true("denominator_description" %in% names(dict))
+  expect_equal(nrow(dict), 1)
 })

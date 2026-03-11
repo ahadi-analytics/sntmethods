@@ -1,7 +1,7 @@
 #' Calculate Fever Prevalence from DHS Data
 #'
 #' Estimates fever prevalence among children under 5 using survey-weighted
-#' methods. This is step 0 of the WMR case management cascade.
+#' methods. This is step 0 of the case management cascade.
 #'
 #' @details
 #' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/fever_dhs.yml}
@@ -40,7 +40,7 @@
 #' The denominator is ALL alive children under 5, not just febrile children.
 #' This differs from CSB/ACT which use febrile children as denominator.
 #'
-#' Fever prevalence is the entry point (step 0) of the WMR case management
+#' Fever prevalence is the entry point (step 0) of the case management
 #' cascade: Fever -> Sought care -> Tested -> Any antimalarial -> ACT.
 #'
 #' @examples
@@ -345,30 +345,34 @@ calc_fever_dhs_core <- function(
 }
 
 
-#' Calculate Fever Prevalence from DHS Data (Wrapper)
+#' Calculate Fever Prevalence from DHS Data
 #'
-#' Convenience wrapper around calc_fever_dhs_core() that also extracts
-#' survey metadata and builds a data dictionary.
+#' Computes fever prevalence among alive U5 children from DHS Children's
+#' Recode (KR) data. Returns survey-weighted proportions with logit
+#' confidence intervals in standardized long format.
 #'
 #' @inheritParams calc_fever_dhs_core
+#' @param ci_method Method for confidence intervals. Default: "logit".
 #'
-#' @return List with:
-#'   \itemize{
-#'     \item `data`: Tibble with fever estimates by admin level
-#'     \item `dict`: Data dictionary from sntutils::build_dictionary()
-#'     \item `metadata`: List with survey metadata
+#' @return Named list with:
+#'   \describe{
+#'     \item{`adm0`}{National-level estimates (always present)}
+#'     \item{`adm1`}{Admin-1 estimates (when `region_var` provided)}
 #'   }
+#'   Each tibble contains standardized columns: survey_id, iso3, iso2,
+#'   survey_type, survey_year, adm0, [adm1], type, geo_source, point,
+#'   ci_l, ci_u, numerator, denominator, indicator, indicator_code,
+#'   numerator_description, denominator_description, denominator_code.
 #'
 #' @examples
 #' \dontrun{
-#' fever <- calc_fever_dhs(
-#'   dhs_kr = kr_data,
-#'   region_var = "v024"
-#' )
-#' fever$data
-#' fever$dict
+#' fever <- calc_fever_dhs(dhs_kr = kr_data, region_var = "v024")
+#' fever$adm0
+#' fever$adm1
 #' }
 #'
+#' @seealso [fever_dictionary()] for indicator metadata,
+#'   [calc_fever_dhs_core()] for legacy wide-format output
 #' @export
 calc_fever_dhs <- function(
   dhs_kr,
@@ -381,84 +385,121 @@ calc_fever_dhs <- function(
     alive = "b5"
   ),
   region_var = NULL,
-  gps_data = NULL,
-  gps_vars = list(
-    cluster = "DHSCLUST",
-    lat = "LATNUM",
-    lon = "LONGNUM"
-  ),
-  shapefile = NULL,
-  admin_level = NULL,
-  join_nearest = TRUE
+  ci_method = "logit"
 ) {
-  # Extract metadata
-  metadata <- .extract_dhs_metadata_fever(
-    dhs_kr = dhs_kr,
-    survey_vars = survey_vars
-  )
+  # ---- 1. Extract survey metadata ----
+  survey_meta <- .extract_survey_meta(dhs_kr)
 
-  # Calculate fever using core function
-  fever_data <- calc_fever_dhs_core(
+  # ---- 2. Prepare data ----
+  kr_u5 <- .prepare_fever_data(
     dhs_kr = dhs_kr,
     survey_vars = survey_vars,
-    region_var = region_var,
-    gps_data = gps_data,
-    gps_vars = gps_vars,
-    shapefile = shapefile,
-    admin_level = admin_level,
-    join_nearest = join_nearest
+    include_survey_vars = TRUE
   )
 
-  labels <- tibble::tribble(
-    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~dhs_recode, ~indicator_category, ~wmr_cascade_step, ~age_group, ~units, ~notes,
-    "dhs_fever", "Fever prevalence in children under 5", "Prevalence de la fievre chez les enfants de moins de 5 ans", "h22", "Children with fever", "Alive children 0-59 months", "h22", "b5, hw1", "KR", "Malaria", 0L, "0-59 months", "proportion (0-1)", "Step 0 of WMR cascade; fever in 2 weeks preceding interview",
-    "dhs_fever_low", "Fever - lower 95% CI", "Fievre - IC 95% inferieur", "h22", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 0L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_fever_upp", "Fever - upper 95% CI", "Fievre - IC 95% superieur", "h22", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", 0L, "0-59 months", "proportion (0-1)", "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_n_children", "Number of children under 5 (denominator)", "Nombre d'enfants de moins de 5 ans (denominateur)", "b5, hw1", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", NA_integer_, "0-59 months", "count", "Unweighted count; alive children 0-59 months",
-    "dhs_n_fever", "Number with fever (numerator)", "Nombre avec fievre (numerateur)", "h22", NA_character_, NA_character_, NA_character_, NA_character_, "KR", "Malaria", NA_integer_, "0-59 months", "count", "Unweighted count"
-  )
+  # ---- 3. Resolve region labels ----
+  group_var <- NULL
+  geo_src <- NA_character_
 
-  dict <- sntutils::build_dictionary(fever_data)
-  dict <- .enrich_dhs_dictionary(dict, labels)
+  if (!is.null(region_var)) {
+    if (!region_var %in% names(dhs_kr)) {
+      cli::cli_abort("Column {.var {region_var}} not found in `dhs_kr`.")
+    }
+    kr_u5$region <- .resolve_region_labels(
+      dhs_kr[[region_var]], region_var
+    )
+    group_var <- "region"
+    geo_src <- "survey"
+  }
 
-  list(
-    data = fever_data,
-    dict = dict,
-    metadata = metadata
+  # ---- 4. Get conditions ----
+  conditions <- .fever_conditions()
+
+  # ---- 5. Compute national results ----
+  national_results <- purrr::map_dfr(conditions, function(cond) {
+    .compute_dhs_indicator_generic(
+      data = kr_u5,
+      condition = cond,
+      group_var = NULL,
+      ci_method = ci_method
+    )
+  })
+
+  # ---- 6. Compute regional results ----
+  regional_results <- tibble::tibble()
+  if (!is.null(group_var)) {
+    regional_results <- purrr::map_dfr(conditions, function(cond) {
+      .compute_dhs_indicator_generic(
+        data = kr_u5,
+        condition = cond,
+        group_var = group_var,
+        subnational_level = "adm1",
+        ci_method = ci_method
+      )
+    })
+    # Keep only regional rows
+    regional_results <- regional_results |>
+      dplyr::filter(level != "adm0")
+  }
+
+  # ---- 7. Assemble output ----
+  .assemble_dhs_output(
+    national_results = national_results,
+    regional_results = regional_results,
+    survey_meta = survey_meta,
+    geo_source = geo_src,
+    admin_col = "adm1"
   )
 }
 
 
-#' Extract metadata from DHS KR dataset for fever analysis
+# =============================================================================
+# Indicator conditions
+# =============================================================================
+
+#' Internal: Fever indicator conditions
 #'
-#' @param dhs_kr DHS children's recode dataset.
-#' @param survey_vars Named list of survey variable mappings.
-#'
-#' @return List containing survey metadata.
+#' @return List of named lists, each with indicator specification.
 #' @noRd
-.extract_dhs_metadata_fever <- function(dhs_kr, survey_vars = NULL) {
-  metadata <- list()
+.fever_conditions <- function() {
+  list(
+    list(
+      indicator       = "Fever",
+      indicator_code  = "fever",
+      indicator_title = "Fever prevalence among alive U5 children",
+      denom_code      = "alive_u5",
+      filter_expr     = NULL,
+      outcome_var     = "had_fever",
+      num_desc        = "Children with fever in last 2 weeks",
+      denom_desc      = "Alive U5 children 0-59 months"
+    )
+  )
+}
 
-  if ("v000" %in% names(dhs_kr)) {
-    metadata$country_code <- unique(dhs_kr$v000)[1]
-  } else {
-    metadata$country_code <- NA_character_
-  }
 
-  if ("v007" %in% names(dhs_kr)) {
-    metadata$survey_year <- unique(dhs_kr$v007)[1]
-  } else {
-    metadata$survey_year <- NA_integer_
-  }
+# =============================================================================
+# Indicator Dictionary
+# =============================================================================
 
-  metadata$survey_type <- "DHS"
-  metadata$file_type <- "KR"
-  metadata$total_records <- nrow(dhs_kr)
-  metadata$analysis_type <- "Fever Prevalence"
-  metadata$methodology <- "WHO World Malaria Report (WMR)"
-  metadata$age_group <- "0-59 months"
-  metadata$cascade_step <- 0L
-  metadata$processed_date <- Sys.Date()
-
-  metadata
+#' Fever Indicator Dictionary
+#'
+#' Returns the dictionary of fever indicators with metadata.
+#'
+#' @return Tibble with columns: indicator, indicator_code, indicator_title,
+#'   numerator_description, denominator_description, denominator_code.
+#'
+#' @examples
+#' fever_dictionary()
+#'
+#' @export
+fever_dictionary <- function() {
+  conds <- .fever_conditions()
+  tibble::tibble(
+    indicator               = vapply(conds, `[[`, character(1), "indicator"),
+    indicator_code          = vapply(conds, `[[`, character(1), "indicator_code"),
+    indicator_title         = vapply(conds, `[[`, character(1), "indicator_title"),
+    numerator_description   = vapply(conds, `[[`, character(1), "num_desc"),
+    denominator_description = vapply(conds, `[[`, character(1), "denom_desc"),
+    denominator_code        = vapply(conds, `[[`, character(1), "denom_code")
+  )
 }

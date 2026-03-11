@@ -66,9 +66,8 @@ test_that("calc_irs_dhs_core handles NA values", {
   expect_equal(result$dhs_n_sprayed, 2L)
 })
 
-test_that("calc_irs_dhs returns list with data, dict, and metadata", {
+test_that("calc_irs_dhs returns named list with adm0", {
   skip_if_not_installed("survey")
-  skip_if_not_installed("sntutils")
 
   hr_data <- data.frame(
     hv021 = rep(1:5, each = 10),
@@ -81,8 +80,56 @@ test_that("calc_irs_dhs returns list with data, dict, and metadata", {
   result <- calc_irs_dhs(hr_data)
 
   expect_type(result, "list")
-  expect_named(result, c("data", "dict", "metadata"))
-  expect_s3_class(result$data, "tbl_df")
-  expect_equal(result$metadata$analysis_type, "IRS (Indoor Residual Spraying)")
-  expect_equal(result$metadata$file_type, "HR")
+  expect_true("adm0" %in% names(result))
+  expect_s3_class(result$adm0, "tbl_df")
+})
+
+test_that("calc_irs_dhs adm0 has correct column structure", {
+  skip_if_not_installed("survey")
+
+  hr_data <- data.frame(
+    hv021 = rep(1:5, each = 10),
+    hv005 = rep(1000000, 50),
+    hv022 = rep(1:2, each = 25),
+    hv024 = rep("REGION1", 50),
+    hv253 = sample(c(0, 1), 50, replace = TRUE)
+  )
+
+  result <- calc_irs_dhs(hr_data)
+
+  expected_cols <- c(
+    "survey_id", "iso3", "iso2", "survey_type", "survey_year",
+    "adm0", "type", "geo_source",
+    "point", "ci_l", "ci_u", "numerator", "denominator",
+    "indicator", "indicator_code",
+    "numerator_description", "denominator_description", "denominator_code"
+  )
+  expect_true(all(expected_cols %in% names(result$adm0)))
+})
+
+test_that("calc_irs_dhs adm0 contains irs indicator", {
+  skip_if_not_installed("survey")
+
+  hr_data <- data.frame(
+    hv021 = rep(1:5, each = 10),
+    hv005 = rep(1000000, 50),
+    hv022 = rep(1:2, each = 25),
+    hv024 = rep("REGION1", 50),
+    hv253 = sample(c(0, 1), 50, replace = TRUE)
+  )
+
+  result <- calc_irs_dhs(hr_data)
+
+  expect_true("irs" %in% result$adm0$indicator_code)
+})
+
+test_that("irs_dictionary returns correct structure", {
+  dict <- irs_dictionary()
+
+  expect_s3_class(dict, "tbl_df")
+  expect_true("indicator_code" %in% names(dict))
+  expect_true("indicator" %in% names(dict))
+  expect_true("numerator_description" %in% names(dict))
+  expect_true("denominator_description" %in% names(dict))
+  expect_equal(nrow(dict), 1)
 })
