@@ -2,7 +2,7 @@
 #'
 #' Estimates the proportion of febrile children under 5 who had blood taken
 #' for malaria testing using survey-weighted methods. This is step 2 of the
-#' WMR case management cascade.
+#' case management cascade.
 #'
 #' @details
 #' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/malaria_dx_dhs.yml}
@@ -344,29 +344,20 @@ calc_malaria_dx_dhs_core <- function(
 }
 
 
-#' Calculate Malaria Diagnostic Testing from DHS Data (Wrapper)
+#' Calculate Malaria Diagnostic Testing from DHS Data (Standardized)
 #'
-#' Convenience wrapper around calc_malaria_dx_dhs_core() that also extracts
-#' survey metadata and builds a data dictionary.
+#' Estimates the proportion of febrile children under 5 who had blood taken
+#' for malaria testing. Returns standardized long-format output as
+#' `list(adm0, adm1)`.
 #'
 #' @inheritParams calc_malaria_dx_dhs_core
+#' @param ci_method CI method for svyciprop. Default: "logit".
 #'
-#' @return List with:
-#'   \itemize{
-#'     \item `data`: Tibble with malaria diagnosis estimates by admin level
-#'     \item `dict`: Data dictionary from sntutils::build_dictionary()
-#'     \item `metadata`: List with survey metadata
-#'   }
+#' @return Named list with `adm0` (national) and optionally `adm1` (regional)
+#'   tibbles in standardized long format.
 #'
-#' @examples
-#' \dontrun{
-#' dx <- calc_malaria_dx_dhs(
-#'   dhs_kr = kr_data,
-#'   region_var = "v024"
-#' )
-#' dx$data
-#' }
-#'
+#' @seealso [malaria_dx_dictionary()] for indicator definitions,
+#'   [calc_malaria_dx_dhs_core()] for backward-compatible wide output
 #' @export
 calc_malaria_dx_dhs <- function(
   dhs_kr,
@@ -379,83 +370,138 @@ calc_malaria_dx_dhs <- function(
     malaria_dx = "h47"
   ),
   region_var = NULL,
-  gps_data = NULL,
-  gps_vars = list(
-    cluster = "DHSCLUST",
-    lat = "LATNUM",
-    lon = "LONGNUM"
-  ),
-  shapefile = NULL,
-  admin_level = NULL,
-  join_nearest = TRUE
+  ci_method = "logit"
 ) {
-  metadata <- .extract_dhs_metadata_malaria_dx(
-    dhs_kr = dhs_kr,
-    survey_vars = survey_vars
-  )
+  # ---- 1. Extract survey metadata ----
+  survey_meta <- .extract_survey_meta(dhs_kr)
 
-  dx_data <- calc_malaria_dx_dhs_core(
+  # ---- 2. Prepare data ----
+  kr_fever <- .prepare_malaria_dx_data(
     dhs_kr = dhs_kr,
     survey_vars = survey_vars,
-    region_var = region_var,
-    gps_data = gps_data,
-    gps_vars = gps_vars,
-    shapefile = shapefile,
-    admin_level = admin_level,
-    join_nearest = join_nearest
+    include_survey_vars = TRUE
   )
+  if (is.null(kr_fever)) {
+    cli::cli_abort("No valid malaria diagnosis data after preparation.")
+  }
 
-  labels <- tibble::tribble(
-    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~notes,
-    "dhs_malaria_dx", "Malaria diagnostic testing prevalence", "Prevalence du diagnostic du paludisme", "h47 (or ml1)", "Febrile children tested", "Febrile children under 5", "h47/ml1", "h22", "Step 2 of WMR cascade; h47 preferred, ml1 fallback for older surveys",
-    "dhs_malaria_dx_low", "Malaria Dx - lower 95% CI", "Diagnostic paludisme - IC 95% inferieur", "h47 (or ml1)", NA_character_, NA_character_, NA_character_, NA_character_, "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_malaria_dx_upp", "Malaria Dx - upper 95% CI", "Diagnostic paludisme - IC 95% superieur", "h47 (or ml1)", NA_character_, NA_character_, NA_character_, NA_character_, "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_n_febrile", "Number of febrile children (denominator)", "Nombre d'enfants febriles (denominateur)", "h22", NA_character_, NA_character_, NA_character_, NA_character_, "Unweighted count",
-    "dhs_n_tested", "Number tested for malaria (numerator)", "Nombre testes pour le paludisme (numerateur)", "h47 (or ml1)", NA_character_, NA_character_, NA_character_, NA_character_, "Unweighted count"
-  )
+  # ---- 3. Resolve region labels ----
+  group_var <- NULL
+  geo_src <- NA_character_
 
-  dict <- sntutils::build_dictionary(dx_data)
-  dict <- .enrich_dhs_dictionary(dict, labels)
+  if (!is.null(region_var)) {
+    if (!region_var %in% names(dhs_kr)) {
+      cli::cli_abort("Column {.var {region_var}} not found in `dhs_kr`.")
+    }
+    kr_fever$region <- .resolve_region_labels(
+      dhs_kr[[region_var]], region_var
+    )
+    # Map to febrile subset if lengths differ
+    if (nrow(kr_fever) != nrow(dhs_kr)) {
+      resolved_all <- .resolve_region_labels(
+        dhs_kr[[region_var]], region_var
+      )
+      raw_all <- as.character(
+        as.vector(haven::zap_labels(dhs_kr[[region_var]]))
+      )
+      lookup <- stats::setNames(resolved_all, raw_all)
+      kr_raw <- as.character(kr_fever[[region_var]])
+      kr_fever$region <- unname(lookup[kr_raw])
+    }
+    group_var <- "region"
+    geo_src <- "survey"
+  }
 
-  list(
-    data = dx_data,
-    dict = dict,
-    metadata = metadata
+  # ---- 4. Get conditions ----
+  conditions <- .malaria_dx_conditions()
+
+  # ---- 5. Compute national results ----
+  national_results <- purrr::map_dfr(conditions, function(cond) {
+    .compute_dhs_indicator_generic(
+      data = kr_fever,
+      condition = cond,
+      group_var = NULL,
+      ci_method = ci_method
+    )
+  })
+
+  # ---- 6. Compute regional results ----
+  regional_results <- tibble::tibble()
+  if (!is.null(group_var)) {
+    regional_results <- purrr::map_dfr(conditions, function(cond) {
+      .compute_dhs_indicator_generic(
+        data = kr_fever,
+        condition = cond,
+        group_var = group_var,
+        subnational_level = "adm1",
+        ci_method = ci_method
+      )
+    })
+    # Keep only regional rows
+    regional_results <- regional_results |>
+      dplyr::filter(level != "adm0")
+  }
+
+  # ---- 7. Assemble output ----
+  .assemble_dhs_output(
+    national_results = national_results,
+    regional_results = regional_results,
+    survey_meta = survey_meta,
+    geo_source = geo_src,
+    admin_col = "adm1"
   )
 }
 
 
-#' Extract metadata from DHS KR dataset for malaria diagnosis analysis
+# =============================================================================
+# Indicator conditions
+# =============================================================================
+
+#' Internal: Malaria Dx indicator conditions
 #'
-#' @param dhs_kr DHS children's recode dataset.
-#' @param survey_vars Named list of survey variable mappings.
-#'
-#' @return List containing survey metadata.
+#' @return List of named lists, each with indicator specification.
 #' @noRd
-.extract_dhs_metadata_malaria_dx <- function(dhs_kr, survey_vars = NULL) {
-  metadata <- list()
+.malaria_dx_conditions <- function() {
+  denom <- "Febrile U5 children (0-59 months)"
+  list(
+    list(
+      indicator       = "MALARIA_DX",
+      indicator_code  = "malaria_dx",
+      indicator_title = "Blood taken for malaria testing among febrile U5",
+      denom_code      = "febrile_u5",
+      filter_expr     = NULL,
+      outcome_var     = "had_test",
+      num_desc        = "Febrile children who had blood taken for testing",
+      denom_desc      = denom
+    )
+  )
+}
 
-  if ("v000" %in% names(dhs_kr)) {
-    metadata$country_code <- unique(dhs_kr$v000)[1]
-  } else {
-    metadata$country_code <- NA_character_
-  }
 
-  if ("v007" %in% names(dhs_kr)) {
-    metadata$survey_year <- unique(dhs_kr$v007)[1]
-  } else {
-    metadata$survey_year <- NA_integer_
-  }
+# =============================================================================
+# Indicator Dictionary
+# =============================================================================
 
-  metadata$survey_type <- "DHS"
-  metadata$file_type <- "KR"
-  metadata$total_records <- nrow(dhs_kr)
-  metadata$analysis_type <- "Malaria Diagnostic Testing"
-  metadata$methodology <- "WHO World Malaria Report (WMR)"
-  metadata$age_group <- "0-59 months"
-  metadata$condition <- "Fever in last 2 weeks"
-  metadata$cascade_step <- 2L
-  metadata$processed_date <- Sys.Date()
-
-  metadata
+#' Malaria Diagnostic Testing Indicator Dictionary
+#'
+#' Returns the dictionary of malaria diagnostic testing indicators with
+#' metadata.
+#'
+#' @return Tibble with columns: indicator, indicator_code, indicator_title,
+#'   numerator_description, denominator_description, denominator_code.
+#'
+#' @examples
+#' malaria_dx_dictionary()
+#'
+#' @export
+malaria_dx_dictionary <- function() {
+  conds <- .malaria_dx_conditions()
+  tibble::tibble(
+    indicator               = vapply(conds, `[[`, character(1), "indicator"),
+    indicator_code          = vapply(conds, `[[`, character(1), "indicator_code"),
+    indicator_title         = vapply(conds, `[[`, character(1), "indicator_title"),
+    numerator_description   = vapply(conds, `[[`, character(1), "num_desc"),
+    denominator_description = vapply(conds, `[[`, character(1), "denom_desc"),
+    denominator_code        = vapply(conds, `[[`, character(1), "denom_code")
+  )
 }

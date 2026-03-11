@@ -174,7 +174,7 @@ test_that("calc_malaria_dx_dhs_core works with region_var", {
   expect_equal(sort(result$v024), c("REGION1", "REGION2"))
 })
 
-test_that("calc_malaria_dx_dhs returns list with data, dict, metadata", {
+test_that("calc_malaria_dx_dhs returns named list with adm0", {
   skip_if_not_installed("survey")
 
   set.seed(111)
@@ -196,11 +196,75 @@ test_that("calc_malaria_dx_dhs returns list with data, dict, metadata", {
   result <- calc_malaria_dx_dhs(kr_data)
 
   expect_type(result, "list")
-  expect_named(result, c("data", "dict", "metadata"))
-  expect_s3_class(result$data, "tbl_df")
-  expect_type(result$metadata, "list")
-  expect_equal(result$metadata$analysis_type, "Malaria Diagnostic Testing")
-  expect_equal(result$metadata$cascade_step, 2L)
+  expect_true("adm0" %in% names(result))
+  expect_s3_class(result$adm0, "tbl_df")
+})
+
+test_that("calc_malaria_dx_dhs adm0 has correct column structure", {
+  skip_if_not_installed("survey")
+
+  set.seed(111)
+  n <- 200
+
+  kr_data <- data.frame(
+    v021 = rep(1:20, each = 10),
+    v005 = rep(1000000, n),
+    v022 = rep(1:4, each = 50),
+    hw1 = sample(0:59, n, replace = TRUE),
+    h22 = sample(c(0, 1), n, replace = TRUE, prob = c(0.6, 0.4)),
+    h47 = NA_real_,
+    stringsAsFactors = FALSE
+  )
+
+  febrile <- kr_data$h22 == 1
+  kr_data$h47[febrile] <- sample(c(0, 1), sum(febrile), replace = TRUE)
+
+  result <- calc_malaria_dx_dhs(kr_data)
+
+  expected_cols <- c(
+    "survey_id", "iso3", "iso2", "survey_type", "survey_year",
+    "adm0", "type", "geo_source",
+    "point", "ci_l", "ci_u", "numerator", "denominator",
+    "indicator", "indicator_code",
+    "numerator_description", "denominator_description", "denominator_code"
+  )
+  expect_true(all(expected_cols %in% names(result$adm0)))
+})
+
+test_that("calc_malaria_dx_dhs adm0 contains malaria_dx indicator", {
+  skip_if_not_installed("survey")
+
+  set.seed(111)
+  n <- 200
+
+  kr_data <- data.frame(
+    v021 = rep(1:20, each = 10),
+    v005 = rep(1000000, n),
+    v022 = rep(1:4, each = 50),
+    hw1 = sample(0:59, n, replace = TRUE),
+    h22 = sample(c(0, 1), n, replace = TRUE, prob = c(0.6, 0.4)),
+    h47 = NA_real_,
+    stringsAsFactors = FALSE
+  )
+
+  febrile <- kr_data$h22 == 1
+  kr_data$h47[febrile] <- sample(c(0, 1), sum(febrile), replace = TRUE)
+
+  result <- calc_malaria_dx_dhs(kr_data)
+
+  expect_true("malaria_dx" %in% result$adm0$indicator_code)
+  expect_equal(nrow(result$adm0), 1)
+})
+
+test_that("malaria_dx_dictionary returns correct structure", {
+  dict <- malaria_dx_dictionary()
+
+  expect_s3_class(dict, "tbl_df")
+  expect_true(all(c("indicator", "indicator_code", "indicator_title",
+                     "numerator_description", "denominator_description",
+                     "denominator_code") %in% names(dict)))
+  expect_true("malaria_dx" %in% dict$indicator_code)
+  expect_equal(nrow(dict), 1)
 })
 
 test_that("calc_malaria_dx_dhs_core errors when no febrile children", {

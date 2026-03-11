@@ -104,10 +104,10 @@ test_that("calc_epi_dhs_core recognizes DHS vaccination codes", {
   expect_equal(result$dhs_epi_bcg, 0.50)
 })
 
-test_that("calc_epi_dhs returns list with metadata", {
+test_that("calc_epi_dhs returns named list with adm0", {
   skip_if_not_installed("survey")
-  skip_if_not_installed("sntutils")
 
+  set.seed(42)
   kr_data <- data.frame(
     v021 = rep(1:5, each = 10),
     v005 = rep(1000000, 50),
@@ -116,13 +116,77 @@ test_that("calc_epi_dhs returns list with metadata", {
     hw1 = sample(12:23, 50, replace = TRUE),
     h2 = sample(c(0, 1), 50, replace = TRUE),
     h5 = sample(c(0, 1), 50, replace = TRUE),
-    h9 = sample(c(0, 1), 50, replace = TRUE)
+    h9 = sample(c(0, 1), 50, replace = TRUE),
+    stringsAsFactors = FALSE
   )
 
   result <- calc_epi_dhs(kr_data, indicators = c("bcg", "dpt3", "measles1"))
 
   expect_type(result, "list")
-  expect_named(result, c("data", "dict", "metadata"))
-  expect_equal(result$metadata$analysis_type, "EPI (Expanded Programme on Immunization)")
-  expect_equal(result$metadata$file_type, "KR")
+  expect_true("adm0" %in% names(result))
+  expect_s3_class(result$adm0, "tbl_df")
+})
+
+test_that("calc_epi_dhs adm0 has correct column structure", {
+  skip_if_not_installed("survey")
+
+  set.seed(42)
+  kr_data <- data.frame(
+    v021 = rep(1:5, each = 10),
+    v005 = rep(1000000, 50),
+    v022 = rep(1:2, each = 25),
+    v024 = rep("REGION1", 50),
+    hw1 = sample(12:23, 50, replace = TRUE),
+    h2 = sample(c(0, 1), 50, replace = TRUE),
+    h5 = sample(c(0, 1), 50, replace = TRUE),
+    h9 = sample(c(0, 1), 50, replace = TRUE),
+    stringsAsFactors = FALSE
+  )
+
+  result <- calc_epi_dhs(kr_data, indicators = c("bcg", "dpt3", "measles1"))
+
+  expected_cols <- c(
+    "survey_id", "iso3", "iso2", "survey_type", "survey_year",
+    "adm0", "type", "geo_source",
+    "point", "ci_l", "ci_u", "numerator", "denominator",
+    "indicator", "indicator_code",
+    "numerator_description", "denominator_description", "denominator_code"
+  )
+  expect_true(all(expected_cols %in% names(result$adm0)))
+})
+
+test_that("calc_epi_dhs adm0 contains requested indicator_codes", {
+  skip_if_not_installed("survey")
+
+  set.seed(42)
+  kr_data <- data.frame(
+    v021 = rep(1:5, each = 10),
+    v005 = rep(1000000, 50),
+    v022 = rep(1:2, each = 25),
+    v024 = rep("REGION1", 50),
+    hw1 = sample(12:23, 50, replace = TRUE),
+    h2 = sample(c(0, 1), 50, replace = TRUE),
+    h5 = sample(c(0, 1), 50, replace = TRUE),
+    h9 = sample(c(0, 1), 50, replace = TRUE),
+    stringsAsFactors = FALSE
+  )
+
+  result <- calc_epi_dhs(kr_data, indicators = c("bcg", "dpt3", "measles1"))
+
+  expect_true("epi_bcg" %in% result$adm0$indicator_code)
+  expect_true("epi_dpt3" %in% result$adm0$indicator_code)
+  expect_true("epi_measles1" %in% result$adm0$indicator_code)
+  expect_equal(nrow(result$adm0), 3)
+})
+
+test_that("epi_dictionary returns correct structure", {
+  dict <- epi_dictionary()
+
+  expect_s3_class(dict, "tbl_df")
+  expect_true(all(c("indicator", "indicator_code", "indicator_title",
+                     "numerator_description", "denominator_description",
+                     "denominator_code") %in% names(dict)))
+  expect_true("epi_bcg" %in% dict$indicator_code)
+  expect_true("epi_fully_vaccinated" %in% dict$indicator_code)
+  expect_true(nrow(dict) >= 28)
 })
