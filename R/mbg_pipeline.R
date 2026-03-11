@@ -1005,11 +1005,11 @@ run_mbg_indicator_pipeline <- function(
         calc_pfpr_mbg(
           dhs_pr = survey_data$PR,
           gps_data = gps_data,
-          test_type = "both",
-          age_groups = list(
-            u5 = c(6, 59),
-            `5_10` = c(60, 120),
-            u10 = c(6, 119)
+          indicators = c(
+            "pfpr_rdt", "pfpr_mic",
+            "pfpr_rdt_u5", "pfpr_mic_u5", "pfpr_either_u5",
+            "pfpr_rdt_5_10", "pfpr_mic_5_10", "pfpr_either_5_10",
+            "pfpr_rdt_u10", "pfpr_mic_u10", "pfpr_either_u10"
           )
         )
       }, error = function(e) {
@@ -1171,12 +1171,17 @@ run_mbg_indicator_pipeline <- function(
             "act_pub_nochw", "act_chw", "act_priv",
             "act_priv_formal", "act_priv_pharm",
             "act_priv_informal", "act_priv_form_pha",
+            "act_public", "act_tested",
             "antimal", "antimal_any_tx",
             "antimal_trained", "antimal_pub",
             "antimal_pub_nochw", "antimal_chw",
             "antimal_priv", "antimal_formal",
             "antimal_pharm", "antimal_priv_informal",
-            "antimal_form_pharm"
+            "antimal_form_pharm",
+            "mal_dx_am", "mal_dx_pub_am", "mal_dx_pub_nochw_am",
+            "mal_dx_chw_am", "mal_dx_priv_am", "mal_dx_priv_formal_am",
+            "mal_dx_pharm_am", "mal_dx_priv_informal_am",
+            "mal_dx_priv_form_pha_am"
           )
         )
       }, error = function(e) {
@@ -1262,7 +1267,7 @@ run_mbg_indicator_pipeline <- function(
       })
     },
 
-    smc_receipt = , smc_coverage = ,
+    smc_coverage = ,
     smc = {
       if (!"KR" %in% names(survey_data)) {
         return(skip_indicator("Missing KR data (Children Recode)"))
@@ -1273,7 +1278,7 @@ run_mbg_indicator_pipeline <- function(
           gps_data = gps_data
         )
         if (!is.null(smc_result) && nrow(smc_result) > 0) {
-          list(smc_receipt = smc_result)
+          list(smc_coverage = smc_result)
         } else {
           results$skipped <<- "SMC variable not found in survey"
           list()

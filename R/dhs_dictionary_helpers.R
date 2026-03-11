@@ -204,7 +204,6 @@
     irs_coverage      = list(recode = "HR", category = "IRS",           cascade = na_int, age = "all ages"),
     # SMC — KR module
     smc_coverage      = list(recode = "KR", category = "SMC",           cascade = na_int, age = "0-59 months"),
-    smc_receipt       = list(recode = "KR", category = "SMC",           cascade = na_int, age = "0-59 months"),
     # Derived: Effective coverage of case management
     eff_cm_any        = list(recode = "KR", category = "Malaria",       cascade = na_int, age = "0-59 months"),
     eff_cm_public     = list(recode = "KR", category = "Malaria",       cascade = na_int, age = "0-59 months")
@@ -298,7 +297,7 @@
     # IRS (HR module)
     "irs_coverage",
     # SMC (KR module)
-    "smc_receipt", "smc_coverage",
+    "smc_coverage",
     # Derived
     "eff_cm_any", "eff_cm_public"
   )
