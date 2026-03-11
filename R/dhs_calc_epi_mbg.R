@@ -12,6 +12,7 @@
 #'   \itemize{
 #'     \item "bcg": BCG vaccine
 #'     \item "dpt1", "dpt2", "dpt3": DPT doses 1-3 (falls back to pentavalent)
+#'     \item "polio0": OPV birth dose
 #'     \item "polio1", "polio2", "polio3": Polio doses 1-3
 #'     \item "measles1", "measles2": Measles doses 1-2
 #'     \item "vita1", "vita2": Vitamin A doses 1-2
@@ -22,6 +23,8 @@
 #'     \item "ipv": Inactivated Polio Vaccine
 #'     \item "hepb0": Hepatitis B birth dose
 #'     \item "yellowfever": Yellow Fever vaccine
+#'     \item "any": Any vaccination (h10 >= 1)
+#'     \item "never_vaccinated": Zero-dose (h10 == 0)
 #'     \item "fully_vaccinated": Basic fully vaccinated
 #'   }
 #'   Default: c("bcg", "dpt3", "measles1").
@@ -57,6 +60,7 @@ calc_epi_mbg <- function(
     cluster = "v001",
     age = "hw1",
     bcg = "h2",
+    polio0 = "h0",
     dpt1 = "h3", dpt2 = "h4", dpt3 = "h5",
     polio1 = "h6", polio2 = "h7", polio3 = "h8",
     measles1 = "h9", measles2 = "h9a",
@@ -65,7 +69,8 @@ calc_epi_mbg <- function(
     penta1 = "h51", penta2 = "h52", penta3 = "h53",
     pneumo1 = "h54", pneumo2 = "h55", pneumo3 = "h56",
     rota1 = "h57", rota2 = "h58", rota3 = "h59",
-    ipv = "h60", hepb0 = "h50", yellowfever = "h61"
+    ipv = "h60", hepb0 = "h50", yellowfever = "h61",
+    any = "h10"
   ),
   gps_vars = list(
     cluster = "DHSCLUST",
@@ -77,7 +82,7 @@ calc_epi_mbg <- function(
 
   valid_indicators <- c(
     "bcg", "dpt1", "dpt2", "dpt3",
-    "polio1", "polio2", "polio3",
+    "polio0", "polio1", "polio2", "polio3",
     "measles1", "measles2",
     "vita1", "vita2",
     "malaria",
@@ -85,6 +90,7 @@ calc_epi_mbg <- function(
     "pneumo1", "pneumo2", "pneumo3",
     "rota1", "rota2", "rota3",
     "ipv", "hepb0", "yellowfever",
+    "any", "never_vaccinated",
     "fully_vaccinated"
   )
   invalid <- setdiff(indicators, valid_indicators)
@@ -164,6 +170,7 @@ prep_epi_mbg <- function(
     cluster = "v001",
     age = "hw1",
     bcg = "h2",
+    polio0 = "h0",
     dpt1 = "h3", dpt2 = "h4", dpt3 = "h5",
     polio1 = "h6", polio2 = "h7", polio3 = "h8",
     measles1 = "h9", measles2 = "h9a",
@@ -172,7 +179,8 @@ prep_epi_mbg <- function(
     penta1 = "h51", penta2 = "h52", penta3 = "h53",
     pneumo1 = "h54", pneumo2 = "h55", pneumo3 = "h56",
     rota1 = "h57", rota2 = "h58", rota3 = "h59",
-    ipv = "h60", hepb0 = "h50", yellowfever = "h61"
+    ipv = "h60", hepb0 = "h50", yellowfever = "h61",
+    any = "h10"
   ),
   gps_vars = list(
     cluster = "DHSCLUST",

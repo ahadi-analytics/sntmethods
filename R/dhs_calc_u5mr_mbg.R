@@ -1,56 +1,57 @@
 #' Prepare U5MR Data for MBG Analysis
 #'
-#' Prepares cluster-level Under-5 Mortality Rate (U5MR) data for MBG analysis.
-#' Splits birth histories into age-specific cohorts for separate modeling,
-#' then combines into composite U5MR.
+#' Prepares cluster-level Under-5 Mortality Rate (U5MR) data for MBG analysis
+#' using `DHS.rates::chmort()` for the mortality calculation. This follows the
+#' standard DHS synthetic-cohort life-table methodology with 8 age segments.
 #'
 #' @details
 #' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/u5mr_dhs.yml}
 #'
-#' @param dhs_br DHS Birth Recode dataset.
+#' `DHS.rates::chmort()` computes childhood mortality rates (NNMR, PNNMR, IMR,
+#' CMR, U5MR) using the standard DHS synthetic-cohort approach. When called with
+#' `Class = "v001"` (cluster ID), it produces per-cluster U5MR estimates. The
+#' function uses 8 age segments (0-1, 1-3, 3-6, 6-12, 12-24, 24-36, 36-48,
+#' 48-60 months) and applies partial-exposure weighting at period boundaries.
+#'
+#' Because `chmort()` internally computes a design effect (DEFT) via
+#' [survey::svydesign()], and per-cluster subsets contain only a single PSU,
+#' this function creates synthetic PSU and strata columns with two pseudo-PSUs
+#' per cluster. Uniform weights are applied so that the cluster-level rates are
+#' unweighted -- appropriate for MBG, which handles spatial smoothing and
+#' uncertainty internally.
+#'
+#' **Important:** The `indicator` and `samplesize` columns are used by MBG to
+#' model the death proportion (indicator/samplesize). The MBG pipeline
+#' automatically converts model outputs to "per 1,000" units to match
+#' epidemiological standards and the scale of the `u5mr` column.
+#'
+#' @param dhs_br DHS Birth Recode (BR) dataset. Must contain the standard DHS
+#'   variables needed by `DHS.rates::chmort()`: cluster ID (v001), interview
+#'   date in CMC (v008), child's date of birth in CMC (b3), and child's age at
+#'   death in months (b7).
 #' @param gps_data DHS GPS dataset with cluster coordinates.
-#' @param age_groups Named list of age group boundaries in months. Default:
+#' @param period_years Number of years to look back for the mortality reference
+#'   period. Default: 5 (standard DHS 5-year window). Passed to
+#'   `DHS.rates::chmort()` as `Period = period_years * 12`.
+#' @param survey_vars Named list mapping DHS variable names. Keys:
 #'   \itemize{
-#'     \item under1: c(0, 12) - Infant mortality
-#'     \item age1: c(12, 24) - Child mortality age 1
-#'     \item age2: c(24, 36) - Child mortality age 2
-#'     \item age3: c(36, 48) - Child mortality age 3
-#'     \item age4: c(48, 60) - Child mortality age 4
+#'     \item cluster: Cluster ID variable (default: "v001")
+#'     \item interview_date: Date of interview in CMC (default: "v008")
+#'     \item birth_date: Child's date of birth in CMC (default: "b3")
+#'     \item age_at_death: Child's age at death in months (default: "b7")
 #'   }
-#' @param retrospective_months Number of months to look back. Default: 60.
-#' @param survey_vars Named list mapping DHS variable names.
 #' @param gps_vars Named list for GPS variable mapping.
 #'
 #' @return A list with one data.table named "u5mr" containing:
 #'   \itemize{
 #'     \item cluster_id: Cluster identifier
-#'     \item indicator: Number of deaths (sum across age groups)
-#'     \item samplesize: Number of children exposed (from under1 group)
+#'     \item indicator: Estimated number of deaths (derived from U5MR and exposure)
+#'     \item samplesize: Number of births exposed in the 0-60 month window
 #'     \item x: Longitude
 #'     \item y: Latitude
-#'     \item u5mr: Combined U5MR per 1,000 live births
+#'     \item u5mr: U5MR per 1,000 live births
 #'   }
-#'
-#' @details
-#' **Important:** The `indicator` and `samplesize` columns are used by MBG to model
-#' the death proportion (indicator/samplesize). The MBG pipeline automatically
-#' converts model outputs to "per 1,000" units to match epidemiological standards
-#' and the scale of the `u5mr` column.
-#'
-#' @details
-#' U5MR is modeled as a composite of age-specific mortality risks:
-#'
-#' U5MR = 1 - (1 - q_under1) * (1 - q_age1) * (1 - q_age2) * (1 - q_age3) * (1 - q_age4)
-#'
-#' This function:
-#' 1. Splits birth histories into 5 age intervals
-#' 2. Calculates deaths/exposed for each interval at cluster level
-#' 3. Computes age-specific mortality rates (q)
-#' 4. Combines into composite U5MR using survival probability multiplication
-#'
-#' **Right-censoring:** Only children who have fully completed an age group
-#' before the interview date are included. This prevents downward bias from
-#' including children still at risk of dying within the interval.
+#'   Returns NULL if required variables are missing or data is insufficient.
 #'
 #' @examples
 #' \dontrun{
@@ -67,234 +68,266 @@
 calc_u5mr_mbg <- function(
   dhs_br,
   gps_data,
-
-  age_groups = list(
-    under1 = c(0, 12),
-    age1 = c(12, 24),
-    age2 = c(24, 36),
-    age3 = c(36, 48),
-    age4 = c(48, 60)
-  ),
-  retrospective_months = 60,
+  period_years = 5,
   survey_vars = list(
-    cluster = "v001",
-    hhid = "v002",
-    birth_index = "bidx",
+    cluster        = "v001",
     interview_date = "v008",
-    birth_date = "b3",
-    child_alive = "b5",
-    death_age = "b7"
+    birth_date     = "b3",
+    age_at_death   = "b7"
   ),
   gps_vars = list(
     cluster = "DHSCLUST",
-    lat = "LATNUM",
-    lon = "LONGNUM"
+    lat     = "LATNUM",
+    lon     = "LONGNUM"
   )
 ) {
+  # ---- Check DHS.rates availability ----
+
+  if (!requireNamespace("DHS.rates", quietly = TRUE)) {
+    cli::cli_abort(
+      c(
+        "Package {.pkg DHS.rates} is required but not installed.",
+        "i" = "Install it with: {.code install.packages('DHS.rates')}"
+      )
+    )
+  }
+
   # ---- Input validation ----
 
   if (!is.data.frame(dhs_br)) {
-    cli::cli_abort("`dhs_br` must be a data.frame or tibble")
+    cli::cli_abort("{.arg dhs_br} must be a data.frame or tibble.")
+  }
+
+  if (nrow(dhs_br) == 0) {
+    cli::cli_abort("{.arg dhs_br} is empty.")
   }
 
   if (!is.data.frame(gps_data)) {
-    cli::cli_abort("`gps_data` must be a data.frame or tibble")
+    cli::cli_abort("{.arg gps_data} must be a data.frame or tibble.")
   }
 
-  # Check required columns
-  required <- unlist(survey_vars)
-  missing <- setdiff(required, names(dhs_br))
-  if (length(missing) > 0) {
+  # Check required BR columns
+  required_vars <- unlist(survey_vars)
+  missing_vars <- setdiff(required_vars, names(dhs_br))
+
+  if (length(missing_vars) > 0) {
     cli::cli_warn(
-      "U5MR column(s) not found in BR data: {.var {missing}}; U5MR not available for this survey"
+      "U5MR column(s) not found in BR data: {.var {missing_vars}}; U5MR not available for this survey"
+    )
+    return(NULL)
+  }
+
+  # Guard: if age_at_death is entirely NA, U5MR cannot be estimated
+  age_death_var <- survey_vars$age_at_death
+  if (all(is.na(dhs_br[[age_death_var]]))) {
+    cli::cli_warn(
+      "{.var {age_death_var}} is entirely NA; U5MR cannot be estimated - skipping"
     )
     return(NULL)
   }
 
   # ---- Prepare GPS data ----
 
-  gps_clean <- gps_data |>
-    dplyr::transmute(
-      cluster_id = .data[[gps_vars$cluster]],
-      x = as.numeric(.data[[gps_vars$lon]]),
-      y = as.numeric(.data[[gps_vars$lat]])
-    ) |>
-    dplyr::filter(!is.na(x), !is.na(y), x != 0, y != 0) |>
-    dplyr::distinct()
+  gps_clean <- .prepare_gps_data(gps_data, gps_vars)
+
+  # ---- Prepare BR data for chmort() ----
+
+  cluster_var <- survey_vars$cluster
+  br_prepped <- .prepare_br_for_chmort(dhs_br, cluster_var)
 
   cli::cli_alert_info(
-    "GPS data: {nrow(gps_clean)} clusters with valid coordinates"
+    "BR data: {format(nrow(br_prepped), big.mark = ',')} birth records ",
+    "across {length(unique(br_prepped[[cluster_var]]))} clusters"
   )
 
-  # ---- Prepare BR data ----
+  # ---- Call DHS.rates::chmort() per cluster ----
 
-  br <- dhs_br |>
-    dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
-    dplyr::mutate(dplyr::across(dplyr::everything(), as.vector)) |>
-    dplyr::transmute(
-      cluster_id = .data[[survey_vars$cluster]],
-      hhid = .data[[survey_vars$hhid]],
-      birth_index = .data[[survey_vars$birth_index]],
-      interview_cmc = .data[[survey_vars$interview_date]],
-      birth_cmc = .data[[survey_vars$birth_date]],
-      child_alive = .data[[survey_vars$child_alive]],
-      death_age_months = .data[[survey_vars$death_age]]
-    ) |>
-    dplyr::filter(
-      !is.na(birth_cmc),
-      !is.na(interview_cmc)
+  cli::cli_alert_info(
+    "Calculating cluster-level U5MR using {.fn DHS.rates::chmort} ",
+    "(Period = {period_years * 12} months)"
+  )
+
+  # chmort() uses cat() for progress messages; suppress with capture.output()
+  mort_results <- tryCatch({
+      invisible(utils::capture.output({
+        mort_raw <- DHS.rates::chmort(
+          Data.Name         = br_prepped,
+          Strata            = "v022",
+          Cluster           = "v021",
+          Weight            = "v005",
+          Date_of_interview = survey_vars$interview_date,
+          Date_of_birth     = survey_vars$birth_date,
+          Age_at_death      = survey_vars$age_at_death,
+          Period            = period_years * 12,
+          Class             = cluster_var
+        )
+      }))
+      mort_raw
+    },
+    error = function(e) {
+      cli::cli_abort(
+        c(
+          "Error in {.fn DHS.rates::chmort}",
+          "x" = e$message,
+          "i" = "Check that BR data has valid variables: {.var {unlist(survey_vars)}}"
+        )
+      )
+    }
+  )
+
+  # ---- Extract U5MR from chmort output ----
+
+  # chmort() with Class returns a data.frame with columns: Class, R, N, WN
+  # Row names follow the pattern: NNMR, PNNMR, IMR, CMR, U5MR for the first
+
+  # class, then NNMR1, PNNMR1, ..., U5MR1 for the second, etc.
+
+  mort_df <- as.data.frame(mort_results)
+
+  if (!"Class" %in% names(mort_df) || !"R" %in% names(mort_df)) {
+    cli::cli_abort(
+      c(
+        "Unexpected output format from {.fn DHS.rates::chmort}.",
+        "i" = "Expected columns {.val Class}, {.val R}, {.val N} in output."
+      )
     )
+  }
 
-  # Guard: if death_age column exists but is entirely NA, skip
-  death_age_col <- survey_vars[["death_age"]]
-  if (all(is.na(br$death_age_months))) {
+  u5mr_rows <- mort_df[grepl("^U5MR", rownames(mort_df)), , drop = FALSE]
+
+  if (nrow(u5mr_rows) == 0) {
+    cli::cli_warn("No U5MR rows found in {.fn chmort} output; skipping")
+    return(NULL)
+  }
+
+  # Build cluster-level results
+  # R  = U5MR per 1,000 live births
+  # N  = exposure (number of births in the 0-60 month window)
+  # WN = weighted exposure (equal to N here since weights are uniform)
+  u5mr_data <- data.frame(
+    cluster_id = as.integer(as.character(u5mr_rows$Class)),
+    u5mr       = as.numeric(u5mr_rows$R),
+    samplesize = as.integer(u5mr_rows$N),
+    stringsAsFactors = FALSE
+  )
+
+  # Drop clusters with NaN/NA U5MR (too few births for a valid estimate)
+  na_mask <- is.na(u5mr_data$u5mr) | is.nan(u5mr_data$u5mr)
+  if (any(na_mask)) {
+    n_na <- sum(na_mask)
+    cli::cli_alert_warning(
+      "Dropping {n_na} cluster(s) with undefined U5MR (insufficient births)"
+    )
+    u5mr_data <- u5mr_data[!na_mask, ]
+  }
+
+  if (nrow(u5mr_data) == 0) {
+    cli::cli_warn("No clusters with valid U5MR estimates; skipping")
+    return(NULL)
+  }
+
+  # Derive approximate death count from rate and exposure
+  # U5MR = deaths/exposed * 1000, so deaths ~ round(U5MR/1000 * exposed)
+  u5mr_data$indicator <- as.integer(round(
+    u5mr_data$u5mr / 1000 * u5mr_data$samplesize
+  ))
+
+  # ---- Join GPS coordinates ----
+
+  u5mr_data <- dplyr::inner_join(u5mr_data, gps_clean, by = "cluster_id")
+
+  if (nrow(u5mr_data) == 0) {
     cli::cli_warn(
-      "{.var {death_age_col}} is entirely NA; U5MR cannot be estimated - skipping"
+      "No clusters matched between mortality results and GPS data; skipping"
     )
     return(NULL)
   }
 
-  # Calculate time since birth
-  br <- br |>
-    dplyr::mutate(
-      months_since_birth = interview_cmc - birth_cmc
-    )
+  # ---- Format final output ----
 
-  cli::cli_alert_info(
-    "BR data: {format(nrow(br), big.mark = ',')} birth records"
-  )
-
-  # ---- Process each age group ----
-
-  age_specific_results <- list()
-
-  for (age_name in names(age_groups)) {
-    age_range <- age_groups[[age_name]]
-    age_start <- age_range[1]
-    age_end <- age_range[2]
-
-    # Filter to children who completed this age group during analysis period
-    # Criteria:
-    # 1. Child must have fully exited the age group before interview (right-censoring)
-    # 2. Child didn't die before reaching this age group
-    # 3. Child's entry to this age group was within retrospective window
-
-    br_age <- br |>
-      dplyr::filter(
-        # Child must have completed the age group before interview (right-censoring)
-        months_since_birth >= age_end,
-        # Child didn't die before reaching this age group
-        child_alive == 1 | (child_alive == 0 & !is.na(death_age_months) & death_age_months >= age_start),
-        # Entry to this age group was within retrospective window
-        months_since_birth - age_start <= retrospective_months
-      ) |>
-      dplyr::mutate(
-        # Did child die during this age interval?
-        died_in_interval = as.integer(
-          child_alive == 0 &
-          !is.na(death_age_months) &
-          death_age_months >= age_start &
-          death_age_months < age_end
-        )
-      )
-
-    if (nrow(br_age) == 0) {
-      cli::cli_alert_warning("No eligible children for age group {age_name}")
-      next
-    }
-
-    # Aggregate to cluster level
-    cluster_data <- br_age |>
-      dplyr::group_by(cluster_id) |>
-      dplyr::summarise(
-        deaths = sum(died_in_interval, na.rm = TRUE),
-        exposed = dplyr::n(),
-        .groups = "drop"
-      ) |>
-      dplyr::mutate(
-        q = deaths / exposed  # Age-specific mortality rate
-      )
-
-    age_specific_results[[age_name]] <- cluster_data
-
-    n_deaths <- sum(cluster_data$deaths)
-    n_exposed <- sum(cluster_data$exposed)
-    rate <- round(n_deaths / n_exposed * 1000, 1)
-
-    cli::cli_alert_info(
-      "{age_name}: {n_deaths} deaths / {n_exposed} exposed ({rate} per 1000)"
-    )
-  }
-
-  if (length(age_specific_results) == 0) {
-    cli::cli_warn("No valid U5MR data for any age group; U5MR not available for this survey")
-    return(NULL)
-  }
-
-  # ---- Combine age groups into U5MR ----
-
-  # Start with under1 as base (has most children)
-  combined <- age_specific_results[["under1"]] |>
-    dplyr::select(cluster_id, q_under1 = q, deaths_under1 = deaths, exposed_under1 = exposed)
-
-  # Join other age groups
-  for (age_name in c("age1", "age2", "age3", "age4")) {
-    if (age_name %in% names(age_specific_results)) {
-      age_data <- age_specific_results[[age_name]] |>
-        dplyr::select(
-          cluster_id,
-          !!paste0("q_", age_name) := q,
-          !!paste0("deaths_", age_name) := deaths
-        )
-      combined <- combined |>
-        dplyr::left_join(age_data, by = "cluster_id")
-    }
-  }
-
-  # Fill missing q values with 0 (no deaths in that age group for that cluster)
-  combined <- combined |>
-    dplyr::mutate(
-      dplyr::across(dplyr::starts_with("q_"), ~ dplyr::if_else(is.na(.), 0, .)),
-      dplyr::across(dplyr::starts_with("deaths_"), ~ dplyr::if_else(is.na(.), 0L, as.integer(.)))
-    )
-
-  # Calculate composite U5MR
-  # U5MR = 1 - (1-q0)*(1-q1)*(1-q2)*(1-q3)*(1-q4)
-  # Multiply by 1000 to convert to "per 1,000 live births" (standard epidemiological unit)
-  combined <- combined |>
-    dplyr::mutate(
-      u5mr_raw = (1 - (1 - q_under1) * (1 - q_age1) * (1 - q_age2) * (1 - q_age3) * (1 - q_age4)) * 1000,
-      # Total deaths across all age groups
-      total_deaths = deaths_under1 + deaths_age1 + deaths_age2 + deaths_age3 + deaths_age4
-    )
-
-  # Join GPS coordinates
-  combined <- combined |>
-    dplyr::inner_join(gps_clean, by = "cluster_id")
-
-  # Create final output in MBG format
-  u5mr_output <- combined |>
+  u5mr_output <- u5mr_data |>
     dplyr::transmute(
       cluster_id,
-      indicator = total_deaths,
-      samplesize = exposed_under1,  # Use under1 exposed as denominator
+      indicator,
+      samplesize,
       x,
       y,
-      u5mr = u5mr_raw
+      u5mr
     )
 
-  n_clusters <- nrow(u5mr_output)
-  total_deaths <- sum(u5mr_output$indicator)
-  total_exposed <- sum(u5mr_output$samplesize)
-  mean_u5mr <- round(mean(u5mr_output$u5mr), 1)
+  n_clusters   <- nrow(u5mr_output)
+  total_deaths <- sum(u5mr_output$indicator, na.rm = TRUE)
+  total_exposed <- sum(u5mr_output$samplesize, na.rm = TRUE)
+  mean_u5mr    <- round(mean(u5mr_output$u5mr, na.rm = TRUE), 1)
 
   cli::cli_alert_success(
     "U5MR: {n_clusters} clusters, {total_deaths} total deaths, ",
     "mean U5MR = {mean_u5mr} per 1,000 live births"
   )
 
-  # Return combined result
   list(
     u5mr = data.table::as.data.table(u5mr_output)
   )
+}
+
+
+#' Prepare BR Data for Cluster-Level chmort()
+#'
+#' Creates synthetic survey-design columns required by `DHS.rates::chmort()`
+#' when computing per-cluster mortality rates. Since `chmort()` internally
+#' calls `DEFT()` which requires at least 2 PSUs per stratum -- even when
+#' DEFT is not used in the output -- this function creates 2 pseudo-PSUs
+#' per cluster and assigns uniform weights.
+#'
+#' @param dhs_br DHS Birth Recode dataset.
+#' @param cluster_var Name of the cluster ID variable (default: "v001").
+#'
+#' @return A data.frame with synthetic v005, v021, v022 columns suitable
+#'   for `chmort(Class = cluster_var)`.
+#'
+#' @noRd
+.prepare_br_for_chmort <- function(dhs_br, cluster_var = "v001") {
+  br <- as.data.frame(dhs_br)
+
+  # Strip haven labels to avoid issues with DHS.rates internals
+  for (col in names(br)) {
+    if (inherits(br[[col]], "haven_labelled")) {
+      br[[col]] <- as.vector(br[[col]])
+    }
+  }
+
+  # Sort by cluster for deterministic PSU assignment
+  br <- br[order(br[[cluster_var]]), ]
+
+  # Create 2 pseudo-PSUs per cluster by alternating rows.
+  # This satisfies svydesign() which requires >= 2 PSUs per stratum.
+  br$v021 <- paste0(
+    br[[cluster_var]], "_",
+    ave(
+      rep(1L, nrow(br)),
+      br[[cluster_var]],
+      FUN = function(x) ((seq_along(x) - 1L) %% 2L) + 1L
+    )
+  )
+
+  # Each cluster is its own stratum (since we want per-cluster rates)
+  br$v022 <- br[[cluster_var]]
+
+  # Uniform weights: MBG uses unweighted cluster-level rates.
+  # DHS.rates divides v005 by 1e6, so v005 = 1e6 gives weight = 1.
+  br$v005 <- 1e6
+
+  # Drop clusters with only 1 birth (cannot form 2 pseudo-PSUs)
+  cluster_counts <- table(br[[cluster_var]])
+  singleton_clusters <- names(cluster_counts)[cluster_counts < 2]
+
+  if (length(singleton_clusters) > 0) {
+    cli::cli_alert_warning(
+      "Dropping {length(singleton_clusters)} cluster(s) with < 2 births ",
+      "(cannot compute mortality rate)"
+    )
+    br <- br[!br[[cluster_var]] %in% as.integer(singleton_clusters), ]
+  }
+
+  br
 }

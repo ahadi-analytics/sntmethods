@@ -1,9 +1,9 @@
 #' Prepare ACT and Antimalarial Data for MBG Analysis
 #'
 #' Prepares cluster-level ACT (Artemisinin-based Combination
-#' Therapy) and antimalarial treatment data for MBG analysis.
-#' Uses a dictionary-driven approach matching the indicator
-#' codes from \code{\link{calc_act_dhs}}.
+#' Therapy), antimalarial treatment, and malaria diagnostic
+#' data for MBG analysis. Uses a dictionary-driven approach
+#' matching the indicator codes from \code{\link{calc_act_dhs}}.
 #'
 #' @details
 #' All dictionary-based indicators share the same data
@@ -14,8 +14,21 @@
 #'   \item Classify care-seeking sectors (via
 #'     \code{.classify_csb_from_h32()})
 #'   \item Build antimalarial composite from ml13/h37 series
+#'   \item Build malaria diagnostic flag from ml1/h47
 #'   \item Apply per-indicator filters and aggregate to
 #'     cluster-level counts
+#' }
+#'
+#' The dictionary includes three indicator families:
+#' \itemize{
+#'   \item \strong{ACT} (\code{act_*}): ACT receipt among
+#'     febrile U5, with sector and AM filters
+#'   \item \strong{Antimalarial} (\code{antimal_*}):
+#'     Antimalarial receipt among febrile U5, with sector
+#'     filters
+#'   \item \strong{Malaria diagnostic} (\code{mal_dx_*}):
+#'     Malaria diagnostic test (ml1/h47) among AM recipients,
+#'     with sector filters
 #' }
 #'
 #' @param dhs_kr DHS Children's Recode (KR) dataset.
@@ -65,7 +78,8 @@
 #' act_mbg <- calc_act_mbg(
 #'   dhs_kr = kr_data,
 #'   gps_data = gps_data,
-#'   indicators = c("act_pub", "act_trained", "antimal_chw")
+#'   indicators = c("act_pub", "act_trained", "antimal_chw",
+#'                   "mal_dx_am", "mal_dx_pub_am")
 #' )
 #' }
 #'
@@ -224,6 +238,41 @@ calc_act_mbg <- function(
     enriched <- .enrich_with_antimalarial(
       enriched, dhs_kr, survey_vars
     )
+  }
+
+  # ---- Enrich with malaria diagnostic if needed ----
+
+  needs_dx <- any(vapply(dict_specs, function(s) {
+    s$outcome == "had_test"
+  }, logical(1)))
+  if (needs_dx) {
+    # Mirror DHS derivation: try ml1 first, then h47 fallback
+    if ("ml1" %in% names(enriched)) {
+      enriched$had_test <- as.integer(
+        !is.na(enriched$ml1) & enriched$ml1 == 1
+      )
+      cli::cli_alert_info(
+        "Enriched with malaria diagnostic (ml1): \\
+        {sum(enriched$had_test == 1, na.rm = TRUE)} \\
+        tested"
+      )
+    } else if ("h47" %in% names(enriched)) {
+      enriched$had_test <- as.integer(
+        !is.na(enriched$h47) & enriched$h47 == 1
+      )
+      cli::cli_alert_info(
+        "Enriched with malaria diagnostic (h47): \\
+        {sum(enriched$had_test == 1, na.rm = TRUE)} \\
+        tested"
+      )
+    } else {
+      cli::cli_alert_warning(
+        "Neither ml1 nor h47 found \\
+        {cli::symbol$em_dash} mal_dx indicators \\
+        will be skipped"
+      )
+      enriched$had_test <- NA_integer_
+    }
   }
 
   # ---- Dictionary-driven indicator loop ----
@@ -416,13 +465,22 @@ calc_act_mbg <- function(
 }
 
 
-#' ACT/Antimalarial MBG Indicator Dictionary
+#' ACT/Antimalarial/Malaria Diagnostic MBG Indicator Dictionary
 #'
 #' Returns the full set of standardized indicator
 #' specifications for cluster-level MBG output.
 #' Each entry defines the outcome variable, optional
 #' CSB filter column, and whether an antimalarial
 #' receipt filter applies.
+#'
+#' Three indicator families:
+#' \itemize{
+#'   \item \strong{ACT} (13): \code{outcome = "received_act"}
+#'   \item \strong{Antimalarial} (11):
+#'     \code{outcome = "received_antimalarial"}
+#'   \item \strong{Malaria diagnostic} (9):
+#'     \code{outcome = "had_test"} (ml1/h47 == 1)
+#' }
 #'
 #' @return List of named lists with fields:
 #'   \code{name}, \code{outcome}, \code{csb_filter},
@@ -576,6 +634,63 @@ calc_act_mbg <- function(
       outcome = "received_antimalarial",
       csb_filter = "csb_private_formal_pha",
       am_filter = FALSE
+    ),
+
+    # -- Malaria diagnostic indicators (outcome = had_test) --
+    # Malaria diagnostic among AM recipients, by care-seeking sector
+    list(
+      name = "mal_dx_am",
+      outcome = "had_test",
+      csb_filter = NULL,
+      am_filter = TRUE
+    ),
+    list(
+      name = "mal_dx_pub_am",
+      outcome = "had_test",
+      csb_filter = "csb_public",
+      am_filter = TRUE
+    ),
+    list(
+      name = "mal_dx_pub_nochw_am",
+      outcome = "had_test",
+      csb_filter = "csb_public_nochw",
+      am_filter = TRUE
+    ),
+    list(
+      name = "mal_dx_chw_am",
+      outcome = "had_test",
+      csb_filter = "csb_chw",
+      am_filter = TRUE
+    ),
+    list(
+      name = "mal_dx_priv_am",
+      outcome = "had_test",
+      csb_filter = "csb_private",
+      am_filter = TRUE
+    ),
+    list(
+      name = "mal_dx_priv_formal_am",
+      outcome = "had_test",
+      csb_filter = "csb_private_formal_ind",
+      am_filter = TRUE
+    ),
+    list(
+      name = "mal_dx_pharm_am",
+      outcome = "had_test",
+      csb_filter = "csb_pharmacy",
+      am_filter = TRUE
+    ),
+    list(
+      name = "mal_dx_priv_informal_am",
+      outcome = "had_test",
+      csb_filter = "csb_private_informal",
+      am_filter = TRUE
+    ),
+    list(
+      name = "mal_dx_priv_form_pha_am",
+      outcome = "had_test",
+      csb_filter = "csb_private_formal_pha",
+      am_filter = TRUE
     )
   )
 }

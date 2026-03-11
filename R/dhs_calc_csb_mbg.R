@@ -14,13 +14,13 @@
 #'   \itemize{
 #'     \item "any": Sought care anywhere (public or private)
 #'     \item "public": Public sector including CHW
-#'     \item "public_nochw": Public sector excluding CHW
+#'     \item "pub_nochw": Public sector excluding CHW
 #'     \item "chw": Community health worker only
 #'     \item "private": Any private sector
-#'     \item "private_formal": Private formal sector only
+#'     \item "priv_formal": Private formal sector only
 #'     \item "pharmacy": Pharmacy / drug shop only
-#'     \item "private_informal": Private informal only
-#'     \item "private_formal_pha": Private formal or pharmacy
+#'     \item "priv_informal": Private informal only
+#'     \item "priv_form_pha": Private formal or pharmacy
 #'     \item "trained": Trained provider (public + formal +
 #'       pharmacy)
 #'     \item "none": Did not seek care
@@ -83,10 +83,13 @@ calc_csb_mbg <- function(
     cli::cli_abort("`gps_data` must be a data.frame or tibble")
   }
 
+  # Accept both prefixed ("csb_public") and short ("public") forms
+  indicators <- sub("^csb_", "", indicators)
+
   valid_indicators <- c(
-    "any", "public", "public_nochw", "chw",
-    "private", "private_formal", "pharmacy",
-    "private_informal", "private_formal_pha",
+    "any", "public", "pub_nochw", "chw",
+    "private", "priv_formal", "pharmacy",
+    "priv_informal", "priv_form_pha",
     "trained", "none"
   )
   invalid <- setdiff(indicators, valid_indicators)
@@ -109,32 +112,32 @@ calc_csb_mbg <- function(
 
   # ---- Calculate cluster-level indicators ----
 
-  # Maps short indicator name → CSB column in data
+  # Maps short indicator name -> CSB column in data
   indicator_map <- list(
     any = "csb_any",
     public = "csb_public",
-    public_nochw = "csb_public_nochw",
+    pub_nochw = "csb_public_nochw",
     chw = "csb_chw",
     private = "csb_private",
-    private_formal = "csb_private_formal_ind",
+    priv_formal = "csb_private_formal_ind",
     pharmacy = "csb_pharmacy",
-    private_informal = "csb_private_informal",
-    private_formal_pha = "csb_private_formal_pha",
+    priv_informal = "csb_private_informal",
+    priv_form_pha = "csb_private_formal_pha",
     trained = "csb_trained",
     none = "csb_none"
   )
 
-  # Maps short indicator name → output key name
+  # Maps short indicator name -> output key name
   result_names <- list(
     any = "csb_any",
     public = "csb_public",
-    public_nochw = "csb_public_nochw",
+    pub_nochw = "csb_pub_nochw",
     chw = "csb_chw",
     private = "csb_private",
-    private_formal = "csb_private_formal",
+    priv_formal = "csb_priv_formal",
     pharmacy = "csb_pharmacy",
-    private_informal = "csb_private_informal",
-    private_formal_pha = "csb_private_formal_pha",
+    priv_informal = "csb_priv_informal",
+    priv_form_pha = "csb_priv_form_pha",
     trained = "csb_trained",
     none = "csb_none"
   )

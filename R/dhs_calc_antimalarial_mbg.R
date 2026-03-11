@@ -1,26 +1,30 @@
 #' Prepare Antimalarial Treatment Data for MBG Analysis
 #'
 #' Prepares cluster-level antimalarial treatment data for MBG analysis.
-#' Calculates counts of febrile children under 5 who received any antimalarial
-#' drug, at each survey cluster.
+#' Uses a dictionary-driven approach matching the indicator codes from
+#' \code{\link{calc_antimalarial_dhs}}.
 #'
 #' @details
 #' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/antimalarial_dhs.yml}
 #'
+#' All dictionary-based indicators share the same data preparation pipeline:
+#' \enumerate{
+#'   \item Filter to febrile U5 children (via \code{.prepare_antimalarial_data()})
+#'   \item Classify care-seeking sectors if needed (via
+#'     \code{.classify_csb_from_h32()})
+#'   \item Apply per-indicator filters and aggregate to cluster-level counts
+#' }
+#'
 #' @param dhs_kr DHS Children's Recode (KR) dataset.
 #' @param gps_data DHS GPS dataset with cluster coordinates.
-#' @param indicators Character vector of indicators to calculate:
-#'   \itemize{
-#'     \item "antimalarial": Received any antimalarial among febrile U5
-#'     \item "antimalarial_public": Received any antimalarial among febrile U5
-#'       who sought public care
-#'   }
-#'   Default: "antimalarial".
+#' @param indicators Character vector of indicators to calculate.
+#'   See \code{.antimalarial_mbg_dictionary()} for the full list of
+#'   standardized indicator codes. Default: \code{"antimalarial"}.
 #' @param survey_vars Named list mapping DHS variable names:
 #'   \itemize{
-#'     \item `cluster`: Cluster ID (default: "v001")
-#'     \item `age`: Child's age in months (default: "hw1")
-#'     \item `fever`: Fever in last 2 weeks (default: "h22")
+#'     \item \code{cluster}: Cluster ID (default: "v001")
+#'     \item \code{age}: Child's age in months (default: "hw1")
+#'     \item \code{fever}: Fever in last 2 weeks (default: "h22")
 #'   }
 #' @param gps_vars Named list for GPS variable mapping.
 #'
@@ -37,11 +41,12 @@
 #' \dontrun{
 #' am_mbg <- calc_antimalarial_mbg(
 #'   dhs_kr = kr_data,
-#'   gps_data = gps_data
+#'   gps_data = gps_data,
+#'   indicators = c("antimalarial", "antimalarial_public")
 #' )
 #' }
 #'
-#' @seealso [calc_antimalarial_dhs_core()] for survey-weighted estimates,
+#' @seealso [calc_antimalarial_dhs()] for survey-weighted estimates,
 #'   [calc_act_mbg()] for ACT-specific treatment
 #' @export
 calc_antimalarial_mbg <- function(
@@ -68,17 +73,19 @@ calc_antimalarial_mbg <- function(
     cli::cli_abort("`gps_data` must be a data.frame or tibble")
   }
 
-  valid_indicators <- c("antimalarial", "antimalarial_public")
-  invalid <- setdiff(indicators, valid_indicators)
+  # Validate indicators against dictionary
+  dict <- .antimalarial_mbg_dictionary()
+  dict_names <- vapply(dict, `[[`, character(1), "name")
+  invalid <- setdiff(indicators, dict_names)
   if (length(invalid) > 0) {
     cli::cli_abort("Invalid indicators: {.val {invalid}}")
   }
 
-  # ---- Prepare data using shared helpers ----
+  # ---- Prepare base data using shared helpers ----
 
   gps_clean <- .prepare_gps_data(gps_data, gps_vars)
 
-  kr_fever <- tryCatch(
+  am_data <- tryCatch(
     .prepare_antimalarial_data(
       dhs_kr = dhs_kr,
       survey_vars = survey_vars,
@@ -90,67 +97,99 @@ calc_antimalarial_mbg <- function(
     }
   )
 
-  if (is.null(kr_fever)) return(list())
+  if (is.null(am_data)) return(list())
 
-  if (all(is.na(kr_fever$has_antimalarial))) {
+  if (all(is.na(am_data$has_antimalarial))) {
     cli::cli_alert_warning("All antimalarial variables are NA")
     return(list())
   }
 
-  # ---- Calculate cluster-level indicators ----
+  # ---- Determine which dictionary entries are requested ----
 
-  results <- list()
+  dict_specs <- dict[vapply(dict, function(d) d$name %in% indicators, logical(1))]
 
-  if ("antimalarial" %in% indicators) {
-    am_data <- kr_fever |>
-      dplyr::filter(!is.na(has_antimalarial)) |>
-      dplyr::mutate(am_binary = as.integer(has_antimalarial == 1))
+  # ---- Conditional CSB enrichment (only when needed) ----
 
-    dt <- .aggregate_to_mbg_clusters(
-      individual_data = am_data,
-      indicator_col = "am_binary",
-      gps_clean = gps_clean,
-      result_name = "antimalarial"
-    )
+  needs_csb <- any(vapply(
+    dict_specs,
+    function(s) !is.null(s$csb_filter),
+    logical(1)
+  ))
 
-    if (!is.null(dt)) {
-      results[["antimalarial"]] <- dt
-    }
-  }
-
-  if ("antimalarial_public" %in% indicators) {
-    # Apply CSB classification to identify public care seekers
-    kr_fever_csb <- tryCatch(
-      .classify_csb_from_h32(kr_fever),
+  if (needs_csb) {
+    am_data <- tryCatch(
+      .classify_csb_from_h32(am_data),
       error = function(e) {
         cli::cli_alert_warning(
-          "Cannot compute antimalarial_public: {conditionMessage(e)}"
+          "CSB classification failed: {conditionMessage(e)}"
         )
         NULL
       }
     )
-
-    if (!is.null(kr_fever_csb)) {
-      am_public_data <- kr_fever_csb |>
-        dplyr::filter(csb_public == 1, !is.na(has_antimalarial)) |>
-        dplyr::mutate(am_binary = as.integer(has_antimalarial == 1))
-
-      if (nrow(am_public_data) > 0) {
-        dt <- .aggregate_to_mbg_clusters(
-          individual_data = am_public_data,
-          indicator_col = "am_binary",
-          gps_clean = gps_clean,
-          result_name = "antimalarial_public"
-        )
-
-        if (!is.null(dt)) {
-          results[["antimalarial_public"]] <- dt
+    if (is.null(am_data)) {
+      # Fall back: re-prepare without CSB, skip CSB-dependent indicators
+      am_data <- tryCatch(
+        .prepare_antimalarial_data(
+          dhs_kr = dhs_kr,
+          survey_vars = survey_vars,
+          include_survey_vars = FALSE
+        ),
+        error = function(e) {
+          cli::cli_alert_warning(conditionMessage(e))
+          return(NULL)
         }
-      } else {
-        cli::cli_alert_warning(
-          "No febrile children who sought public care - skipping antimalarial_public"
-        )
-      }
+      )
+      if (is.null(am_data)) return(list())
+      needs_csb <- FALSE
+    }
+  }
+
+  # ---- Dictionary-driven indicator loop ----
+
+  results <- list()
+
+  for (spec in dict_specs) {
+    # Skip CSB-filtered indicators if CSB enrichment failed
+    if (!is.null(spec$csb_filter) && !needs_csb) {
+      cli::cli_alert_warning(
+        "Skipping {.val {spec$name}}: CSB classification not available"
+      )
+      next
+    }
+
+    filtered <- am_data
+
+    # Apply CSB filter if specified
+    if (!is.null(spec$csb_filter)) {
+      col <- spec$csb_filter
+      if (!col %in% names(filtered)) next
+      filtered <- filtered[
+        !is.na(filtered[[col]]) & filtered[[col]] == 1, ,
+        drop = FALSE
+      ]
+    }
+
+    # Filter to non-NA outcome
+    filtered <- filtered[!is.na(filtered[[spec$outcome]]), , drop = FALSE]
+    if (nrow(filtered) == 0) {
+      cli::cli_alert_warning(
+        "No data for {.val {spec$name}} — skipping"
+      )
+      next
+    }
+
+    # Build binary outcome
+    filtered$.binary <- as.integer(filtered[[spec$outcome]] == 1)
+
+    dt <- .aggregate_to_mbg_clusters(
+      individual_data = filtered,
+      indicator_col = ".binary",
+      gps_clean = gps_clean,
+      result_name = spec$name
+    )
+
+    if (!is.null(dt)) {
+      results[[spec$name]] <- dt
     }
   }
 
@@ -159,6 +198,31 @@ calc_antimalarial_mbg <- function(
   }
 
   results
+}
+
+
+#' Antimalarial MBG Indicator Dictionary
+#'
+#' Returns the full set of standardized indicator specifications for
+#' cluster-level antimalarial MBG output. Each entry defines the outcome
+#' variable and an optional CSB filter column.
+#'
+#' @return List of named lists with fields:
+#'   \code{name}, \code{outcome}, \code{csb_filter}.
+#' @noRd
+.antimalarial_mbg_dictionary <- function() {
+  list(
+    list(
+      name = "antimalarial",
+      outcome = "has_antimalarial",
+      csb_filter = NULL
+    ),
+    list(
+      name = "antimalarial_public",
+      outcome = "has_antimalarial",
+      csb_filter = "csb_public"
+    )
+  )
 }
 
 
