@@ -2,12 +2,11 @@
 #'
 #' Left-joins DHS-specific labels onto a base dictionary produced by
 #' \code{sntutils::build_dictionary()}, overriding generic auto-labels
-#' with precise DHS indicator names, French translations, and
-#' methodological notes.
+#' with precise DHS indicator names and methodological notes.
 #'
 #' @param dict A data frame produced by \code{sntutils::build_dictionary()}.
 #' @param labels A tibble with at least a \code{variable} column and one or more
-#'   of: \code{label_en}, \code{label_fr}, \code{dhs_variable}, \code{numerator},
+#'   of: \code{label_en}, \code{dhs_variable}, \code{numerator},
 #'   \code{denominator}, \code{dhs_numerator_var}, \code{dhs_denominator_var},
 #'   \code{notes}.
 #'
@@ -38,11 +37,6 @@
       labels_joined$label_en,
       enriched$label_en
     )
-  }
-
-  # Add or override label_fr
-  if ("label_fr" %in% names(labels)) {
-    enriched$label_fr <- labels_joined$label_fr
   }
 
   # Override notes where our DHS notes are defined (not NA)
@@ -93,7 +87,7 @@
 
   # Reorder columns: structural first, then DHS-specific, then stats
   desired_order <- c(
-    "variable", "type", "label_en", "label_fr",
+    "variable", "type", "label_en",
     "category",
     "dhs_variable", "numerator", "denominator",
     "dhs_numerator_var", "dhs_denominator_var",
@@ -107,740 +101,6 @@
   enriched <- enriched[, c(existing, remaining), drop = FALSE]
 
   tibble::as_tibble(enriched)
-}
-
-
-#' Build MBG-specific labels for indicator columns
-#'
-#' Programmatically generates label tibbles for MBG output columns
-#' based on indicator names. Each indicator produces _mean, _lower,
-#' _upper, n_tested_, n_pos_, n_clusters_, and _raw columns.
-#'
-#' @param indicator_names Character vector of indicator names
-#'   (e.g., "fever", "malaria_dx").
-#'
-#' @return A tibble with columns: variable, label_en, label_fr,
-#'   dhs_variable, numerator, denominator, dhs_numerator_var,
-#'   dhs_denominator_var, notes.
-#'
-#' @noRd
-.build_mbg_labels <- function(indicator_names) {
-  # Map indicator names to readable labels with numerator/denominator metadata
-  # Fields: en, fr, dhs_var, num, den, dhs_num, dhs_den
-  indicator_labels <- list(
-    # Case Management Cascade
-    fever = list(
-      en = "Fever prevalence", fr = "Prevalence de la fievre",
-      dhs_var = "h22",
-      num = "Children with fever", den = "Alive children 0-59 months",
-      dhs_num = "h22", dhs_den = "b5, hw1"
-    ),
-    csb_public = list(
-      en = "Care-seeking at public facility",
-      fr = "Recherche de soins en etablissement public",
-      dhs_var = "h32a-c",
-      num = "Febrile children taken to public facility",
-      den = "Febrile children under 5",
-      dhs_num = "h32a-c", dhs_den = "h22"
-    ),
-    csb_private = list(
-      en = "Care-seeking at private facility",
-      fr = "Recherche de soins en etablissement prive",
-      dhs_var = "h32d-u",
-      num = "Febrile children taken to private facility",
-      den = "Febrile children under 5",
-      dhs_num = "h32d-u", dhs_den = "h22"
-    ),
-    csb_none = list(
-      en = "No care-seeking for fever",
-      fr = "Pas de recherche de soins pour fievre",
-      dhs_var = "1-any(h32*)",
-      num = "Febrile children not taken anywhere",
-      den = "Febrile children under 5",
-      dhs_num = "1-any(h32*)", dhs_den = "h22"
-    ),
-    csb_any = list(
-      en = "Care-seeking at any source",
-      fr = "Recherche de soins toute source",
-      dhs_var = "h32a-z",
-      num = "Febrile children taken to any source",
-      den = "Febrile children under 5",
-      dhs_num = "h32a-z", dhs_den = "h22"
-    ),
-    csb_trained = list(
-      en = "Care-seeking from trained provider",
-      fr = "Recherche de soins aupres d'un prestataire forme",
-      dhs_var = "h32a-u",
-      num = "Febrile children taken to trained provider",
-      den = "Febrile children under 5",
-      dhs_num = "h32a-u", dhs_den = "h22"
-    ),
-    malaria_dx = list(
-      en = "Blood taken for malaria testing",
-      fr = "Sang preleve pour test de paludisme",
-      dhs_var = "h47/ml1",
-      num = "Febrile children with blood taken for testing",
-      den = "Febrile children under 5",
-      dhs_num = "h47/ml1", dhs_den = "h22"
-    ),
-    antimalarial = list(
-      en = "Received any antimalarial",
-      fr = "A recu un antipaludique",
-      dhs_var = "ml13a-h (or h37a-h)",
-      num = "Febrile children receiving any antimalarial",
-      den = "Febrile children under 5",
-      dhs_num = "ml13a-h (or h37a-h)", dhs_den = "h22"
-    ),
-    antimalarial_public = list(
-      en = "Received any antimalarial (public care-seeking)",
-      fr = "A recu un antipaludique (soins publics)",
-      dhs_var = "ml13a-h (or h37a-h), h32a-i",
-      num = "Febrile U5 receiving antimalarial among public care seekers",
-      den = "Febrile U5 who sought public care",
-      dhs_num = "ml13a-h (or h37a-h)", dhs_den = "h22 + h32a-i"
-    ),
-    act = list(
-      en = "Received ACT", fr = "A recu un CTA",
-      dhs_var = "ml13e (or h37e)",
-      num = "Febrile children receiving ACT",
-      den = "Febrile children under 5",
-      dhs_num = "ml13e (or h37e)", dhs_den = "h22"
-    ),
-    act_public = list(
-      en = "Received ACT (public care-seeking)",
-      fr = "A recu un CTA (soins publics)",
-      dhs_var = "ml13e (or h37e), h32a-i",
-      num = "Febrile U5 receiving ACT among public care seekers",
-      den = "Febrile U5 who sought public care",
-      dhs_num = "ml13e (or h37e)", dhs_den = "h22 + h32a-i"
-    ),
-    act_tested = list(
-      en = "Received ACT (test-positive)",
-      fr = "A recu un CTA (testes positifs)",
-      dhs_var = "ml13e (or h37e)",
-      num = "Test-positive children receiving ACT",
-      den = "Test-positive febrile children",
-      dhs_num = "ml13e (or h37e)", dhs_den = "h47/ml1"
-    ),
-    febrile_rdt_pos = list(
-      en = "RDT positivity rate (febrile U5)",
-      fr = "Taux de positivite TDR (enfants febriles < 5 ans)",
-      dhs_var = "hml35",
-      num = "Febrile children under 5 with positive RDT",
-      den = "Febrile children under 5 with valid RDT result",
-      dhs_num = "hml35", dhs_den = "hml35"
-    ),
-    febrile_rdt_pos_act = list(
-      en = "ACT coverage among febrile RDT+ children",
-      fr = "Couverture CTA chez les enfants febriles TDR+",
-      dhs_var = "ml13e (or h37e)",
-      num = "Febrile RDT-positive children receiving ACT",
-      den = "Febrile children under 5 with positive RDT",
-      dhs_num = "ml13e (or h37e)", dhs_den = "hml35"
-    ),
-    # PfPR
-    pfpr_rdt = list(
-      en = "PfPR by RDT", fr = "TIP par TDR",
-      dhs_var = "hml35",
-      num = "RDT-positive children", den = "Children tested by RDT",
-      dhs_num = "hml35", dhs_den = "hml35"
-    ),
-    pfpr_mic = list(
-      en = "PfPR by microscopy", fr = "TIP par microscopie",
-      dhs_var = "hml32",
-      num = "Microscopy-positive children",
-      den = "Children tested by microscopy",
-      dhs_num = "hml32", dhs_den = "hml32"
-    ),
-    pfpr_rdt_u5 = list(
-      en = "PfPR by RDT (under 5)",
-      fr = "TIP par TDR (moins de 5 ans)",
-      dhs_var = "hml35",
-      num = "RDT-positive children under 5",
-      den = "Children under 5 tested by RDT",
-      dhs_num = "hml35", dhs_den = "hml35"
-    ),
-    pfpr_mic_u5 = list(
-      en = "PfPR by microscopy (under 5)",
-      fr = "TIP par microscopie (moins de 5 ans)",
-      dhs_var = "hml32",
-      num = "Microscopy-positive children under 5",
-      den = "Children under 5 tested by microscopy",
-      dhs_num = "hml32", dhs_den = "hml32"
-    ),
-    pfpr_either_u5 = list(
-      en = "PfPR by either test (under 5)",
-      fr = "TIP par tout test (moins de 5 ans)",
-      dhs_var = "hml32/hml35",
-      num = "Children under 5 positive by either test",
-      den = "Children under 5 tested",
-      dhs_num = "hml32/hml35", dhs_den = "hml32/hml35"
-    ),
-    pfpr_combined_u5 = list(
-      en = "PfPR combined (under 5)",
-      fr = "TIP combine (moins de 5 ans)",
-      dhs_var = "hml32/hml35",
-      num = "Children under 5 positive (combined)",
-      den = "Children under 5 tested",
-      dhs_num = "hml32/hml35", dhs_den = "hml32/hml35"
-    ),
-    # ITN
-    itn_ownership = list(
-      en = "ITN household ownership",
-      fr = "Possession de MII par menage",
-      dhs_var = "hml10_*",
-      num = "Households with at least 1 ITN",
-      den = "All households",
-      dhs_num = "hml10_*", dhs_den = "hv001"
-    ),
-    itn_access = list(
-      en = "ITN population access",
-      fr = "Acces de la population aux MII",
-      dhs_var = "hml18",
-      num = "Population with access to ITN",
-      den = "De facto household population",
-      dhs_num = "hml18", dhs_den = "hv013"
-    ),
-    itn_use = list(
-      en = "ITN population use",
-      fr = "Utilisation des MII par la population",
-      dhs_var = "hml12",
-      num = "Population sleeping under ITN",
-      den = "De facto household population",
-      dhs_num = "hml12", dhs_den = "hv013"
-    ),
-    itn_use_u5 = list(
-      en = "ITN use in children under 5",
-      fr = "Utilisation des MII chez les enfants de moins de 5 ans",
-      dhs_var = "hml12",
-      num = "Children under 5 sleeping under ITN",
-      den = "Children under 5 in household",
-      dhs_num = "hml12", dhs_den = "hv013"
-    ),
-    itn_use_preg = list(
-      en = "ITN use in pregnant women",
-      fr = "Utilisation des MII chez les femmes enceintes",
-      dhs_var = "hml12",
-      num = "Pregnant women sleeping under ITN",
-      den = "Pregnant women in household",
-      dhs_num = "hml12", dhs_den = "hv013"
-    ),
-    itn_use_all = list(
-      en = "ITN use - all population",
-      fr = "Utilisation MII - toute la population",
-      dhs_var = "hml12",
-      num = "Population sleeping under ITN",
-      den = "De facto household population",
-      dhs_num = "hml12", dhs_den = "hv013"
-    ),
-    itn_use_5_10 = list(
-      en = "ITN use in children 5-10",
-      fr = "Utilisation MII enfants 5-10 ans",
-      dhs_var = "hml12",
-      num = "Children 5-10 sleeping under ITN",
-      den = "Children 5-10 in household",
-      dhs_num = "hml12", dhs_den = "hv013"
-    ),
-    itn_use_10_20 = list(
-      en = "ITN use in adolescents 10-20",
-      fr = "Utilisation MII adolescents 10-20 ans",
-      dhs_var = "hml12",
-      num = "Adolescents 10-20 sleeping under ITN",
-      den = "Adolescents 10-20 in household",
-      dhs_num = "hml12", dhs_den = "hv013"
-    ),
-    itn_use_20plus = list(
-      en = "ITN use in adults 20+",
-      fr = "Utilisation MII adultes 20+",
-      dhs_var = "hml12",
-      num = "Adults 20+ sleeping under ITN",
-      den = "Adults 20+ in household",
-      dhs_num = "hml12", dhs_den = "hv013"
-    ),
-    itn_use_pregnant = list(
-      en = "ITN use in pregnant women",
-      fr = "Utilisation MII femmes enceintes",
-      dhs_var = "hml12",
-      num = "Pregnant women sleeping under ITN",
-      den = "Pregnant women in household",
-      dhs_num = "hml12", dhs_den = "hv013"
-    ),
-    itn_use_if_access = list(
-      en = "ITN use given access",
-      fr = "Utilisation MII si acces",
-      dhs_var = "hml12",
-      num = "People with access using ITN",
-      den = "People with access to ITN",
-      dhs_num = "hml12", dhs_den = "hml18"
-    ),
-    # Anemia
-    severe_anemia = list(
-      en = "Severe anemia prevalence",
-      fr = "Prevalence de l'anemie severe",
-      dhs_var = "hw53/hc56",
-      num = "Children with Hb < 8 g/dL",
-      den = "Children with Hb measurement",
-      dhs_num = "hw53/hc56", dhs_den = "hw53/hc56"
-    ),
-    anemia_any = list(
-      en = "Any anemia prevalence",
-      fr = "Prevalence de toute anemie",
-      dhs_var = "hw53/hc56",
-      num = "Children with Hb < 11 g/dL",
-      den = "Children with Hb measurement",
-      dhs_num = "hw53/hc56", dhs_den = "hw53/hc56"
-    ),
-    anemia_moderate_plus = list(
-      en = "Moderate or severe anemia",
-      fr = "Anemie moderee ou severe",
-      dhs_var = "hw53/hc56",
-      num = "Children with Hb < 10 g/dL",
-      den = "Children with Hb measurement",
-      dhs_num = "hw53/hc56", dhs_den = "hw53/hc56"
-    ),
-    anemia_severe = list(
-      en = "Severe anemia prevalence",
-      fr = "Prevalence de l'anemie severe",
-      dhs_var = "hw53/hc56",
-      num = "Children with Hb < 8 g/dL",
-      den = "Children with Hb measurement",
-      dhs_num = "hw53/hc56", dhs_den = "hw53/hc56"
-    ),
-    anemia_mild_only = list(
-      en = "Mild anemia only",
-      fr = "Anemie legere uniquement",
-      dhs_var = "hw53/hc56",
-      num = "Children with 10 <= Hb < 11 g/dL",
-      den = "Children with Hb measurement",
-      dhs_num = "hw53/hc56", dhs_den = "hw53/hc56"
-    ),
-    anemia_moderate_only = list(
-      en = "Moderate anemia only",
-      fr = "Anemie moderee uniquement",
-      dhs_var = "hw53/hc56",
-      num = "Children with 8 <= Hb < 10 g/dL",
-      den = "Children with Hb measurement",
-      dhs_num = "hw53/hc56", dhs_den = "hw53/hc56"
-    ),
-    anemia_severe_only = list(
-      en = "Severe anemia only",
-      fr = "Anemie severe uniquement",
-      dhs_var = "hw53/hc56",
-      num = "Children with Hb < 8 g/dL",
-      den = "Children with Hb measurement",
-      dhs_num = "hw53/hc56", dhs_den = "hw53/hc56"
-    ),
-    # ANC
-    anc_1plus = list(
-      en = "At least 1 ANC visit", fr = "Au moins 1 visite CPN",
-      dhs_var = "m14_1",
-      num = "Women with >= 1 ANC visit",
-      den = "Women with recent birth",
-      dhs_num = "m14_1", dhs_den = "v201"
-    ),
-    anc_3plus = list(
-      en = "At least 3 ANC visits", fr = "Au moins 3 visites CPN",
-      dhs_var = "m14_1",
-      num = "Women with >= 3 ANC visits",
-      den = "Women with recent birth",
-      dhs_num = "m14_1", dhs_den = "v201"
-    ),
-    anc_4plus = list(
-      en = "At least 4 ANC visits", fr = "Au moins 4 visites CPN",
-      dhs_var = "m14_1",
-      num = "Women with >= 4 ANC visits",
-      den = "Women with recent birth",
-      dhs_num = "m14_1", dhs_den = "v201"
-    ),
-    anc_8plus = list(
-      en = "At least 8 ANC visits", fr = "Au moins 8 visites CPN",
-      dhs_var = "m14_1",
-      num = "Women with >= 8 ANC visits",
-      den = "Women with recent birth",
-      dhs_num = "m14_1", dhs_den = "v201"
-    ),
-    # IPTp
-    iptp_1plus = list(
-      en = "At least 1 dose IPTp-SP", fr = "Au moins 1 dose TPI-SP",
-      dhs_var = "m49a_1/ml1_1",
-      num = "Women receiving >= 1 SP dose",
-      den = "Women with recent birth",
-      dhs_num = "m49a_1/ml1_1", dhs_den = "v201"
-    ),
-    iptp_2plus = list(
-      en = "At least 2 doses IPTp-SP", fr = "Au moins 2 doses TPI-SP",
-      dhs_var = "m49a_1/ml1_1",
-      num = "Women receiving >= 2 SP doses",
-      den = "Women with recent birth",
-      dhs_num = "m49a_1/ml1_1", dhs_den = "v201"
-    ),
-    iptp_3plus = list(
-      en = "At least 3 doses IPTp-SP", fr = "Au moins 3 doses TPI-SP",
-      dhs_var = "m49a_1/ml1_1",
-      num = "Women receiving >= 3 SP doses",
-      den = "Women with recent birth",
-      dhs_num = "m49a_1/ml1_1", dhs_den = "v201"
-    ),
-    iptp_4plus = list(
-      en = "At least 4 doses IPTp-SP", fr = "Au moins 4 doses TPI-SP",
-      dhs_var = "ml1_1",
-      num = "Women receiving >= 4 SP doses",
-      den = "Women with recent birth",
-      dhs_num = "ml1_1", dhs_den = "v201"
-    ),
-    iptp_1only = list(
-      en = "Exactly 1 dose IPTp-SP", fr = "Exactement 1 dose TPI-SP",
-      dhs_var = "m49a_1/ml1_1",
-      num = "Women receiving exactly 1 SP dose",
-      den = "Women with recent birth",
-      dhs_num = "m49a_1/ml1_1", dhs_den = "v201"
-    ),
-    iptp_2only = list(
-      en = "Exactly 2 doses IPTp-SP", fr = "Exactement 2 doses TPI-SP",
-      dhs_var = "m49a_1/ml1_1",
-      num = "Women receiving exactly 2 SP doses",
-      den = "Women with recent birth",
-      dhs_num = "m49a_1/ml1_1", dhs_den = "v201"
-    ),
-    iptp_3only = list(
-      en = "Exactly 3 doses IPTp-SP", fr = "Exactement 3 doses TPI-SP",
-      dhs_var = "m49a_1/ml1_1",
-      num = "Women receiving exactly 3 SP doses",
-      den = "Women with recent birth",
-      dhs_num = "m49a_1/ml1_1", dhs_den = "v201"
-    ),
-    # EPI
-    epi_bcg = list(
-      en = "BCG vaccination", fr = "Vaccination BCG",
-      dhs_var = "h2",
-      num = "Children 12-23m with BCG", den = "Children 12-23 months",
-      dhs_num = "h2", dhs_den = "hw1"
-    ),
-    epi_dpt1 = list(
-      en = "DPT dose 1", fr = "DTC dose 1",
-      dhs_var = "h3",
-      num = "Children 12-23m with DPT1", den = "Children 12-23 months",
-      dhs_num = "h3", dhs_den = "hw1"
-    ),
-    epi_dpt2 = list(
-      en = "DPT dose 2", fr = "DTC dose 2",
-      dhs_var = "h4",
-      num = "Children 12-23m with DPT2", den = "Children 12-23 months",
-      dhs_num = "h4", dhs_den = "hw1"
-    ),
-    epi_dpt3 = list(
-      en = "DPT dose 3", fr = "DTC dose 3",
-      dhs_var = "h5",
-      num = "Children 12-23m with DPT3", den = "Children 12-23 months",
-      dhs_num = "h5", dhs_den = "hw1"
-    ),
-    epi_polio1 = list(
-      en = "Polio dose 1", fr = "Polio dose 1",
-      dhs_var = "h6",
-      num = "Children 12-23m with Polio1", den = "Children 12-23 months",
-      dhs_num = "h6", dhs_den = "hw1"
-    ),
-    epi_polio2 = list(
-      en = "Polio dose 2", fr = "Polio dose 2",
-      dhs_var = "h7",
-      num = "Children 12-23m with Polio2", den = "Children 12-23 months",
-      dhs_num = "h7", dhs_den = "hw1"
-    ),
-    epi_polio3 = list(
-      en = "Polio dose 3", fr = "Polio dose 3",
-      dhs_var = "h8",
-      num = "Children 12-23m with Polio3", den = "Children 12-23 months",
-      dhs_num = "h8", dhs_den = "hw1"
-    ),
-    epi_measles1 = list(
-      en = "Measles dose 1", fr = "Rougeole dose 1",
-      dhs_var = "h9",
-      num = "Children 12-23m with Measles1", den = "Children 12-23 months",
-      dhs_num = "h9", dhs_den = "hw1"
-    ),
-    epi_measles2 = list(
-      en = "Measles dose 2", fr = "Rougeole dose 2",
-      dhs_var = "h9a",
-      num = "Children 12-23m with Measles2", den = "Children 12-23 months",
-      dhs_num = "h9a", dhs_den = "hw1"
-    ),
-    epi_vita1 = list(
-      en = "Vitamin A dose 1", fr = "Vitamine A dose 1",
-      dhs_var = "h33",
-      num = "Children 12-23m with Vitamin A dose 1",
-      den = "Children 12-23 months",
-      dhs_num = "h33", dhs_den = "hw1"
-    ),
-    epi_vita2 = list(
-      en = "Vitamin A dose 2", fr = "Vitamine A dose 2",
-      dhs_var = "h33a",
-      num = "Children 12-23m with Vitamin A dose 2",
-      den = "Children 12-23 months",
-      dhs_num = "h33a", dhs_den = "hw1"
-    ),
-    epi_malaria = list(
-      en = "Malaria vaccine (RTS,S/R21)",
-      fr = "Vaccin antipaludique (RTS,S/R21)",
-      dhs_var = "h62-h65",
-      num = "Children 12-23m with malaria vaccine",
-      den = "Children 12-23 months",
-      dhs_num = "h62-h65", dhs_den = "hw1"
-    ),
-    epi_fully_vaccinated = list(
-      en = "Fully vaccinated (basic)",
-      fr = "Completement vaccine (base)",
-      dhs_var = "h2-h9",
-      num = "Children 12-23m fully vaccinated",
-      den = "Children 12-23 months",
-      dhs_num = "h2-h9", dhs_den = "hw1"
-    ),
-    epi_penta1 = list(
-      en = "Pentavalent dose 1", fr = "Pentavalent dose 1",
-      dhs_var = "h51",
-      num = "Children 12-23m with Pentavalent 1", den = "Children 12-23 months",
-      dhs_num = "h51", dhs_den = "hw1"
-    ),
-    epi_penta2 = list(
-      en = "Pentavalent dose 2", fr = "Pentavalent dose 2",
-      dhs_var = "h52",
-      num = "Children 12-23m with Pentavalent 2", den = "Children 12-23 months",
-      dhs_num = "h52", dhs_den = "hw1"
-    ),
-    epi_penta3 = list(
-      en = "Pentavalent dose 3", fr = "Pentavalent dose 3",
-      dhs_var = "h53",
-      num = "Children 12-23m with Pentavalent 3", den = "Children 12-23 months",
-      dhs_num = "h53", dhs_den = "hw1"
-    ),
-    epi_pneumo1 = list(
-      en = "Pneumococcal dose 1", fr = "Pneumocoque dose 1",
-      dhs_var = "h54",
-      num = "Children 12-23m with Pneumococcal 1", den = "Children 12-23 months",
-      dhs_num = "h54", dhs_den = "hw1"
-    ),
-    epi_pneumo2 = list(
-      en = "Pneumococcal dose 2", fr = "Pneumocoque dose 2",
-      dhs_var = "h55",
-      num = "Children 12-23m with Pneumococcal 2", den = "Children 12-23 months",
-      dhs_num = "h55", dhs_den = "hw1"
-    ),
-    epi_pneumo3 = list(
-      en = "Pneumococcal dose 3", fr = "Pneumocoque dose 3",
-      dhs_var = "h56",
-      num = "Children 12-23m with Pneumococcal 3", den = "Children 12-23 months",
-      dhs_num = "h56", dhs_den = "hw1"
-    ),
-    epi_rota1 = list(
-      en = "Rotavirus dose 1", fr = "Rotavirus dose 1",
-      dhs_var = "h57",
-      num = "Children 12-23m with Rotavirus 1", den = "Children 12-23 months",
-      dhs_num = "h57", dhs_den = "hw1"
-    ),
-    epi_rota2 = list(
-      en = "Rotavirus dose 2", fr = "Rotavirus dose 2",
-      dhs_var = "h58",
-      num = "Children 12-23m with Rotavirus 2", den = "Children 12-23 months",
-      dhs_num = "h58", dhs_den = "hw1"
-    ),
-    epi_rota3 = list(
-      en = "Rotavirus dose 3", fr = "Rotavirus dose 3",
-      dhs_var = "h59",
-      num = "Children 12-23m with Rotavirus 3", den = "Children 12-23 months",
-      dhs_num = "h59", dhs_den = "hw1"
-    ),
-    epi_ipv = list(
-      en = "Inactivated Polio Vaccine", fr = "Vaccin polio inactif",
-      dhs_var = "h60",
-      num = "Children 12-23m with IPV", den = "Children 12-23 months",
-      dhs_num = "h60", dhs_den = "hw1"
-    ),
-    epi_hepb0 = list(
-      en = "Hepatitis B birth dose", fr = "Hepatite B dose de naissance",
-      dhs_var = "h50",
-      num = "Children 12-23m with HepB birth dose", den = "Children 12-23 months",
-      dhs_num = "h50", dhs_den = "hw1"
-    ),
-    epi_yellowfever = list(
-      en = "Yellow Fever vaccine", fr = "Vaccin fievre jaune",
-      dhs_var = "h61",
-      num = "Children 12-23m with Yellow Fever vaccine",
-      den = "Children 12-23 months",
-      dhs_num = "h61", dhs_den = "hw1"
-    ),
-    # U5MR
-    u5mr = list(
-      en = "Under-5 mortality rate",
-      fr = "Taux de mortalite des moins de 5 ans",
-      dhs_var = "b5, b7, b3",
-      num = "Deaths before age 5", den = "Live births",
-      dhs_num = "b5, b7", dhs_den = "b3"
-    ),
-    # IRS / SMC
-    irs_coverage = list(
-      en = "IRS coverage", fr = "Couverture PID",
-      dhs_var = "hv253",
-      num = "Households sprayed in last 12 months",
-      den = "All households",
-      dhs_num = "hv253", dhs_den = "hv001"
-    ),
-    smc_coverage = list(
-      en = "SMC coverage", fr = "Couverture CPS",
-      dhs_var = "hml43/ml13g",
-      num = "Children receiving SMC", den = "Children under 5",
-      dhs_num = "hml43/ml13g", dhs_den = "hw1"
-    ),
-    smc_receipt = list(
-      en = "SMC receipt", fr = "Reception de la CPS",
-      dhs_var = "hml43/ml13g",
-      num = "Children who received SMC in last 30 days", den = "Children under 5",
-      dhs_num = "hml43/ml13g", dhs_den = "hw1"
-    ),
-    # Derived: Effective coverage of case management (CSB x ACT)
-    eff_cm_any = list(
-      en = "Effective coverage of case management (any care-seeking)",
-      fr = "Couverture effective de la prise en charge (toute recherche de soins)",
-      dhs_var = "h32 series x ml13e",
-      num = "CSB(any) x P(ACT | antimalarial)",
-      den = "Derived: product of two MBG surfaces",
-      dhs_num = "h32 x ml13e", dhs_den = "h22 x ml13a-h"
-    ),
-    eff_cm_public = list(
-      en = "Effective coverage of case management (public care-seeking)",
-      fr = "Couverture effective de la prise en charge (secteur public)",
-      dhs_var = "h32a-i x ml13e|h32a-i",
-      num = "CSB(public) x P(ACT | antimalarial, sought public care)",
-      den = "Derived: product of two MBG surfaces",
-      dhs_num = "h32a-i x ml13e", dhs_den = "h22+h32a-i x ml13a-h+h32a-i"
-    )
-  )
-
-  na_chr <- NA_character_
-
-  rows <- lapply(indicator_names, function(ind) {
-    info <- indicator_labels[[ind]]
-    if (is.null(info)) {
-      # Fallback for unknown indicators
-      info <- list(
-        en = ind, fr = ind, dhs_var = na_chr,
-        num = na_chr, den = na_chr, dhs_num = na_chr, dhs_den = na_chr
-      )
-    }
-
-    # Use NA for indicators that lack numerator/denominator metadata
-    num <- info$num %||% na_chr
-    den <- info$den %||% na_chr
-    dhs_num <- info$dhs_num %||% na_chr
-    dhs_den <- info$dhs_den %||% na_chr
-
-    # Lookup indicator metadata (recode, category, cascade, age, units)
-    meta <- .mbg_indicator_meta(ind)
-    na_int <- NA_integer_
-
-    # Derived indicators (eff_cm) get custom notes
-    is_derived <- grepl("^eff_cm", ind)
-    note_mean <- if (is_derived) {
-      "Derived indicator: product of two MBG surfaces (CSB x ACT); population-weighted; x100 for percentage"
-    } else {
-      "MBG model-based estimate; population-weighted using WorldPop rasters; x100 for percentage"
-    }
-    note_lower <- if (is_derived) {
-      "Conservative lower bound: product of component lower bounds (not a proper posterior percentile)"
-    } else {
-      "Lower bound of 95% credible interval from MBG posterior distribution"
-    }
-    note_upper <- if (is_derived) {
-      "Conservative upper bound: product of component upper bounds (not a proper posterior percentile)"
-    } else {
-      "Upper bound of 95% credible interval from MBG posterior distribution"
-    }
-
-    tibble::tribble(
-      ~variable, ~label_en, ~label_fr, ~dhs_variable,
-      ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var,
-      ~dhs_recode, ~indicator_category, ~cascade_step, ~age_group, ~units,
-      ~notes,
-
-      paste0(ind, "_mean"),
-      paste0(info$en, " - Mean"),
-      paste0(info$fr, " - Moyenne"),
-      info$dhs_var,
-      num, den, dhs_num, dhs_den,
-      meta$recode, meta$category, meta$cascade, meta$age, meta$base_unit,
-      note_mean,
-
-      paste0(ind, "_lower"),
-      paste0(info$en, " - Lower 95% CI"),
-      paste0(info$fr, " - IC 95% inferieur"),
-      info$dhs_var,
-      na_chr, na_chr, na_chr, na_chr,
-      meta$recode, meta$category, meta$cascade, meta$age, meta$base_unit,
-      note_lower,
-
-      paste0(ind, "_upper"),
-      paste0(info$en, " - Upper 95% CI"),
-      paste0(info$fr, " - IC 95% superieur"),
-      info$dhs_var,
-      na_chr, na_chr, na_chr, na_chr,
-      meta$recode, meta$category, meta$cascade, meta$age, meta$base_unit,
-      note_upper,
-
-      paste0("n_tested_", ind),
-      paste0("N tested - ", info$en),
-      paste0("N testes - ", info$fr),
-      info$dhs_var,
-      den, na_chr, dhs_den, na_chr,
-      meta$recode, meta$category, meta$cascade, meta$age, "count",
-      "Unweighted cluster-level denominator count aggregated to admin area",
-
-      paste0("n_pos_", ind),
-      paste0("N positive - ", info$en),
-      paste0("N positifs - ", info$fr),
-      info$dhs_var,
-      num, den, dhs_num, dhs_den,
-      meta$recode, meta$category, meta$cascade, meta$age, "count",
-      "Unweighted cluster-level numerator count aggregated to admin area",
-
-      paste0("n_clusters_", ind),
-      paste0("N clusters - ", info$en),
-      paste0("N grappes - ", info$fr),
-      na_chr,
-      na_chr, na_chr, na_chr, na_chr,
-      meta$recode, meta$category, meta$cascade, meta$age, "count",
-      "Number of DHS survey clusters with data in admin area",
-
-      paste0(ind, "_raw"),
-      paste0(info$en, " - Raw"),
-      paste0(info$fr, " - Brut"),
-      info$dhs_var,
-      num, den, dhs_num, dhs_den,
-      meta$recode, meta$category, meta$cascade, meta$age, meta$base_unit,
-      "Unweighted cluster proportion (n_pos / n_tested)"
-    )
-  })
-
-  dplyr::bind_rows(rows)
-}
-
-
-#' Standard identifier column labels for MBG output
-#'
-#' @return A tibble with columns matching the full label schema.
-#' @noRd
-.mbg_id_labels <- function() {
-  na_chr <- NA_character_
-  na_int <- NA_integer_
-  tibble::tribble(
-    ~variable,     ~label_en,                                      ~label_fr,                                            ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~dhs_recode, ~indicator_category, ~cascade_step, ~age_group, ~units,    ~notes,
-    "iso3_code",   "ISO 3166-1 alpha-3 country code",              "Code pays ISO 3166-1 alpha-3",                       na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      "Key info",          na_int,            na_chr,     na_chr,    na_chr,
-    "dhs_code",    "DHS country code",                             "Code pays DHS",                                      na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      "Key info",          na_int,            na_chr,     na_chr,    na_chr,
-    "adm0",        "Administrative level 0 (country)",             "Niveau administratif 0 (pays)",                      na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      "Key info",          na_int,            na_chr,     na_chr,    na_chr,
-    "adm1",        "Administrative level 1 (province/region)",     "Niveau administratif 1 (province/region)",           na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      "Key info",          na_int,            na_chr,     na_chr,    na_chr,
-    "adm2",        "Administrative level 2 (district/zone)",       "Niveau administratif 2 (district/zone de sante)",    na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      "Key info",          na_int,            na_chr,     na_chr,    na_chr,
-    "adm3",        "Administrative level 3 (commune/subdistrict)", "Niveau administratif 3 (commune/sous-district)",     na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      "Key info",          na_int,            na_chr,     na_chr,    na_chr,
-    "survey_year", "Survey year",                                  "Annee de l'enquete",                                 na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      "Key info",          na_int,            na_chr,     na_chr,    na_chr,
-    "survey_type", "Survey type (DHS, MIS, etc.)",                 "Type d'enquete (EDS, EIP, etc.)",                    na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      "Key info",          na_int,            na_chr,     na_chr,    na_chr,
-    "median_survey_month", "Median survey interview month (1-12)",    "Mois median d'entretien de l'enquete (1-12)",        "v006/hv006",  na_chr,     na_chr,       na_chr,             na_chr,               "KR/PR/HR/IR", "Key info",       na_int,            na_chr,     "month (1-12)", "Median of interview months across clusters within admin unit"
-  )
 }
 
 
@@ -879,18 +139,17 @@
     pfpr_mic_u5       = list(recode = "PR", category = "Malaria",       cascade = na_int, age = "6-59 months"),
     pfpr_either_u5    = list(recode = "PR", category = "Malaria",       cascade = na_int, age = "6-59 months"),
     pfpr_combined_u5  = list(recode = "PR", category = "Malaria",       cascade = na_int, age = "6-59 months"),
-    # ITN — HR/PR module
-    itn_ownership     = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "all ages"),
-    itn_access        = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "all ages"),
-    itn_use           = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "all ages"),
-    itn_use_all       = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "all ages"),
-    itn_use_u5        = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "0-59 months"),
-    itn_use_preg      = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "women 15-49"),
-    itn_use_5_10      = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "5-10 years"),
-    itn_use_10_20     = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "10-20 years"),
-    itn_use_20plus    = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "20+ years"),
-    itn_use_pregnant  = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "women 15-49"),
-    itn_use_if_access = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "all ages"),
+    # ITN — HR/PR module (aligned with DHS indicator codes)
+    enough_itn        = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "all ages"),
+    with_itn          = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "all ages"),
+    access_itn        = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "all ages"),
+    use_itn           = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "all ages"),
+    use_itn_chu5      = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "0-59 months"),
+    use_itn_preg      = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "women 15-49"),
+    use_itn_5_10      = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "5-10 years"),
+    use_itn_10_20     = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "10-20 years"),
+    use_itn_20plus    = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "20+ years"),
+    use_itn_if_access = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "all ages"),
     # Anemia — PR module
     severe_anemia      = list(recode = "PR", category = "Nutrition",    cascade = na_int, age = "6-59 months"),
     anemia_any         = list(recode = "PR", category = "Nutrition",    cascade = na_int, age = "6-59 months"),
@@ -959,6 +218,92 @@
   }
   m$base_unit <- m$base_unit %||% "proportion (0-1)"
   m
+}
+
+
+#' Valid MBG Indicator Codes
+#'
+#' Returns the complete set of valid indicator codes for the MBG pipeline.
+#' Built from `.mbg_indicator_meta()` keys (the single source of truth) plus
+#' category-level shorthand names used for dispatch.
+#'
+#' @return Character vector of all valid indicator names.
+#' @noRd
+.valid_mbg_indicators <- function() {
+  # Category-level dispatch keys (run all sub-indicators for that family)
+  categories <- c(
+    "pfpr", "itn", "irs", "anc", "csb", "act", "anemia", "iptp", "epi",
+    "u5mr", "smc", "fever", "antimalarial",
+    # Derived (auto-expands to dependencies)
+    "eff_cm"
+  )
+
+  # Individual indicator codes — aligned with _conditions() indicator_code
+  # values and _mbg_dictionary() name values across all calc functions
+  individual_codes <- c(
+    # PfPR (PR module)
+    "pfpr_rdt", "pfpr_mic",
+    "pfpr_rdt_u5", "pfpr_rdt_5_10", "pfpr_rdt_u10", "pfpr_rdt_2_10",
+    "pfpr_mic_u5", "pfpr_mic_5_10", "pfpr_mic_u10", "pfpr_mic_2_10",
+    "pfpr_either_u5", "pfpr_either_5_10", "pfpr_either_u10", "pfpr_either_2_10",
+    "pfpr_combined_u5",
+    # ITN (HR/PR module)
+    "enough_itn", "with_itn", "access_itn", "use_itn",
+    "use_itn_chu5", "use_itn_preg", "use_itn_if_access",
+    "use_itn_5_10", "use_itn_10_20", "use_itn_20plus",
+    # Case management cascade (KR module)
+    "fever", "malaria_dx",
+    "csb_any", "csb_public", "csb_pub_nochw", "csb_chw",
+    "csb_private", "csb_priv_formal", "csb_pharmacy",
+    "csb_priv_informal", "csb_priv_form_pha",
+    "csb_trained", "csb_none",
+    # Antimalarial (KR module)
+    "antimalarial", "antimalarial_public",
+    # ACT (KR module) — from .act_mbg_dictionary()
+    "act", "act_care_seek", "act_antimal", "act_any_tx",
+    "act_trained", "act_pub", "act_pub_nochw", "act_chw",
+    "act_priv", "act_priv_formal", "act_priv_pharm",
+    "act_priv_informal", "act_priv_form_pha",
+    "act_public", "act_tested",
+    "febrile_rdt_pos", "febrile_rdt_pos_act",
+    # Antimalarial sub-indicators from ACT dictionary
+    "antimal", "antimal_any_tx", "antimal_trained",
+    "antimal_pub", "antimal_pub_nochw", "antimal_chw",
+    "antimal_priv", "antimal_formal", "antimal_pharm",
+    "antimal_priv_informal", "antimal_form_pharm",
+    # Malaria dx among antimalarial recipients
+    "mal_dx_am", "mal_dx_pub_am", "mal_dx_pub_nochw_am",
+    "mal_dx_chw_am", "mal_dx_priv_am", "mal_dx_priv_formal_am",
+    "mal_dx_pharm_am", "mal_dx_priv_informal_am", "mal_dx_priv_form_pha_am",
+    # Anemia (PR module)
+    "severe_anemia", "anemia_any", "anemia_moderate_plus", "anemia_severe",
+    "anemia_mild_only", "anemia_moderate_only", "anemia_severe_only",
+    # ANC (IR module)
+    "anc_1plus", "anc_2plus", "anc_3plus", "anc_4plus", "anc_8plus",
+    # IPTp (IR module)
+    "iptp_1plus", "iptp_2plus", "iptp_3plus", "iptp_4plus",
+    "iptp_1only", "iptp_2only", "iptp_3only",
+    # EPI (KR module)
+    "epi_bcg", "epi_dpt1", "epi_dpt2", "epi_dpt3",
+    "epi_polio0", "epi_polio1", "epi_polio2", "epi_polio3",
+    "epi_measles1", "epi_measles2",
+    "epi_vita1", "epi_vita2", "epi_malaria",
+    "epi_penta1", "epi_penta2", "epi_penta3",
+    "epi_pneumo1", "epi_pneumo2", "epi_pneumo3",
+    "epi_rota1", "epi_rota2", "epi_rota3",
+    "epi_ipv", "epi_hepb0", "epi_yellowfever",
+    "epi_any", "epi_never_vaccinated", "epi_fully_vaccinated",
+    # Mortality (BR module)
+    "u5mr",
+    # IRS (HR module)
+    "irs_coverage",
+    # SMC (KR module)
+    "smc_receipt", "smc_coverage",
+    # Derived
+    "eff_cm_any", "eff_cm_public"
+  )
+
+  unique(c(categories, individual_codes))
 }
 
 
