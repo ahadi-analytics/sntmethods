@@ -253,8 +253,8 @@ test_that("itn_dictionary returns correct structure", {
   expect_true("numerator_description" %in% names(dict))
   expect_true("denominator_description" %in% names(dict))
 
-  # Should have 42 rows (6 categories x 7 subgroups)
-  expect_equal(nrow(dict), 42)
+  # 6 categories x 7 subgroups + 4 extra (use_if_access, 5_10, 10_20, 20plus)
+  expect_equal(nrow(dict), 46)
 })
 
 

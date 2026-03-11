@@ -1079,7 +1079,63 @@ itn_dictionary <- function() {
       num_desc        = "Use ITN",
       base_denom_desc = "Population",
       base_denom_code = "pop"
-    )
+    ),
+
+    # --- USE_ITN_IF_ACCESS: ITN use given access ---
+    list(list(
+      indicator       = "USE_ITN_IF_ACCESS",
+      indicator_code  = "use_itn_if_access",
+      indicator_title = "Use ITN given access",
+      data_level      = "person",
+      outcome_var     = "itn_used",
+      filter_expr     = quote(itn_access_ratio > 0),
+      est_method      = "ciprop",
+      num_desc        = "Use ITN among those with access",
+      denom_desc      = "Population with access to ITN",
+      denom_code      = "pop_access"
+    )),
+
+    # --- USE_ITN_5_10: ITN use among 5-9 year olds ---
+    list(list(
+      indicator       = "USE_ITN_5_10",
+      indicator_code  = "use_itn_5_10",
+      indicator_title = "Use ITN (5-9 years)",
+      data_level      = "person",
+      outcome_var     = "itn_used",
+      filter_expr     = quote(age >= 5 & age < 10),
+      est_method      = "ciprop",
+      num_desc        = "Use ITN (5-9 years)",
+      denom_desc      = "Population aged 5-9 years",
+      denom_code      = "pop_5_10"
+    )),
+
+    # --- USE_ITN_10_20: ITN use among 10-19 year olds ---
+    list(list(
+      indicator       = "USE_ITN_10_20",
+      indicator_code  = "use_itn_10_20",
+      indicator_title = "Use ITN (10-19 years)",
+      data_level      = "person",
+      outcome_var     = "itn_used",
+      filter_expr     = quote(age >= 10 & age < 20),
+      est_method      = "ciprop",
+      num_desc        = "Use ITN (10-19 years)",
+      denom_desc      = "Population aged 10-19 years",
+      denom_code      = "pop_10_20"
+    )),
+
+    # --- USE_ITN_20PLUS: ITN use among 20+ year olds ---
+    list(list(
+      indicator       = "USE_ITN_20PLUS",
+      indicator_code  = "use_itn_20plus",
+      indicator_title = "Use ITN (20+ years)",
+      data_level      = "person",
+      outcome_var     = "itn_used",
+      filter_expr     = quote(age >= 20),
+      est_method      = "ciprop",
+      num_desc        = "Use ITN (20+ years)",
+      denom_desc      = "Population aged 20+ years",
+      denom_code      = "pop_20plus"
+    ))
   )
 }
 
