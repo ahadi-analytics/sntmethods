@@ -1,3 +1,94 @@
+#' Detect ACT Variables from Haven Labels
+#'
+#' Scans ml13* and h37* variables in a DHS dataset for haven labels indicating
+#' ACT (Artemisinin-based Combination Therapy). ACT is a drug CLASS — multiple
+#' variables may contain different ACT formulations (e.g., artemether-lumefantrine
+#' in ml13f, artesunate-amodiaquine in ml13g). Returns ALL matching variables.
+#'
+#' Excludes artemisinin monotherapies (artesunate rectal/injection/IV) which
+#' are NOT combination therapies.
+#'
+#' @param dhs_kr DHS dataset with haven_labelled columns.
+#' @param default_vars Default ACT variable(s) to return if no label match found.
+#'
+#' @return Character vector of detected ACT variable names, or `default_vars`.
+#' @noRd
+.detect_act_vars <- function(dhs_kr, default_vars = "ml13e") {
+  # Inclusion pattern: ACT combinations
+  # - combin.*artemi / artemi.*combin: "Combination with artemisinin" (standardised)
+  # - artemether.+lumef: artemether-lumefantrine (Coartem)
+  # - artesunate.+amodiaq: artesunate-amodiaquine (ASAQ)
+  # - dihydroartemis: DHA-piperaquine
+  # - \bact\b: "ACT" as a word
+  # - \bcta\b: French "Combinaison Therapeutique a base d'Artemisinine"
+  # - coartem: brand name
+  act_pattern <- paste0(
+    "\\bact\\b|combin.*artemi|artemi.*combin|",
+    "artemether.+lumef|artesunate.+amodiaq|dihydroartemis|",
+    "coartem|\\bcta\\b"
+  )
+  # Exclusion pattern: artemisinin monotherapies (not combination therapy)
+  exclude_pattern <- "rectal|injection|\\biv\\b|monotherapy"
+
+  # Helper: scan a set of candidates for ACT labels
+  .scan_labels <- function(candidates) {
+    matched <- character(0)
+    for (v in candidates) {
+      lbl <- attr(dhs_kr[[v]], "label")
+      if (!is.null(lbl) && is.character(lbl) && length(lbl) == 1 &&
+          grepl(act_pattern, lbl, ignore.case = TRUE) &&
+          !grepl(exclude_pattern, lbl, ignore.case = TRUE)) {
+        matched <- c(matched, v)
+      }
+    }
+    matched
+  }
+
+  # Search ml13 series first (newer surveys). Only fall back to h37 (older
+  # surveys) if ml13 yields no matches. The two series are PARALLEL — they
+  # represent the same drug slots in different DHS coding systems and must
+  # never be mixed into a single composite.
+  ml13_candidates <- grep("^ml13[a-z]", names(dhs_kr), value = TRUE)
+  act_vars <- .scan_labels(ml13_candidates)
+
+  if (length(act_vars) == 0) {
+    h37_candidates <- grep("^h37[a-z]", names(dhs_kr), value = TRUE)
+    act_vars <- .scan_labels(h37_candidates)
+  }
+
+  if (length(act_vars) == 0) {
+    cli::cli_alert_warning(
+      "No ACT variables detected from labels; defaulting to {.var {default_vars}}"
+    )
+    return(default_vars)
+  }
+
+  if (length(act_vars) > 1) {
+    cli::cli_alert_info(
+      "Detected {length(act_vars)} ACT variables from labels: {paste(act_vars, collapse = ', ')}"
+    )
+  } else if (act_vars[1] != default_vars[1]) {
+    lbl <- attr(dhs_kr[[act_vars[1]]], "label")
+    cli::cli_alert_info(
+      "Auto-detected ACT variable {.var {act_vars[1]}} from label: {.val {lbl}}"
+    )
+  }
+
+  act_vars
+}
+
+
+#' Detect ACT Variable from Haven Labels (deprecated wrapper)
+#'
+#' @param dhs_kr DHS dataset with haven_labelled columns.
+#' @param default_var Default ACT variable to return if no label match found.
+#' @return Single variable name (first detected ACT variable).
+#' @noRd
+.detect_act_var_from_labels <- function(dhs_kr, default_var = "ml13e") {
+  .detect_act_vars(dhs_kr, default_vars = default_var)[1]
+}
+
+
 #' Prepare ACT Data for Analysis
 #'
 #' Shared data cleaning and indicator computation for ACT functions.
@@ -10,6 +101,7 @@
 #' @return A data frame of febrile children with columns:
 #'   cluster_id, age_months, received_act, test_positive, has_act.
 #'   If include_survey_vars = TRUE, also: survey_weight, stratum_id.
+#'   Attribute "act_var_used" records which variable was resolved as ACT.
 #'
 #' @noRd
 .prepare_act_data <- function(
@@ -37,33 +129,54 @@
     ))
   }
 
-  # Detect ACT variable: prefer ml13e (newer surveys), fall back to h37e (older surveys).
-  # h37e = "Combination with artemisinin taken for fever/cough" in older DHS surveys.
-  # Some surveys have ml13e as a placeholder column (all 0/NA) while actual data
-  # is in h37e — check for meaningful values before using ml13e.
-  act_var <- survey_vars$act
-  if (act_var %in% names(dhs_kr)) {
-    raw_vals <- as.vector(haven::zap_labels(dhs_kr[[act_var]]))
-    has_any_positive <- any(raw_vals == 1, na.rm = TRUE)
-    if (!has_any_positive && "h37e" %in% names(dhs_kr)) {
-      h37e_vals <- as.vector(haven::zap_labels(dhs_kr[["h37e"]]))
-      if (any(h37e_vals == 1, na.rm = TRUE)) {
-        cli::cli_alert_info(
-          "ACT variable {.var {act_var}} has no positive values; using {.var h37e} which has data"
-        )
-        act_var <- "h37e"
-      }
-    }
-  } else if ("h37e" %in% names(dhs_kr)) {
-    cli::cli_alert_info(
-      "ACT variable {.var {act_var}} not found; using {.var h37e} (artemisinin combination for fever/cough)"
-    )
-    act_var <- "h37e"
+  # Detect ACT variables with multi-stage resolution:
+  # 1. Label-based detection: find ALL ACT combination variables
+  #    (handles surveys with multiple ACT formulations, e.g. Togo MIS 2017)
+  # 2. Positive-value fallback: if no ACT vars have data, try h37 series
+  # 3. Presence fallback: try h37e if ml13 vars are missing entirely
+  act_input <- survey_vars$act
+
+  # Stage 1: auto-detect from haven labels when using default mapping
+  if (length(act_input) == 1 && act_input == "ml13e") {
+    act_vars <- .detect_act_vars(dhs_kr, default_vars = act_input)
   } else {
-    cli::cli_abort(
-      "ACT variable {.var {act_var}} not found in data (also tried {.var h37e})"
-    )
+    act_vars <- act_input
   }
+
+  # Validate presence
+  act_vars <- intersect(act_vars, names(dhs_kr))
+
+  # Stage 2-3: fallback logic
+  if (length(act_vars) == 0) {
+    # Try h37 series
+    h37_acts <- .detect_act_vars(dhs_kr, default_vars = "h37e")
+    act_vars <- intersect(h37_acts, names(dhs_kr))
+    if (length(act_vars) > 0) {
+      cli::cli_alert_info(
+        "ml13 ACT variables not found; using h37 series: {paste(act_vars, collapse = ', ')}"
+      )
+    } else {
+      cli::cli_abort(
+        "No ACT variables found in data (tried ml13* and h37*)"
+      )
+    }
+  }
+
+  # Check if any ACT var has positive values
+  act_has_data <- any(sapply(act_vars, function(v) {
+    any(as.vector(haven::zap_labels(dhs_kr[[v]])) == 1, na.rm = TRUE)
+  }))
+
+  if (!act_has_data && "h37e" %in% names(dhs_kr)) {
+    h37e_vals <- as.vector(haven::zap_labels(dhs_kr[["h37e"]]))
+    if (any(h37e_vals == 1, na.rm = TRUE)) {
+      cli::cli_alert_info(
+        "ACT variable{?s} {.var {act_vars}} ha{?s/ve} no positive values; using {.var h37e} which has data"
+      )
+      act_vars <- "h37e"
+    }
+  }
+
   has_test_var <- survey_vars$test %in% names(dhs_kr)
 
   # Zap labels
@@ -71,15 +184,22 @@
     dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
     dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
 
+  # Build composite received_act from all ACT variables
+  # (same pattern as received_antimalarial in .prepare_antimalarial_data)
+  act_matrix <- as.matrix(kr[, act_vars, drop = FALSE])
+  act_matrix[!act_matrix %in% c(0, 1)] <- NA
+  kr$received_act <- apply(act_matrix, 1, function(row) {
+    if (all(is.na(row))) return(NA_real_)
+    if (any(row == 1, na.rm = TRUE)) return(1)
+    return(0)
+  })
+
   # Build columns
   kr <- kr |>
     dplyr::mutate(
       cluster_id = .data[[survey_vars$cluster]],
       age_months = .data[[survey_vars$age]],
-      had_fever = .data[[survey_vars$fever]],
-      received_act = dplyr::if_else(
-        .data[[act_var]] %in% c(0, 1), .data[[act_var]], NA_real_
-      )
+      had_fever = .data[[survey_vars$fever]]
     )
 
   if (has_test_var) {
@@ -134,6 +254,13 @@
   cli::cli_alert_info(
     "Found {format(nrow(kr_fever), big.mark = ',')} febrile children under 5"
   )
+  cli::cli_alert_info(
+    "Using {length(act_vars)} ACT variable{?s}: {paste(act_vars, collapse = ', ')}"
+  )
+
+  # Record which ACT variables were resolved for downstream alignment
+  attr(kr_fever, "act_vars_used") <- act_vars
+  attr(kr_fever, "act_var_used") <- act_vars[1]  # backward compat
 
   kr_fever
 }

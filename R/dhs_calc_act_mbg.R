@@ -193,19 +193,36 @@ calc_act_mbg <- function(
     )
 
     if (!is.null(kr_fever_enriched)) {
-      # Add antimalarial composite (check for positive values before choosing series)
-      ml13_vars <- grep("^ml13[a-z]+$", names(dhs_kr), value = TRUE)
-      h37_vars_am <- grep("^h37[a-h]$", names(dhs_kr), value = TRUE)
+      # Zap labels on the raw dataset for safe comparisons
+      dhs_kr_zapped <- dhs_kr |>
+        dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
+        dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
 
-      if (length(ml13_vars) > 0) {
-        ml13_has_data <- any(
-          sapply(ml13_vars, function(v) any(dhs_kr[[v]] == 1, na.rm = TRUE))
+      # Add antimalarial composite.
+      # Antimalarial series must align with the ACT variable used by
+      # .prepare_act_data(). If ACT uses h37e, use h37 series.
+      ml13_vars <- grep("^ml13[a-z]+$", names(dhs_kr_zapped), value = TRUE)
+      h37_vars_am <- grep("^h37[a-z]+$", names(dhs_kr_zapped), value = TRUE)
+
+      # Read which ACT variable(s) .prepare_act_data() actually resolved
+      act_vars_used <- attr(kr_fever_enriched, "act_vars_used") %||%
+        attr(kr_fever_enriched, "act_var_used") %||% (survey_vars$act %||% "ml13e")
+      act_used_h37 <- any(grepl("^h37", act_vars_used))
+
+      if (act_used_h37 && length(h37_vars_am) > 0) {
+        drug_series <- h37_vars_am
+        cli::cli_alert_info(
+          "Antimalarial composite using h37 series (aligned with ACT h37e fallback)"
         )
+      } else if (length(ml13_vars) > 0) {
+        ml13_has_data <- any(sapply(ml13_vars, function(v) {
+          any(dhs_kr_zapped[[v]] == 1, na.rm = TRUE)
+        }))
         if (ml13_has_data) {
           drug_series <- ml13_vars
-        } else if (length(h37_vars_am) > 0 && any(
-          sapply(h37_vars_am, function(v) any(dhs_kr[[v]] == 1, na.rm = TRUE))
-        )) {
+        } else if (length(h37_vars_am) > 0 && any(sapply(h37_vars_am, function(v) {
+          any(dhs_kr_zapped[[v]] == 1, na.rm = TRUE)
+        }))) {
           cli::cli_alert_info(
             "ml13 antimalarial variables have no positive values; using h37 series"
           )
@@ -218,21 +235,19 @@ calc_act_mbg <- function(
       }
 
       if (length(drug_series) > 0) {
-        # Build febrile index matching .prepare_act_data() filtering
+        # Build febrile index matching .prepare_act_data() filtering (on zapped data)
         has_alive_var <- !is.null(survey_vars$alive) &&
-          survey_vars$alive %in% names(dhs_kr)
-        febrile_cond <- dhs_kr[[survey_vars$fever]] == 1 &
-          dhs_kr[[survey_vars$age]] >= 0 &
-          dhs_kr[[survey_vars$age]] <= 59
+          survey_vars$alive %in% names(dhs_kr_zapped)
+        febrile_cond <- dhs_kr_zapped[[survey_vars$fever]] == 1 &
+          dhs_kr_zapped[[survey_vars$age]] >= 0 &
+          dhs_kr_zapped[[survey_vars$age]] <= 59
         if (has_alive_var) {
-          febrile_cond <- febrile_cond & dhs_kr[[survey_vars$alive]] == 1
+          febrile_cond <- febrile_cond & dhs_kr_zapped[[survey_vars$alive]] == 1
         }
         febrile_idx <- which(febrile_cond)
 
         for (dvar in drug_series) {
-          kr_fever_enriched[[dvar]] <- as.vector(
-            haven::zap_labels(dhs_kr[[dvar]][febrile_idx])
-          )
+          kr_fever_enriched[[dvar]] <- dhs_kr_zapped[[dvar]][febrile_idx]
           kr_fever_enriched[[dvar]][!kr_fever_enriched[[dvar]] %in% c(0, 1)] <- NA
         }
         drug_matrix <- as.matrix(kr_fever_enriched[, drug_series, drop = FALSE])
