@@ -138,7 +138,7 @@ run_mbg_pipeline <- function(
   pop_raster_u5 = NULL,
   country_iso2 = NULL,
   survey_year = NULL,
-  min_year = NULL,
+  min_year = "2005",
   survey_type = NULL,
   indicators = c(
     "pfpr", "itn", "irs", "anc", "csb", "anemia", "iptp",
