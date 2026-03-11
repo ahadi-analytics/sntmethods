@@ -65,7 +65,7 @@ calc_irs_dhs_core <- function(
   # Set up survey design
   use_strata <- dplyr::n_distinct(hr$stratum_id) > 1
   if (use_strata) {
-    survey_options <- options(survey.lonely.psu = "certainty")
+    survey_options <- options(survey.lonely.psu = "adjust")
     on.exit(options(survey_options), add = TRUE)
     des <- survey::svydesign(
       ids = ~cluster_id, strata = ~stratum_id,

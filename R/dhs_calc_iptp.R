@@ -335,7 +335,7 @@ calc_iptp_dhs_core <- function(
 
   # always set lonely.psu option - subsets may create single PSU strata
   survey_options <- base::options(
-    survey.lonely.psu = "certainty"
+    survey.lonely.psu = "adjust"
   )
 
   base::on.exit(

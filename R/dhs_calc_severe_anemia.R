@@ -216,7 +216,7 @@ calc_severe_anemia_dhs_core <- function(
   # ---- 5. Survey design ---------------------------------------------------
 
   # Handle single-PSU strata
-  survey_options <- options(survey.lonely.psu = "certainty")
+  survey_options <- options(survey.lonely.psu = "adjust")
   on.exit(options(survey_options), add = TRUE)
 
   if (use_strata) {

@@ -105,7 +105,7 @@
   })
 
   # National estimate
-  old_opts <- options(survey.lonely.psu = "certainty")
+  old_opts <- options(survey.lonely.psu = "adjust")
   on.exit(options(old_opts), add = TRUE)
 
   national <- tryCatch({
