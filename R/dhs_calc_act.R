@@ -1,14 +1,14 @@
-#' Calculate WMR ACT Treatment Indicators from DHS Data
+#' Calculate ACT Treatment Indicators from DHS Data
 #'
-#' Computes the full set of WMR (World Malaria Report) ACT treatment indicators
+#' Computes the full set of (World Malaria Report) ACT treatment indicators
 #' from DHS Children's Recode (KR) data. Returns survey-weighted proportions
-#' with logit confidence intervals in WMR long format.
+#' with logit confidence intervals in standardized long format.
 #'
 #' @details
-#' Computes up to 10 ACT indicators following WMR methodology. Each indicator
+#' Computes up to 12 ACT indicators following DHS methodology. Each indicator
 #' measures the proportion of febrile U5 children receiving ACT within a
 #' specific subpopulation defined by care-seeking behaviour and antimalarial
-#' receipt. See [act_wmr_dictionary()] for the full indicator list.
+#' receipt. See [act_dictionary()] for the full indicator list.
 #'
 #' The function uses three internal helpers:
 #' \itemize{
@@ -50,7 +50,7 @@
 #'   admin unit. Default: TRUE.
 #' @param dhs_pr Optional DHS Person Recode (PR) for febrile RDT indicators.
 #' @param indicators Character vector of indicator names to compute. If NULL
-#'   (default), computes all indicators from [act_wmr_dictionary()].
+#'   (default), computes all indicators from [act_dictionary()].
 #' @param ci_method Method for confidence intervals. Default: "logit".
 #'
 #' @return Named list of tibbles, one per admin level:
@@ -109,7 +109,7 @@
 #' )
 #' }
 #'
-#' @seealso [act_wmr_dictionary()] for indicator definitions,
+#' @seealso [act_dictionary()] for indicator definitions,
 #'   [calc_act_mbg()] for cluster-level MBG inputs
 #' @export
 calc_act_dhs <- function(
@@ -487,7 +487,7 @@ calc_act_dhs <- function(
 
   # ---- 7. Get indicator dictionary and filter ----
 
-  dict <- .act_wmr_conditions()
+  dict <- .act_conditions()
 
   if (!is.null(indicators)) {
     valid <- vapply(dict, function(d) d$indicator, character(1))
@@ -537,7 +537,7 @@ calc_act_dhs <- function(
 
   # --- adm0 (national, no group_var) ---
   national_results <- purrr::map_dfr(dict, function(cond) {
-    .compute_wmr_indicator(
+    .compute_dhs_indicator(
       data      = kr_fever,
       condition = cond,
       group_var = NULL,
@@ -580,7 +580,7 @@ calc_act_dhs <- function(
     lvl_name <- ah$level_name
 
     sub_results <- purrr::map_dfr(dict, function(cond) {
-      .compute_wmr_indicator(
+      .compute_dhs_indicator(
         data              = kr_fever,
         condition         = cond,
         group_var         = grp,
@@ -658,26 +658,26 @@ calc_act_dhs <- function(
 
 
 # =============================================================================
-# WMR Indicator Dictionary
+# Indicator Dictionary
 # =============================================================================
 
-#' ACT WMR Indicator Dictionary
+#' ACT Indicator Dictionary
 #'
-#' Returns the full dictionary of WMR ACT indicators with metadata.
+#' Returns the full dictionary of ACT indicators with metadata.
 #' Each indicator measures the proportion of febrile U5 children receiving
 #' ACT within a specific subpopulation.
 #'
 #' @return Tibble with columns: indicator,
 #'   indicator_code, indicator_title, numerator_description,
 #'   denominator_description, denominator_code,
-#'   wmr_cascade_step, requires_csb, requires_am.
+#'   cascade_step, requires_csb, requires_am.
 #'
 #' @examples
-#' act_wmr_dictionary()
+#' act_dictionary()
 #'
 #' @export
-act_wmr_dictionary <- function() {
-  conds <- .act_wmr_conditions()
+act_dictionary <- function() {
+  conds <- .act_conditions()
   tibble::tibble(
     indicator = vapply(conds, `[[`, character(1), "indicator"),
     indicator_code = vapply(conds, `[[`, character(1), "indicator_code"),
@@ -692,7 +692,7 @@ act_wmr_dictionary <- function() {
 }
 
 
-#' Internal: ACT WMR indicator conditions (with filter expressions)
+#' Internal: ACT indicator conditions (with filter expressions)
 #'
 #' Returns a list of indicator specifications, each containing the filter
 #' expression, indicator name, and description metadata.
@@ -700,12 +700,30 @@ act_wmr_dictionary <- function() {
 #' @return List of named lists, each with: indicator, filter_expr,
 #'   num_desc, denom_desc.
 #' @noRd
-.act_wmr_conditions <- function() {
+.act_conditions <- function() {
   # Common strings
   num <- "Received ACT treatment"
   am1 <- " and received antimalarial"
 
   list(
+    list(
+      indicator      = "ACT",
+      indicator_code = "act",
+      indicator_title = "Use of ACTs among febrile U5",
+      denom_code     = "feb_u5",
+      filter_expr    = NULL,
+      num_desc       = num,
+      denom_desc     = "Under 5 with fever"
+    ),
+    list(
+      indicator      = "ACT_TESTED",
+      indicator_code = "act_tested",
+      indicator_title = "Use of ACTs among test-positive febrile U5",
+      denom_code     = "feb_u5_test_pos",
+      filter_expr    = quote(test_positive == 1),
+      num_desc       = num,
+      denom_desc     = "Under 5 with fever who tested positive for malaria"
+    ),
     list(
       indicator      = "ACT_CARE_SEEKERS",
       indicator_code = "act_care_seek",
@@ -1277,7 +1295,7 @@ act_wmr_dictionary <- function() {
 # Core computation helpers
 # =============================================================================
 
-#' Compute a single WMR indicator (national + optional regional)
+#' Compute a single indicator (national + optional regional)
 #'
 #' @param data Prepared febrile U5 dataset with ACT, CSB, antimalarial columns.
 #' @param condition List with indicator, filter_expr, num_desc, denom_desc.
@@ -1289,7 +1307,7 @@ act_wmr_dictionary <- function() {
 #' @return Tibble with columns: level, location, point, ci_l, ci_u, numerator,
 #'   denominator, indicator, numerator_description, denominator_description.
 #' @noRd
-.compute_wmr_indicator <- function(data, condition, group_var = NULL,
+.compute_dhs_indicator <- function(data, condition, group_var = NULL,
                                     subnational_level = NULL,
                                     ci_method = "logit") {
 
@@ -1314,11 +1332,11 @@ act_wmr_dictionary <- function() {
     return(tibble::tibble())
   }
 
-  # Set the outcome column as .wmr_outcome for survey estimation
-  filtered$.wmr_outcome <- filtered[[outcome_var]]
+  # Set the outcome column as .dhs_outcome for survey estimation
+  filtered$.dhs_outcome <- filtered[[outcome_var]]
 
   # Drop rows with NA outcome
-  filtered <- filtered[!is.na(filtered$.wmr_outcome), ]
+  filtered <- filtered[!is.na(filtered$.dhs_outcome), ]
 
   n_denom <- nrow(filtered)
   if (n_denom == 0) {
@@ -1333,7 +1351,7 @@ act_wmr_dictionary <- function() {
   if (n_clusters < 2) {
     n_denom_w <- round(sum(filtered$survey_weight, na.rm = TRUE))
     n_numer_w <- round(sum(
-      filtered$survey_weight * (filtered$.wmr_outcome == 1), na.rm = TRUE
+      filtered$survey_weight * (filtered$.dhs_outcome == 1), na.rm = TRUE
     ))
     point_est <- n_numer_w / n_denom_w
     national <- tibble::tibble(
@@ -1373,14 +1391,14 @@ act_wmr_dictionary <- function() {
   })
 
   # --- National estimate ---
-  # Weighted counts (matches WMR format: numerator/denominator ≈ point)
+  # Weighted counts (matches format: numerator/denominator ≈ point)
   n_denom_w <- round(sum(filtered$survey_weight, na.rm = TRUE))
   n_numer_w <- round(sum(
-    filtered$survey_weight * (filtered$.wmr_outcome == 1), na.rm = TRUE
+    filtered$survey_weight * (filtered$.dhs_outcome == 1), na.rm = TRUE
   ))
 
   national <- tryCatch({
-    est <- survey::svyciprop(~.wmr_outcome, svy, method = ci_method,
+    est <- survey::svyciprop(~.dhs_outcome, svy, method = ci_method,
                               na.rm = TRUE)
     ci  <- stats::confint(est)
     tibble::tibble(
@@ -1411,7 +1429,7 @@ act_wmr_dictionary <- function() {
 
     regional <- tryCatch({
       by_result <- survey::svyby(
-        ~.wmr_outcome,
+        ~.dhs_outcome,
         by       = group_formula,
         design   = svy,
         FUN      = survey::svyciprop,
@@ -1427,7 +1445,7 @@ act_wmr_dictionary <- function() {
         dplyr::group_by(.data[[group_var]]) |>
         dplyr::summarise(
           numerator = round(sum(
-            survey_weight * (.wmr_outcome == 1), na.rm = TRUE
+            survey_weight * (.dhs_outcome == 1), na.rm = TRUE
           )),
           .groups = "drop"
         )
@@ -1441,15 +1459,15 @@ act_wmr_dictionary <- function() {
         )
 
       # Normalize CI column names (svyby names vary)
-      names(by_result)[names(by_result) == "ci_l"] <- "ci_l..wmr_outcome"
-      names(by_result)[names(by_result) == "ci_u"] <- "ci_u..wmr_outcome"
+      names(by_result)[names(by_result) == "ci_l"] <- "ci_l..dhs_outcome"
+      names(by_result)[names(by_result) == "ci_u"] <- "ci_u..dhs_outcome"
 
       by_result |>
         dplyr::rename(
           location = !!group_var,
-          point    = .wmr_outcome,
-          ci_l     = `ci_l..wmr_outcome`,
-          ci_u     = `ci_u..wmr_outcome`
+          point    = .dhs_outcome,
+          ci_l     = `ci_l..dhs_outcome`,
+          ci_u     = `ci_u..dhs_outcome`
         ) |>
         dplyr::mutate(location = as.character(location)) |>
         dplyr::left_join(
@@ -1617,7 +1635,7 @@ act_wmr_dictionary <- function() {
 #' @param subnational_level Admin level label for grouped rows.
 #' @param ci_method CI method.
 #'
-#' @return Tibble in WMR long format with RDT indicators, or empty tibble.
+#' @return Tibble in standardized long format with RDT indicators, or empty tibble.
 #' @noRd
 .compute_rdt_indicators <- function(kr_fever, dhs_pr, group_var = NULL,
                                      subnational_level = NULL,
@@ -1644,7 +1662,7 @@ act_wmr_dictionary <- function() {
   kr_merged_rdt <- kr_merged |>
     dplyr::mutate(has_act = has_rdt_pos)
 
-  rdt_pos <- .compute_wmr_indicator(
+  rdt_pos <- .compute_dhs_indicator(
     kr_merged_rdt, rdt_pos_cond, group_var, subnational_level, ci_method
   )
   results <- dplyr::bind_rows(results, rdt_pos)
@@ -1664,7 +1682,7 @@ act_wmr_dictionary <- function() {
       num_desc       = "Received ACT among RDT-positive under 5 with fever",
       denom_desc     = "Under 5 with fever with positive RDT result"
     )
-    rdt_act <- .compute_wmr_indicator(
+    rdt_act <- .compute_dhs_indicator(
       kr_rdt_pos, rdt_act_cond, group_var, subnational_level, ci_method
     )
     results <- dplyr::bind_rows(results, rdt_act)

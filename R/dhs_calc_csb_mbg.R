@@ -10,7 +10,7 @@
 #' @param dhs_kr DHS Children's Recode (KR) dataset.
 #' @param gps_data DHS GPS dataset with cluster coordinates.
 #' @param indicators Character vector of indicators to
-#'   calculate. WMR-aligned sector breakdown:
+#'   calculate. standardized sector breakdown:
 #'   \itemize{
 #'     \item "any": Sought care anywhere (public or private)
 #'     \item "public": Public sector including CHW
@@ -27,7 +27,7 @@
 #'   }
 #'   Default: c("any", "public", "private", "none").
 #' @param csb_classification Data frame with h32 variable to category mapping.
-#'   Must have columns `variable` and `csb`. If NULL, uses default WMR classification.
+#'   Must have columns `variable` and `csb`. If NULL, uses default classification.
 #' @param survey_vars Named list mapping DHS variable names.
 #' @param gps_vars Named list for GPS variable mapping.
 #'

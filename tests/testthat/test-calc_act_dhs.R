@@ -402,10 +402,10 @@ test_that("calc_act_dhs excludes artemisinin monotherapies from composite ACT", 
 })
 
 
-test_that("act_wmr_dictionary returns all 32 indicators", {
-  dict <- act_wmr_dictionary()
+test_that("act_dictionary returns all 34 indicators", {
+  dict <- act_dictionary()
   expect_s3_class(dict, "tbl_df")
-  expect_equal(nrow(dict), 32)
+  expect_equal(nrow(dict), 34)
   expect_true(all(
     c("indicator", "indicator_code", "indicator_title",
       "numerator_description",

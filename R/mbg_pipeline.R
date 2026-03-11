@@ -268,7 +268,7 @@ run_mbg_indicator_pipeline <- function(
     # ITN sub-indicators (selectable individually for faster pipelines)
     "itn_ownership", "itn_access", "itn_use_all", "itn_use_u5",
     "itn_use_pregnant", "itn_use_if_access",
-    # Public care-seeking and WMR sub-indicators
+    # Public care-seeking and sub-indicators
     "act_public", "act_among_am", "antimalarial_public",
     # Derived indicators (auto-expand to required dependencies)
     "eff_cm"

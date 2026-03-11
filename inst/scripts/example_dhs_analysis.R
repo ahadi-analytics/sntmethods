@@ -6,198 +6,330 @@ cli::cli_h1("Process DHS Data")
 # 1) Set-up paths and parameters -----------------------------------------------
 ## ---------------------------------------------------------------------------##
 
-devtools::load_all()
+country_iso2 <- "TG"
+country_iso3 <- "tgo"
 
-# country metadata
-country_iso2 <- "BF"
-country_iso3 <- "BFA"
-survey_year_dhs <- 2021
-survey_year_mis <- 2017
-
-# admin levels to process
 admin_levels <- c("adm1", "adm2")
 
-# paths
-path_dhs_parquet <- here::here(ahadi_path(), "01_data/parquet")
+path_dhs_parquet <- here::here(sntmethods::ahadi_path(), "01_data/parquet")
 
-# set paths
-paths <- here::here(
-  "/Users/mohamedyusuf/Downloads/burkina_MAP"
-)
+paths <-
+  sntutils::setup_project_paths(
+    base_path = Sys.getenv("AHADI_ONEDRIVE_PROJECT"),
+    quiet = TRUE
+  )
 
-# shapefile
-shp_admin <- sntutils::read(
-  here::here(paths,
-  "70ds_from_nmcp_2019_numbered.shp")
+shp_admin <- sntutils::read_snt_data(
+  path = here::here(paths$admin_shp, "processed"),
+  data_name = glue::glue("{country_iso3}_shp_list"),
+  file_formats = c("qs2")
+)$final_spat_vec$adm2
+
+# get the survey years
+survey_years_dhs <- sntmethods::dhs_read(
+  path = path_dhs_parquet,
+  file_type = "GE",
+  survey_type = "DHS",
+  country_code = country_iso2
 ) |>
-  dplyr::mutate(
-    adm0 = "BURKINA FASO",
-    adm1 = NOMREGION,
-    adm2 = NOMPROVINC,
-    adm3 = NOMDEP
+  dplyr::pull(DHSYEAR) |>
+  unique()
+
+survey_years_dhs <- survey_years_dhs[1]
+survey_years_dhs <- NULL
+survey_years_mis <- sntmethods::dhs_read(
+  path = path_dhs_parquet,
+  file_type = "GE",
+  survey_type = "MIS",
+  country_code = country_iso2
+) |>
+  dplyr::pull(DHSYEAR) |>
+  unique()
+
+## ---------------------------------------------------------------------------##
+# 2) Read DHS + MIS data for all years -----------------------------------------
+## ---------------------------------------------------------------------------##
+
+read_dhs_bundle <- function(survey_year, survey_type) {
+  cli::cli_h2(
+    glue::glue("Reading {survey_type} data for {survey_year}")
+  )
+
+  list(
+    ge = sntmethods::dhs_read(
+      path = path_dhs_parquet,
+      file_type = "GE",
+      survey_type = survey_type,
+      country_code = country_iso2,
+      survey_year = survey_year
+    ),
+    pr = sntmethods::dhs_read(
+      path = path_dhs_parquet,
+      file_type = "PR",
+      survey_type = survey_type,
+      country_code = country_iso2,
+      survey_year = survey_year
+    ),
+    hr = sntmethods::dhs_read(
+      path = path_dhs_parquet,
+      file_type = "HR",
+      survey_type = survey_type,
+      country_code = country_iso2,
+      survey_year = survey_year
+    ),
+    kr = sntmethods::dhs_read(
+      path = path_dhs_parquet,
+      file_type = "KR",
+      survey_type = survey_type,
+      country_code = country_iso2,
+      survey_year = survey_year
+    ),
+    ir = sntmethods::dhs_read(
+      path = path_dhs_parquet,
+      file_type = "IR",
+      survey_type = survey_type,
+      country_code = country_iso2,
+      survey_year = survey_year
+    )
+  )
+}
+
+dhs_bundles <-
+  purrr::map(
+    survey_years_dhs,
+    ~ read_dhs_bundle(.x, "DHS")
   ) |>
-  dplyr::select(adm0, adm1, adm2, adm3)
+  rlang::set_names(survey_years_dhs)
+
+mis_bundles <-
+  purrr::map(
+    survey_years_mis,
+    ~ read_dhs_bundle(.x, "MIS")
+  ) |>
+  rlang::set_names(survey_years_mis)
+
+mis_raw_dictionary <-
+  mis_bundles |>
+  purrr::imap_dfr(\(year_bundle, year_name) {
+    year_value <- readr::parse_integer(year_name)
+
+    year_bundle |>
+      purrr::imap_dfr(\(dhs_dataset, dataset_name) {
+        sntmethods::make_dhs_raw_dictionary(
+          dhs_dataset |> dplyr::slice(1:2)
+        ) |>
+          dplyr::mutate(
+            surevey_type = "MIS",
+            survey_year = year_value,
+            dataset = toupper(dataset_name),
+            .before = 1
+          )
+      })
+  })
+
+dhs_raw_dictionary <-
+  dhs_bundles |>
+  purrr::imap_dfr(\(year_bundle, year_name) {
+    year_value <- readr::parse_integer(year_name)
+
+    year_bundle |>
+      purrr::imap_dfr(\(dhs_dataset, dataset_name) {
+        sntmethods::make_dhs_raw_dictionary(
+          dhs_dataset |> dplyr::slice(1:2)
+        ) |>
+          dplyr::mutate(
+            surevey_type = "DHS",
+            survey_year = year_value,
+            dataset = toupper(dataset_name),
+            .before = 1
+          )
+      })
+  })
+
+# save dictionary
+dplyr::bind_rows(
+  dhs_raw_dictionary,
+  mis_raw_dictionary
+) |>
+  sntutils::write(
+    here::here(
+      paths$dhs,
+      "processed",
+      glue::glue("{country_iso3}_dhs_mis_dictionary.csv")
+    )
+  )
 
 ## ---------------------------------------------------------------------------##
-# 2) Get DHS data --------------------------------------------------------------
+# 3) Calculate all DHS indicators per survey -----------------------------------
 ## ---------------------------------------------------------------------------##
 
-ge_mis <- dhs_read(
-  path = path_dhs_parquet,
-  file_type = "GE",
-  survey_type = "MIS",
-  country_code = country_iso2,
-  survey_year = survey_year_mis
-)
+# All calc_*_dhs() functions return list(adm0, adm1, adm2, ...) in long format
+# with standardised columns: survey_id, iso3, iso2, survey_type, survey_year,
+# adm0, [adm1], [adm2], type, geo_source, point, ci_l, ci_u, numerator,
+# denominator, indicator, indicator_code, numerator_description,
+# denominator_description, denominator_code.
 
-ge_dhs <- dhs_read(
-  path = path_dhs_parquet,
-  file_type = "GE",
-  survey_type = "DHS",
-  country_code = country_iso2,
-  survey_year = survey_year_dhs
-)
+admin_levels <- c("adm0", "adm1", "adm2")
 
-pr_mis <- dhs_read(
-  path = path_dhs_parquet,
-  file_type = "PR",
-  survey_type = "MIS",
-  country_code = country_iso2,
-  survey_year = survey_year_mis
-)
+calc_dhs_indicators <- function(dhs, shp_admin, admin_levels) {
+  results <- list()
 
-pr_dhs <- dhs_read(
-  path = path_dhs_parquet,
-  file_type = "PR",
-  survey_type = "DHS",
-  country_code = country_iso2,
-  survey_year = survey_year_dhs
-)
-
-hr_dhs <- dhs_read(
-  path = path_dhs_parquet,
-  file_type = "HR",
-  survey_type = "DHS",
-  country_code = country_iso2,
-  survey_year = survey_year_dhs
-)
-
-kr_dhs <- dhs_read(
-  path = path_dhs_parquet,
-  file_type = "KR",
-  survey_type = "DHS",
-  country_code = country_iso2,
-  survey_year = survey_year_dhs
-)
-
-ir_dhs <- dhs_read(
-  path = path_dhs_parquet,
-  file_type = "IR",
-  survey_type = "DHS",
-  country_code = country_iso2,
-  survey_year = survey_year_dhs
-)
-
-## ---------------------------------------------------------------------------##
-# 3–4) Calculate metrics at adm1 and adm2 --------------------------------------
-## ---------------------------------------------------------------------------##
-
-admin_levels <- c("adm1", "adm2")
-
-dhs_data_by_level <- list()
-dhs_dict_by_level <- list()
-
-for (admin_level in admin_levels) {
-  cli::cli_h2(glue::glue("Processing DHS indicators at {admin_level}"))
-
-  pfpr_results <- calc_pfpr_dhs(
-    dhs_pr = pr_mis,
-    gps_data = ge_mis,
+  cli::cli_h3("Fever prevalence")
+  results$fever <- sntmethods::calc_fever_dhs(
+    dhs_kr = dhs$kr,
+    gps_data = dhs$ge,
     shapefile = shp_admin,
-    admin_level = admin_level
+    admin_level = admin_levels
   )
 
-  u5mr_results <- calc_u5mr_dhs(
-    dhs_kr = kr_dhs,
-    period_years = 5,
-    gps_data = ge_dhs,
+  cli::cli_h3("Care-seeking behaviour (CSB)")
+  results$csb <- sntmethods::calc_csb_dhs(
+    dhs_kr = dhs$kr,
+    gps_data = dhs$ge,
     shapefile = shp_admin,
-    admin_level = admin_level
+    admin_level = admin_levels
   )
 
-  csb_results <- calc_csb_dhs(
-    dhs_kr = kr_dhs,
-    gps_data = ge_dhs,
+  cli::cli_h3("Malaria diagnosis")
+  results$malaria_dx <- sntmethods::calc_malaria_dx_dhs(
+    dhs_kr = dhs$kr,
+    gps_data = dhs$ge,
     shapefile = shp_admin,
-    admin_level = admin_level
+    admin_level = admin_levels
   )
 
-  itn_results <- calc_itn_dhs(
-    dhs_hr = hr_dhs,
-    dhs_pr = pr_dhs,
-    gps_data = ge_dhs,
+  cli::cli_h3("Antimalarial treatment")
+  results$antimalarial <- sntmethods::calc_antimalarial_dhs(
+    dhs_kr = dhs$kr,
+    gps_data = dhs$ge,
     shapefile = shp_admin,
-    admin_level = admin_level,
-    # Enable age stratification to get use_if_access indicator
-    age_breaks = c(0, 5, 15, Inf),
-    age_labels = c("u5", "5_14", "15plus")
+    admin_level = admin_levels
   )
 
-  wealth_results <- calc_wealth_dhs(
-    dhs_hr = hr_dhs,
-    gps_data = ge_dhs,
+  cli::cli_h3("ACT treatment")
+  results$act <- sntmethods::calc_act_dhs(
+    dhs_kr = dhs$kr,
+    gps_data = dhs$ge,
     shapefile = shp_admin,
-    admin_level = admin_level
+    admin_level = admin_levels
   )
 
-  iptp_results <- calc_iptp_dhs(
-    dhs_ir = ir_dhs,
-    gps_data = ge_dhs,
+  cli::cli_h3("PfPR")
+  results$pfpr <- sntmethods::calc_pfpr_dhs(
+    dhs_pr = dhs$pr,
+    gps_data = dhs$ge,
     shapefile = shp_admin,
-    admin_level = admin_level
+    admin_level = admin_levels
   )
 
-  anemia_results <- calc_severe_anemia_dhs(
-    dhs_pr = pr_dhs,
-    gps_data = ge_dhs,
+  cli::cli_h3("ITN ownership and use")
+  results$itn <- sntmethods::calc_itn_dhs(
+    dhs_hr = dhs$hr,
+    dhs_pr = dhs$pr,
+    gps_data = dhs$ge,
     shapefile = shp_admin,
-    admin_level = admin_level,
+    admin_level = admin_levels
+  )
+
+  cli::cli_h3("Household wealth")
+  results$wealth <- sntmethods::calc_wealth_dhs(
+    dhs_hr = dhs$hr,
+    gps_data = dhs$ge,
+    shapefile = shp_admin,
+    admin_level = admin_levels
+  )
+
+  cli::cli_h3("IPTp coverage")
+  results$iptp <- sntmethods::calc_iptp_dhs(
+    dhs_ir = dhs$ir,
+    gps_data = dhs$ge,
+    shapefile = shp_admin,
+    admin_level = admin_levels
+  )
+
+  cli::cli_h3("Severe anemia prevalence")
+  results$anemia <- sntmethods::calc_severe_anemia_dhs(
+    dhs_pr = dhs$pr,
+    gps_data = dhs$ge,
+    shapefile = shp_admin,
+    admin_level = admin_levels,
     altitude_adjusted = FALSE
   )
 
-  join_key <- admin_level
+  cli::cli_h3("Under-five mortality rate")
+  results$u5mr <- sntmethods::calc_u5mr_dhs(
+    dhs_kr = dhs$kr,
+    period_years = 5,
+    gps_data = dhs$ge,
+    shapefile = shp_admin,
+    admin_level = admin_levels
+  )
 
-  dhs_indicators <-
-    pfpr_results$data |>
-    dplyr::left_join(u5mr_results$data, by = join_key) |>
-    dplyr::left_join(csb_results$data, by = join_key) |>
-    dplyr::left_join(itn_results$data, by = join_key) |>
-    dplyr::left_join(wealth_results$data, by = join_key) |>
-    dplyr::left_join(iptp_results$data, by = join_key) |>
-    dplyr::left_join(anemia_results$data, by = join_key)
+  cli::cli_h3("EPI vaccination coverage")
+  results$epi <- sntmethods::calc_epi_dhs(
+    dhs_kr = dhs$kr,
+    gps_data = dhs$ge,
+    shapefile = shp_admin,
+    admin_level = admin_levels
+  )
 
-  dhs_data_by_level[[admin_level]] <- dhs_indicators
+  cli::cli_h3("IRS coverage")
+  results$irs <- sntmethods::calc_irs_dhs(
+    dhs_hr = dhs$hr,
+    gps_data = dhs$ge,
+    shapefile = shp_admin,
+    admin_level = admin_levels
+  )
+
+  cli::cli_h3("SMC receipt")
+  results$smc <- sntmethods::calc_smc_dhs(
+    dhs_kr = dhs$kr,
+    gps_data = dhs$ge,
+    shapefile = shp_admin,
+    admin_level = admin_levels
+  )
+
+  # Stack all indicators per admin level
+  purrr::map(
+    purrr::set_names(admin_levels),
+    function(lvl) {
+      purrr::map_df(results, function(res) {
+        if (lvl %in% names(res)) res[[lvl]] else NULL
+      })
+    }
+  )
 }
 
 ## ---------------------------------------------------------------------------##
-# 5) Build single final object and save once ----------------------------------
+# 4) Run across all DHS + MIS surveys and combine -----------------------------
 ## ---------------------------------------------------------------------------##
 
-dhs_dict <- sntutils::build_dictionary(
-  dhs_data_by_level[["adm2"]],
-  language = "fr"
-) |>
-  dplyr::select(variable, type, label_en, label_fr)
+all_bundles <- c(dhs_bundles, mis_bundles)
 
-final_dhs_output <- list(
-  data_adm1 = dhs_data_by_level[["adm1"]],
-  data_adm2 = dhs_data_by_level[["adm2"]],
-  dict = dhs_dict
+all_survey_results <- purrr::imap(all_bundles, function(dhs, year_label) {
+  cli::cli_h2(glue::glue("Calculating indicators for {year_label}"))
+  calc_dhs_indicators(dhs, shp_admin, admin_levels)
+})
+
+# Combine across surveys: bind_rows within each admin level
+dhs_output <- purrr::map(
+  purrr::set_names(admin_levels),
+  function(lvl) {
+    purrr::map_df(all_survey_results, function(survey_res) {
+      if (lvl %in% names(survey_res)) survey_res[[lvl]] else NULL
+    })
+  }
 )
 
+cli::cli_alert_success("Combined all DHS/MIS indicators into long-format output")
+
+## ---------------------------------------------------------------------------##
+# 5) Save final output ---------------------------------------------------------
+## ---------------------------------------------------------------------------##
+
 sntutils::write_snt_data(
-  obj = final_dhs_output,
+  obj = dhs_output,
   data_name = glue::glue("{country_iso3}_dhs_indicators"),
-  path = here::here(paths),
+  path = here::here(paths$dhs, "processed"),
   file_formats = c("qs2", "xlsx")
 )

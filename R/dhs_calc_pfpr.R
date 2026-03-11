@@ -540,16 +540,16 @@ extract_dhs_metadata <- function(dhs_pr, survey_vars = NULL) {
   return(metadata)
 }
 
-#' Calculate WMR PfPR Indicators from DHS Data
+#' Calculate PfPR Indicators from DHS Data
 #'
 #' Computes PfPR (Plasmodium falciparum Parasite Rate) indicators from DHS
 #' Person Records (PR) data. Returns survey-weighted proportions with logit
-#' confidence intervals in WMR long format.
+#' confidence intervals in standardized long format.
 #'
 #' @details
 #' Computes PfPR for children aged 6-59 months using RDT (hml35) and/or
 #' microscopy (hml32) results. Follows the same output pattern as
-#' \code{\link{calc_act_dhs}} and \code{\link{calc_itn_wmr}}.
+#' \code{\link{calc_act_dhs}} and \code{\link{calc_itn_dhs}}.
 #'
 #' @param dhs_pr DHS Person Records (PR) dataset (data.frame or tibble).
 #' @param survey_vars Named list mapping DHS variable names. Required keys:
@@ -573,7 +573,7 @@ extract_dhs_metadata <- function(dhs_pr, survey_vars = NULL) {
 #' @param join_nearest Logical; if TRUE, assigns unmatched clusters to nearest
 #'   admin unit. Default: TRUE.
 #' @param indicators Character vector of indicator names to compute. If NULL
-#'   (default), computes all indicators from \code{\link{pfpr_wmr_dictionary}}.
+#'   (default), computes all indicators from \code{\link{pfpr_dictionary}}.
 #' @param ci_method Method for confidence intervals. Default: "logit".
 #'
 #' @return Named list of tibbles, one per admin level:
@@ -582,7 +582,7 @@ extract_dhs_metadata <- function(dhs_pr, survey_vars = NULL) {
 #'     \item{\code{adm1}}{Admin-1 estimates (when region_var or shapefile)}
 #'     \item{\code{adm2}}{Admin-2 estimates (when shapefile with adm2)}
 #'   }
-#'   Each tibble has WMR standard columns: survey_id, iso3, iso2,
+#'   Each tibble has standard columns: survey_id, iso3, iso2,
 #'   survey_type, survey_year, adm0, type, geo_source, point, ci_l, ci_u,
 #'   numerator, denominator, indicator, indicator_code,
 #'   numerator_description, denominator_description, denominator_code.
@@ -597,7 +597,7 @@ extract_dhs_metadata <- function(dhs_pr, survey_vars = NULL) {
 #' result$adm1  # regional PfPR
 #' }
 #'
-#' @seealso \code{\link{pfpr_wmr_dictionary}} for indicator definitions
+#' @seealso \code{\link{pfpr_dictionary}} for indicator definitions
 #' @export
 calc_pfpr_dhs <- function(
   dhs_pr,
@@ -640,12 +640,14 @@ calc_pfpr_dhs <- function(
   survey_meta <- .extract_survey_meta_hv(dhs_pr)
 
   # ---- 2. Prepare PfPR data ----
+  # Use wide age range (0-119 months) so all age-group variants are available.
+  # Individual indicators apply their own age filters via .pfpr_conditions().
 
   pr <- .prepare_pfpr_data(
     dhs_pr           = dhs_pr,
     survey_vars      = survey_vars,
-    age_min          = 6,
-    age_max          = 59,
+    age_min          = 0,
+    age_max          = 119,
     include_survey_vars = TRUE
   )
   if (is.null(pr)) {
@@ -658,7 +660,7 @@ calc_pfpr_dhs <- function(
   n_rdt <- sum(pr$tested_rdt == 1, na.rm = TRUE)
   n_mic <- sum(pr$tested_mic == 1, na.rm = TRUE)
   cli::cli_alert_info(
-    "Children 6-59 months: {n_rdt} tested by RDT, {n_mic} by microscopy"
+    "Eligible children (0-119 months): {n_rdt} tested by RDT, {n_mic} by microscopy"
   )
 
   # ---- 3. Region grouping or spatial join ----
@@ -726,7 +728,7 @@ calc_pfpr_dhs <- function(
 
   # ---- 4. Get indicator conditions and filter ----
 
-  dict <- .pfpr_wmr_conditions()
+  dict <- .pfpr_conditions()
 
   # Skip indicators without data
   if (!has_rdt) {
@@ -885,23 +887,23 @@ calc_pfpr_dhs <- function(
 
 
 # =============================================================================
-# PfPR WMR Indicator Dictionary
+# PfPR Indicator Dictionary
 # =============================================================================
 
-#' PfPR WMR Indicator Dictionary
+#' PfPR Indicator Dictionary
 #'
-#' Returns the dictionary of WMR PfPR indicators.
+#' Returns the dictionary of PfPR indicators.
 #'
 #' @return Tibble with columns: indicator, indicator_code, indicator_title,
 #'   outcome_var, numerator_description, denominator_description,
 #'   denominator_code, data_level.
 #'
 #' @examples
-#' pfpr_wmr_dictionary()
+#' pfpr_dictionary()
 #'
 #' @export
-pfpr_wmr_dictionary <- function() {
-  conds <- .pfpr_wmr_conditions()
+pfpr_dictionary <- function() {
+  conds <- .pfpr_conditions()
   tibble::tibble(
     indicator = vapply(conds, `[[`, character(1), "indicator"),
     indicator_code = vapply(conds, `[[`, character(1), "indicator_code"),
@@ -915,29 +917,139 @@ pfpr_wmr_dictionary <- function() {
 }
 
 
-#' Internal: PfPR WMR indicator conditions
+#' Internal: PfPR indicator conditions
+#'
+#' Each condition specifies a filter expression applied to the prepared PR data.
+#' The `age` column (child's age in months, from hc1) is available for age-group
+#' subsetting. Age-group naming follows the MBG convention:
+#'   - (default): 6-59 months
+#'   - u5:  0-59 months
+#'   - 5_10: 60-119 months
+#'   - u10: 0-119 months
+#'   - 2_10: 24-119 months
+#'
 #' @noRd
-.pfpr_wmr_conditions <- function() {
+.pfpr_conditions <- function() {
   list(
+
+    # ---- RDT: 6-59 months (default / original) ----
     list(
-      indicator      = "PFPR_RDT",
-      indicator_code = "pfpr_rdt",
-      indicator_title = "PfPR by RDT",
-      denom_code     = "tested_rdt_6_59mo",
-      filter_expr    = quote(tested_rdt == 1),
-      outcome_var    = "rdt_pos",
-      num_desc       = "Children 6-59 months positive by RDT",
-      denom_desc     = "Children 6-59 months tested by RDT"
+      indicator       = "PFPR_RDT",
+      indicator_code  = "pfpr_rdt",
+      indicator_title = "PfPR by RDT (6-59 months)",
+      denom_code      = "tested_rdt_6_59mo",
+      filter_expr     = quote(tested_rdt == 1 & age >= 6 & age <= 59),
+      outcome_var     = "rdt_pos",
+      num_desc        = "Children 6-59 months positive by RDT",
+      denom_desc      = "Children 6-59 months tested by RDT"
     ),
+
+    # ---- MIC: 6-59 months (default / original) ----
     list(
-      indicator      = "PFPR_MIC",
-      indicator_code = "pfpr_mic",
-      indicator_title = "PfPR by microscopy",
-      denom_code     = "tested_mic_6_59mo",
-      filter_expr    = quote(tested_mic == 1),
-      outcome_var    = "mic_pos",
-      num_desc       = "Children 6-59 months positive by microscopy",
-      denom_desc     = "Children 6-59 months tested by microscopy"
+      indicator       = "PFPR_MIC",
+      indicator_code  = "pfpr_mic",
+      indicator_title = "PfPR by microscopy (6-59 months)",
+      denom_code      = "tested_mic_6_59mo",
+      filter_expr     = quote(tested_mic == 1 & age >= 6 & age <= 59),
+      outcome_var     = "mic_pos",
+      num_desc        = "Children 6-59 months positive by microscopy",
+      denom_desc      = "Children 6-59 months tested by microscopy"
+    ),
+
+    # ---- RDT: under 5 (0-59 months) ----
+    list(
+      indicator       = "PFPR_RDT_U5",
+      indicator_code  = "pfpr_rdt_u5",
+      indicator_title = "PfPR by RDT (0-59 months)",
+      denom_code      = "tested_rdt_u5",
+      filter_expr     = quote(tested_rdt == 1 & age >= 0 & age <= 59),
+      outcome_var     = "rdt_pos",
+      num_desc        = "Children 0-59 months positive by RDT",
+      denom_desc      = "Children 0-59 months tested by RDT"
+    ),
+
+    # ---- RDT: 5-10 years (60-119 months) ----
+    list(
+      indicator       = "PFPR_RDT_5_10",
+      indicator_code  = "pfpr_rdt_5_10",
+      indicator_title = "PfPR by RDT (60-119 months)",
+      denom_code      = "tested_rdt_5_10",
+      filter_expr     = quote(tested_rdt == 1 & age >= 60 & age <= 119),
+      outcome_var     = "rdt_pos",
+      num_desc        = "Children 60-119 months positive by RDT",
+      denom_desc      = "Children 60-119 months tested by RDT"
+    ),
+
+    # ---- RDT: under 10 (0-119 months) ----
+    list(
+      indicator       = "PFPR_RDT_U10",
+      indicator_code  = "pfpr_rdt_u10",
+      indicator_title = "PfPR by RDT (0-119 months)",
+      denom_code      = "tested_rdt_u10",
+      filter_expr     = quote(tested_rdt == 1 & age >= 0 & age <= 119),
+      outcome_var     = "rdt_pos",
+      num_desc        = "Children 0-119 months positive by RDT",
+      denom_desc      = "Children 0-119 months tested by RDT"
+    ),
+
+    # ---- RDT: 2-10 years (24-119 months) ----
+    list(
+      indicator       = "PFPR_RDT_2_10",
+      indicator_code  = "pfpr_rdt_2_10",
+      indicator_title = "PfPR by RDT (24-119 months)",
+      denom_code      = "tested_rdt_2_10",
+      filter_expr     = quote(tested_rdt == 1 & age >= 24 & age <= 119),
+      outcome_var     = "rdt_pos",
+      num_desc        = "Children 24-119 months positive by RDT",
+      denom_desc      = "Children 24-119 months tested by RDT"
+    ),
+
+    # ---- MIC: under 5 (0-59 months) ----
+    list(
+      indicator       = "PFPR_MIC_U5",
+      indicator_code  = "pfpr_mic_u5",
+      indicator_title = "PfPR by microscopy (0-59 months)",
+      denom_code      = "tested_mic_u5",
+      filter_expr     = quote(tested_mic == 1 & age >= 0 & age <= 59),
+      outcome_var     = "mic_pos",
+      num_desc        = "Children 0-59 months positive by microscopy",
+      denom_desc      = "Children 0-59 months tested by microscopy"
+    ),
+
+    # ---- MIC: 5-10 years (60-119 months) ----
+    list(
+      indicator       = "PFPR_MIC_5_10",
+      indicator_code  = "pfpr_mic_5_10",
+      indicator_title = "PfPR by microscopy (60-119 months)",
+      denom_code      = "tested_mic_5_10",
+      filter_expr     = quote(tested_mic == 1 & age >= 60 & age <= 119),
+      outcome_var     = "mic_pos",
+      num_desc        = "Children 60-119 months positive by microscopy",
+      denom_desc      = "Children 60-119 months tested by microscopy"
+    ),
+
+    # ---- MIC: under 10 (0-119 months) ----
+    list(
+      indicator       = "PFPR_MIC_U10",
+      indicator_code  = "pfpr_mic_u10",
+      indicator_title = "PfPR by microscopy (0-119 months)",
+      denom_code      = "tested_mic_u10",
+      filter_expr     = quote(tested_mic == 1 & age >= 0 & age <= 119),
+      outcome_var     = "mic_pos",
+      num_desc        = "Children 0-119 months positive by microscopy",
+      denom_desc      = "Children 0-119 months tested by microscopy"
+    ),
+
+    # ---- MIC: 2-10 years (24-119 months) ----
+    list(
+      indicator       = "PFPR_MIC_2_10",
+      indicator_code  = "pfpr_mic_2_10",
+      indicator_title = "PfPR by microscopy (24-119 months)",
+      denom_code      = "tested_mic_2_10",
+      filter_expr     = quote(tested_mic == 1 & age >= 24 & age <= 119),
+      outcome_var     = "mic_pos",
+      num_desc        = "Children 24-119 months positive by microscopy",
+      denom_desc      = "Children 24-119 months tested by microscopy"
     )
   )
 }
@@ -947,7 +1059,7 @@ pfpr_wmr_dictionary <- function() {
 # PfPR computation helper
 # =============================================================================
 
-#' Compute a single PfPR WMR indicator
+#' Compute a single PfPR indicator
 #'
 #' @param data Prepared PfPR dataset with test result columns.
 #' @param condition List with indicator spec (filter_expr, outcome_var, etc.).
@@ -978,8 +1090,8 @@ pfpr_wmr_dictionary <- function() {
     return(tibble::tibble())
   }
 
-  filtered$.wmr_outcome <- filtered[[outcome_var]]
-  filtered <- filtered[!is.na(filtered$.wmr_outcome), ]
+  filtered$.dhs_outcome <- filtered[[outcome_var]]
+  filtered <- filtered[!is.na(filtered$.dhs_outcome), ]
 
   n_denom <- nrow(filtered)
   if (n_denom == 0) return(tibble::tibble())
@@ -991,7 +1103,7 @@ pfpr_wmr_dictionary <- function() {
   # Weighted counts
   n_denom_w <- round(sum(filtered$survey_weight, na.rm = TRUE))
   n_numer_w <- round(sum(
-    filtered$survey_weight * (filtered$.wmr_outcome == 1), na.rm = TRUE
+    filtered$survey_weight * (filtered$.dhs_outcome == 1), na.rm = TRUE
   ))
 
   # Single-cluster guard
@@ -1035,7 +1147,7 @@ pfpr_wmr_dictionary <- function() {
 
   # National estimate
   national <- tryCatch({
-    est <- survey::svyciprop(~.wmr_outcome, svy, method = ci_method,
+    est <- survey::svyciprop(~.dhs_outcome, svy, method = ci_method,
                               na.rm = TRUE)
     ci  <- stats::confint(est)
     tibble::tibble(
@@ -1061,7 +1173,7 @@ pfpr_wmr_dictionary <- function() {
 
     regional <- tryCatch({
       by_result <- survey::svyby(
-        ~.wmr_outcome, by = group_formula, design = svy,
+        ~.dhs_outcome, by = group_formula, design = svy,
         FUN = survey::svyciprop, vartype = "ci",
         method = ci_method, na.rm = TRUE, keep.names = FALSE
       ) |> tibble::as_tibble()
@@ -1070,7 +1182,7 @@ pfpr_wmr_dictionary <- function() {
         dplyr::group_by(.data[[group_var]]) |>
         dplyr::summarise(
           numerator = round(sum(
-            survey_weight * (.wmr_outcome == 1), na.rm = TRUE
+            survey_weight * (.dhs_outcome == 1), na.rm = TRUE
           )), .groups = "drop"
         )
 
@@ -1081,13 +1193,13 @@ pfpr_wmr_dictionary <- function() {
           .groups = "drop"
         )
 
-      names(by_result)[names(by_result) == "ci_l"] <- "ci_l..wmr_outcome"
-      names(by_result)[names(by_result) == "ci_u"] <- "ci_u..wmr_outcome"
+      names(by_result)[names(by_result) == "ci_l"] <- "ci_l..dhs_outcome"
+      names(by_result)[names(by_result) == "ci_u"] <- "ci_u..dhs_outcome"
 
       by_result |>
         dplyr::rename(
-          location = !!group_var, point = .wmr_outcome,
-          ci_l = `ci_l..wmr_outcome`, ci_u = `ci_u..wmr_outcome`
+          location = !!group_var, point = .dhs_outcome,
+          ci_l = `ci_l..dhs_outcome`, ci_u = `ci_u..dhs_outcome`
         ) |>
         dplyr::mutate(location = as.character(location)) |>
         dplyr::left_join(

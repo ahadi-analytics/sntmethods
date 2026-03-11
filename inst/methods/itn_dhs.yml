@@ -273,26 +273,43 @@ methodology:
     Both produce valid point estimates; CIs differ slightly.
 
 output_format:
-  calc_itn_dhs:
+  dhs_survey_output:
     description: >
-      Returns a named list with three elements: data, dict, metadata.
-      data is a tibble in wide format with one row per grouping unit
-      (cluster if GPS provided without shapefile, admin level if shapefile
-      provided, or national if neither). Columns include indicator proportions
-      (0-1), 95% CI bounds, and unweighted sample size counts.
-    key_columns:
-      grouping_vars: "cluster_id / adm1 / adm2 (depending on inputs)"
-      lat: "Latitude (present when GPS-only, no shapefile)"
-      lon: "Longitude (present when GPS-only, no shapefile)"
-      dhs_itn_ownership: "Proportion of households with >= 1 ITN"
-      dhs_itn_sufficient: "Proportion of households with >= 1 ITN per 2 members"
-      dhs_itn_access: "Proportion of population with ITN access (svymean of ratio)"
-      dhs_itn_use: "Proportion of population sleeping under ITN"
-      dhs_itn_use_if_access: "Proportion with access who slept under ITN"
-      dhs_itn_use_u5: "Proportion of children under 5 sleeping under ITN"
-      dhs_itn_use_preg: "Proportion of pregnant women sleeping under ITN"
-      "*_low / *_upp": "Lower and upper 95% CI bounds, clamped to [0, 1]"
-      dhs_n_*: "Unweighted sample size counts"
+      Returns a named list with one element per admin level: list(adm0, adm1, adm2, ...).
+      Each element is a long-format tibble with one row per indicator per geographic unit.
+      All proportion values are on the 0-1 scale.
+    columns:
+      survey_id: "DHS survey identifier"
+      iso3: "ISO3 country code"
+      iso2: "ISO2 country code"
+      survey_type: "Survey type (DHS, MIS, etc.)"
+      survey_year: "Survey year"
+      adm0: "Country name"
+      adm1: "First admin level (adm1 table and below)"
+      adm2: "Second admin level (adm2 table and below)"
+      type: "Estimate type: 'survey_weighted'"
+      geo_source: "Geographic data source (e.g., 'ge' for GPS/shapefile)"
+      point: "Survey-weighted proportion (0-1 scale, rounded to 3 dp)"
+      ci_l: "Lower 95% CI (clamped to [0,1])"
+      ci_u: "Upper 95% CI (clamped to [0,1])"
+      numerator: "Unweighted count (integer)"
+      denominator: "Unweighted count (integer)"
+      indicator: "Human-readable indicator name"
+      indicator_code: "Machine-readable indicator code"
+      numerator_description: "Description of what the numerator counts"
+      denominator_description: "Description of what the denominator counts"
+      denominator_code: "Short code for the denominator"
+    indicator_codes:
+      - "itn_enough: Household has sufficient ITNs (>= 1 per 2 members)"
+      - "itn_with: Household owns at least 1 ITN"
+      - "itn_access: Population ITN access"
+      - "itn_use: Population ITN use (all ages)"
+      - "itn_use_chu5: ITN use among children under 5"
+      - "itn_use_pregnant: ITN use among pregnant women"
+      - "itn_use_if_access: ITN use among those with access"
+      - "itn_use_if_access_u5: Use-if-access among U5 (age-stratified)"
+      - "itn_use_if_access_5_14: Use-if-access among 5-14 (age-stratified)"
+      - "itn_use_if_access_ov15: Use-if-access among 15+ (age-stratified)"
   calc_itn_mbg:
     description: >
       Returns a named list of data.tables (one per indicator). Each table

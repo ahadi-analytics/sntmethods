@@ -572,8 +572,8 @@ test_that("calc_csb_dhs_core returns all 11 CSB indicators at adm0 level", {
   expect_true(all(adm0$numerator <= adm0$denominator, na.rm = TRUE))
 })
 
-test_that("csb_wmr_dictionary returns all 11 indicators with metadata", {
-  dict <- csb_wmr_dictionary()
+test_that("csb_dictionary returns all 11 indicators with metadata", {
+  dict <- csb_dictionary()
   expect_s3_class(dict, "tbl_df")
   expect_equal(nrow(dict), 11)
   expect_true(all(

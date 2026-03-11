@@ -62,7 +62,7 @@
   new_cols <- c(
     "dhs_variable", "numerator", "denominator",
     "dhs_numerator_var", "dhs_denominator_var",
-    "dhs_recode", "indicator_category", "wmr_cascade_step",
+    "dhs_recode", "indicator_category", "cascade_step",
     "age_group", "units"
   )
   for (col in new_cols) {
@@ -97,7 +97,7 @@
     "category",
     "dhs_variable", "numerator", "denominator",
     "dhs_numerator_var", "dhs_denominator_var",
-    "dhs_recode", "indicator_category", "wmr_cascade_step",
+    "dhs_recode", "indicator_category", "cascade_step",
     "age_group", "units",
     "n", "n_missing", "pct_missing", "n_unique",
     "example_values", "min", "max", "notes"
@@ -128,7 +128,7 @@
   # Map indicator names to readable labels with numerator/denominator metadata
   # Fields: en, fr, dhs_var, num, den, dhs_num, dhs_den
   indicator_labels <- list(
-    # WMR Case Management Cascade
+    # Case Management Cascade
     fever = list(
       en = "Fever prevalence", fr = "Prevalence de la fievre",
       dhs_var = "h22",
@@ -757,7 +757,7 @@
     tibble::tribble(
       ~variable, ~label_en, ~label_fr, ~dhs_variable,
       ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var,
-      ~dhs_recode, ~indicator_category, ~wmr_cascade_step, ~age_group, ~units,
+      ~dhs_recode, ~indicator_category, ~cascade_step, ~age_group, ~units,
       ~notes,
 
       paste0(ind, "_mean"),
@@ -830,7 +830,7 @@
   na_chr <- NA_character_
   na_int <- NA_integer_
   tibble::tribble(
-    ~variable,     ~label_en,                                      ~label_fr,                                            ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~dhs_recode, ~indicator_category, ~wmr_cascade_step, ~age_group, ~units,    ~notes,
+    ~variable,     ~label_en,                                      ~label_fr,                                            ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~dhs_recode, ~indicator_category, ~cascade_step, ~age_group, ~units,    ~notes,
     "iso3_code",   "ISO 3166-1 alpha-3 country code",              "Code pays ISO 3166-1 alpha-3",                       na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      "Key info",          na_int,            na_chr,     na_chr,    na_chr,
     "dhs_code",    "DHS country code",                             "Code pays DHS",                                      na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      "Key info",          na_int,            na_chr,     na_chr,    na_chr,
     "adm0",        "Administrative level 0 (country)",             "Niveau administratif 0 (pays)",                      na_chr,        na_chr,     na_chr,       na_chr,             na_chr,               na_chr,      "Key info",          na_int,            na_chr,     na_chr,    na_chr,
@@ -846,7 +846,7 @@
 
 #' Lookup metadata for MBG indicator names
 #'
-#' Returns DHS recode type, indicator category, WMR cascade step,
+#' Returns DHS recode type, indicator category, cascade step,
 #' target age group, and base units for a given indicator name.
 #'
 #' @param ind Character scalar indicator name.
@@ -857,7 +857,7 @@
   na_int <- NA_integer_
 
   meta <- list(
-    # WMR Cascade — KR module, Malaria category
+    # Cascade — KR module, Malaria category
     fever             = list(recode = "KR", category = "Malaria",       cascade = 0L, age = "0-59 months"),
     csb_public        = list(recode = "KR", category = "Malaria",       cascade = 1L, age = "0-59 months"),
     csb_private       = list(recode = "KR", category = "Malaria",       cascade = 1L, age = "0-59 months"),

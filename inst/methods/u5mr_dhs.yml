@@ -197,6 +197,38 @@ validation:
    - "Compare national aggregate to DHS report estimates"
    - "Check for spatial patterns consistent with known health gradients"
 
+output_format:
+  dhs_survey_output:
+    description: >
+      Returns a named list with one element per admin level: list(adm0, adm1, ...).
+      Each element is a long-format tibble with one row per indicator per geographic unit.
+      U5MR values are per 1,000 live births (not proportions).
+    columns:
+      survey_id: "DHS survey identifier"
+      iso3: "ISO3 country code"
+      iso2: "ISO2 country code"
+      survey_type: "Survey type (DHS, MIS, etc.)"
+      survey_year: "Survey year"
+      adm0: "Country name"
+      adm1: "First admin level (adm1 table and below)"
+      type: "Estimate type: 'survey_weighted'"
+      geo_source: "Geographic data source (e.g., 'ge' for GPS/shapefile)"
+      point: "Mortality rate per 1,000 live births (rounded to 3 dp)"
+      ci_l: "Lower 95% CI"
+      ci_u: "Upper 95% CI"
+      numerator: "Number of deaths (integer)"
+      denominator: "Number of live births / person-years at risk (integer)"
+      indicator: "Human-readable indicator name"
+      indicator_code: "Machine-readable indicator code"
+      numerator_description: "Description of what the numerator counts"
+      denominator_description: "Description of what the denominator counts"
+      denominator_code: "Short code for the denominator"
+    indicator_codes:
+      - "nmr: Neonatal mortality rate (0-28 days)"
+      - "imr: Infant mortality rate (0-11 months)"
+      - "cmr: Child mortality rate (12-59 months)"
+      - "u5mr: Under-5 mortality rate (0-59 months)"
+
 limitations:
  - "Five independent models do not share information across age groups"
  - "Uncertainty intervals from mean combination are approximate"

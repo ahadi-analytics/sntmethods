@@ -7,7 +7,7 @@
 #' @param survey_vars Named list mapping DHS variable names. Must include:
 #'   cluster, age, fever. Optionally: weight, stratum.
 #' @param csb_classification Data frame with variable and csb columns.
-#'   If NULL, uses default WMR classification.
+#'   If NULL, uses default classification.
 #' @param include_survey_vars Logical. If TRUE, includes survey_weight and
 #'   stratum_id columns for DHS survey design. If FALSE, omits them (for MBG).
 #'
@@ -143,7 +143,7 @@
 #' @param h32_cols Character vector of h32 column names present in data.
 #'   If NULL, auto-detects from column names.
 #' @param csb_classification Data frame with variable and csb columns.
-#'   If NULL, uses default WMR classification.
+#'   If NULL, uses default classification.
 #'
 #' @return The input data frame with added columns: .row_id, has_public,
 #'   has_chw, has_private_formal, has_private_informal, has_pharmacy,
@@ -238,7 +238,7 @@
       csb_trained = as.numeric(
         csb_public == 1 | csb_private_formal_pha == 1
       ),
-      # Granular sectors (WMR indicator alignment)
+      # Granular sectors (indicator alignment)
       csb_public_nochw = as.numeric(has_public == 1),
       csb_chw = as.numeric(has_chw == 1),
       csb_private_formal_ind = as.numeric(
@@ -306,7 +306,7 @@
     "\\bpharmac|drug.?shop|drug.?store|\\bchemist|\\bppmv\\b|",
     "patent.medicine"
   )
-  # NGO sector (treated as public for WMR)
+  # NGO sector (treated as public )
   ngo_pattern <- "\\bngo\\b|non.governmental|faith.based"
   # Public sector (government / dispensary / health center / gov mobile clinic)
   public_pattern <- paste0(
@@ -347,7 +347,7 @@
       } else if (grepl(pharm_pattern, lbl, ignore.case = TRUE)) {
         csb_cat <- "pharmacy"
       } else if (grepl(ngo_pattern, lbl, ignore.case = TRUE)) {
-        # NGO treated as public sector for WMR purposes
+        # NGO treated as public sector for analysis purposes
         csb_cat <- "public"
       } else if (grepl(public_pattern, lbl, ignore.case = TRUE)) {
         csb_cat <- "public"

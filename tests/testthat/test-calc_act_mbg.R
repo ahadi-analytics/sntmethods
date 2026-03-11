@@ -385,7 +385,7 @@ test_that("calc_act_mbg computes both indicators together", {
 })
 
 
-# ---- WMR-aligned dictionary indicators ----
+# ---- Long-format dictionary indicators ----
 
 test_that("act_mbg_dictionary returns all expected indicators", {
   dict <- sntmethods:::.act_mbg_dictionary()
@@ -402,7 +402,7 @@ test_that("act_mbg_dictionary returns all expected indicators", {
   expect_true("antimal_form_pharm" %in% names)
 })
 
-test_that("calc_act_mbg computes WMR ACT indicators with CSB data", {
+test_that("calc_act_mbg computes  ACT indicators with CSB data", {
   kr <- .mock_kr_act_with_csb()
   gps <- .mock_gps()
 

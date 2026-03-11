@@ -166,25 +166,31 @@ methodology:
     factor: Poorest < Poorer < Middle < Richer < Richest.
 
 output_format:
-  columns:
-    grouping_vars: "Administrative level columns (adm0, adm1, etc.) or cluster_id"
-    dhs_prop_poorest: "Proportion of households in poorest quintile (0-1)"
-    dhs_prop_poorer: "Proportion in poorer quintile (0-1)"
-    dhs_prop_middle: "Proportion in middle quintile (0-1)"
-    dhs_prop_richer: "Proportion in richer quintile (0-1)"
-    dhs_prop_richest: "Proportion in richest quintile (0-1)"
-    dhs_dominant_quintile: "Most common quintile in the area (ordered factor)"
-    dhs_dominant_prop: "Proportion of households in the dominant quintile (0-1)"
-    dhs_gini: "Gini coefficient (0-1; rounded to 3 decimals)"
-    dhs_n_households: "Unweighted household count"
-    dhs_weighted_households: "Survey-weighted household count"
-    dhs_gini_sample_size: "Number of households used for Gini calculation"
-    dhs_gini_reliable: "TRUE if dhs_gini_sample_size >= 25"
-
-  note: >
-    cluster_id and lat/lon are included only for cluster-level output
-    (gps_data provided without shapefile). level = "National" appears in
-    the ungrouped path.
+  dhs_survey_output:
+    description: >
+      Returns a named list with one element per admin level: list(adm0, adm1, ...).
+      Each element is a long-format tibble with one row per indicator per geographic unit.
+      Wealth quintile proportions and Gini coefficient are included as separate indicators.
+    columns:
+      survey_id: "DHS survey identifier"
+      iso3: "ISO3 country code"
+      iso2: "ISO2 country code"
+      survey_type: "Survey type (DHS, MIS, etc.)"
+      survey_year: "Survey year"
+      adm0: "Country name"
+      adm1: "First admin level (adm1 table and below)"
+      type: "Estimate type: 'survey_weighted'"
+      geo_source: "Geographic data source (e.g., 'ge' for GPS/shapefile)"
+      point: "Survey-weighted proportion or Gini value (0-1 scale, rounded to 3 dp)"
+      ci_l: "Lower 95% CI (clamped to [0,1])"
+      ci_u: "Upper 95% CI (clamped to [0,1])"
+      numerator: "Unweighted count (integer)"
+      denominator: "Unweighted count (integer)"
+      indicator: "Human-readable indicator name"
+      indicator_code: "Machine-readable indicator code: 'gini'"
+      numerator_description: "Description of what the numerator counts"
+      denominator_description: "Description of what the denominator counts"
+      denominator_code: "Short code for the denominator"
 
 functions:
   calc_wealth_dhs:

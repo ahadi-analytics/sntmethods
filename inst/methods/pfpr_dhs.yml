@@ -190,25 +190,35 @@ eligibility:
   - "Valid test result (not missing/refused/not tested): hml35 in {0,1} for RDT; hml32 in {0,1,6} for microscopy"
 
 output_format:
-  survey_weighted:
+  dhs_survey_output:
     description: >
-      Output of calc_pfpr_dhs() and calc_pfpr_dhs_core(). One row per cluster
-      (when gps_data is supplied) or per admin unit. Survey weights applied via
-      svydesign() / svyby(). Values are proportions rounded to 2 decimal places.
+      Returns a named list with one element per admin level: list(adm0, adm1, adm2, ...).
+      Each element is a long-format tibble with one row per indicator per geographic unit.
+      Values are proportions on the 0-1 scale rounded to 3 decimal places.
     columns:
-      cluster_id: "Cluster identifier (when GPS data provided) or admin grouping key"
-      dhs_pfpr_rdt: "Survey-weighted PfPR by RDT (proportion, 0-1)"
-      dhs_pfpr_rdt_low: "Lower bound of 95% confidence interval for RDT PfPR"
-      dhs_pfpr_rdt_upp: "Upper bound of 95% confidence interval for RDT PfPR"
-      dhs_pfpr_mic: "Survey-weighted PfPR by microscopy (proportion, 0-1)"
-      dhs_pfpr_mic_low: "Lower bound of 95% confidence interval for microscopy PfPR"
-      dhs_pfpr_mic_upp: "Upper bound of 95% confidence interval for microscopy PfPR"
-      dhs_n_tested_rdt: "Survey-weighted total number tested by RDT (integer)"
-      dhs_n_pos_rdt: "Survey-weighted number RDT-positive (integer)"
-      dhs_n_tested_mic: "Survey-weighted total number tested by microscopy (integer)"
-      dhs_n_pos_mic: "Survey-weighted number microscopy-positive (integer)"
-      lat: "Latitude of cluster centroid (when GPS data provided)"
-      lon: "Longitude of cluster centroid (when GPS data provided)"
+      survey_id: "DHS survey identifier"
+      iso3: "ISO3 country code"
+      iso2: "ISO2 country code"
+      survey_type: "Survey type (DHS, MIS, etc.)"
+      survey_year: "Survey year"
+      adm0: "Country name"
+      adm1: "First admin level (adm1 table and below)"
+      adm2: "Second admin level (adm2 table and below)"
+      type: "Estimate type: 'survey_weighted'"
+      geo_source: "Geographic data source (e.g., 'ge' for GPS/shapefile)"
+      point: "Survey-weighted PfPR proportion (0-1 scale, rounded to 3 dp)"
+      ci_l: "Lower 95% CI (clamped to [0,1])"
+      ci_u: "Upper 95% CI (clamped to [0,1])"
+      numerator: "Unweighted count of positive children (integer)"
+      denominator: "Unweighted count of tested children (integer)"
+      indicator: "Human-readable indicator name"
+      indicator_code: "Machine-readable indicator code"
+      numerator_description: "Description of what the numerator counts"
+      denominator_description: "Description of what the denominator counts"
+      denominator_code: "Short code for the denominator"
+    indicator_codes:
+      - "pfpr_rdt: PfPR by RDT"
+      - "pfpr_mic: PfPR by microscopy"
 
   mbg_cluster:
     description: >

@@ -148,7 +148,7 @@ globalVariables(
     "ci_l.sprayed",
     "ci_u.sprayed",
 
-    # Care-seeking behavior (WMR methodology)
+    # Care-seeking behavior (DHS methodology)
     "had_fever",
     "fever",
     "care_category",

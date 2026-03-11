@@ -198,7 +198,7 @@ test_that("prep_csb_mbg returns single tibble", {
 })
 
 
-# ---- Granular WMR-aligned indicators ----
+# ---- Granular Long-format indicators ----
 
 test_that("calc_csb_mbg computes public_nochw indicator", {
   kr <- .mock_kr_csb_mbg()

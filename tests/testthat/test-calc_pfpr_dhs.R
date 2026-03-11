@@ -1,5 +1,5 @@
 # ============================================================================
-# Tests for calc_pfpr_dhs() — WMR-format PfPR indicators
+# Tests for calc_pfpr_dhs() — long-format PfPR indicators
 # ============================================================================
 
 # --- Shared mock data -------------------------------------------------------
@@ -173,17 +173,17 @@ test_that("indicators parameter filters correctly", {
 })
 
 
-# --- Test: pfpr_wmr_dictionary() --------------------------------------------
+# --- Test: pfpr_dictionary() --------------------------------------------
 
-test_that("pfpr_wmr_dictionary returns correct structure", {
-  dict <- pfpr_wmr_dictionary()
+test_that("pfpr_dictionary returns correct structure", {
+  dict <- pfpr_dictionary()
 
   expect_s3_class(dict, "tbl_df")
   expect_true("indicator" %in% names(dict))
   expect_true("indicator_code" %in% names(dict))
   expect_true("numerator_description" %in% names(dict))
   expect_true("denominator_description" %in% names(dict))
-  expect_equal(nrow(dict), 2)
+  expect_equal(nrow(dict), 10)
 })
 
 

@@ -2,7 +2,7 @@
 #'
 #' Prepares cluster-level ACT (Artemisinin-based Combination
 #' Therapy) and antimalarial treatment data for MBG analysis.
-#' Uses a dictionary-driven approach matching the WMR indicator
+#' Uses a dictionary-driven approach matching the indicator
 #' codes from \code{\link{calc_act_dhs}}.
 #'
 #' @details
@@ -25,7 +25,7 @@
 #'   \code{"febrile_rdt_pos_act"} indicators (provides hml35).
 #' @param indicators Character vector of indicators to
 #'   calculate. See \code{.act_mbg_dictionary()} for the full
-#'   list of WMR-aligned indicator codes. Legacy names
+#'   list of standardized indicator codes. Legacy names
 #'   \code{"act_public"} and \code{"act_among_am"} are also
 #'   accepted. Special indicators:
 #'   \itemize{
@@ -418,7 +418,7 @@ calc_act_mbg <- function(
 
 #' ACT/Antimalarial MBG Indicator Dictionary
 #'
-#' Returns the full set of WMR-aligned indicator
+#' Returns the full set of standardized indicator
 #' specifications for cluster-level MBG output.
 #' Each entry defines the outcome variable, optional
 #' CSB filter column, and whether an antimalarial

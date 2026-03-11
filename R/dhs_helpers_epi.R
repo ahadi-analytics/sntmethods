@@ -12,6 +12,7 @@
   list(
     # Classic EPI vaccines (all DHS eras)
     bcg      = list(dhs_var = "h2",   fallback_var = NULL),
+    polio0   = list(dhs_var = "h0",   fallback_var = NULL),
     dpt1     = list(dhs_var = "h3",   fallback_var = "h51", fallback_source = "pentavalent"),
     dpt2     = list(dhs_var = "h4",   fallback_var = "h52", fallback_source = "pentavalent"),
     dpt3     = list(dhs_var = "h5",   fallback_var = "h53", fallback_source = "pentavalent"),
@@ -35,7 +36,9 @@
     rota3    = list(dhs_var = "h59",  fallback_var = NULL),
     ipv      = list(dhs_var = "h60",  fallback_var = NULL),
     hepb0    = list(dhs_var = "h50",  fallback_var = NULL),
-    yellowfever = list(dhs_var = "h61", fallback_var = NULL)
+    yellowfever = list(dhs_var = "h61", fallback_var = NULL),
+    # Aggregated indicators
+    any      = list(dhs_var = "h10",  fallback_var = NULL)
   )
 }
 
@@ -75,6 +78,7 @@
   vaccine_mapping <- list(
     bcg = survey_vars$bcg, dpt1 = survey_vars$dpt1,
     dpt2 = survey_vars$dpt2, dpt3 = survey_vars$dpt3,
+    polio0 = survey_vars$polio0,
     polio1 = survey_vars$polio1, polio2 = survey_vars$polio2,
     polio3 = survey_vars$polio3,
     measles1 = survey_vars$measles1, measles2 = survey_vars$measles2,
@@ -87,7 +91,8 @@
     rota1 = survey_vars$rota1, rota2 = survey_vars$rota2,
     rota3 = survey_vars$rota3,
     ipv = survey_vars$ipv, hepb0 = survey_vars$hepb0,
-    yellowfever = survey_vars$yellowfever
+    yellowfever = survey_vars$yellowfever,
+    any = survey_vars$any
   )
 
   # Apply DPT -> Pentavalent fallback when primary variable is missing
@@ -164,11 +169,28 @@
   )
 
   # Add binary vaccination columns for each available vaccine
+
+  # Vaccines that need special coding (not the standard 1/2/3 pattern)
+  special_vaccines <- c("any")
+
   # DHS: 1 = vaccination card, 2 = reported by mother, 3 = both
   for (vax_name in names(available_vaccines)[available_vaccines]) {
+    if (vax_name %in% special_vaccines) next
     var_name <- vaccine_mapping[[vax_name]]
     col_name <- paste0("vax_", vax_name)
     kr[[col_name]] <- as.integer(!is.na(kr[[var_name]]) & kr[[var_name]] %in% c(1, 2, 3))
+  }
+
+  # Special coding: "any" — h10 >= 1 means child received at least one vaccination
+  if ("any" %in% names(available_vaccines)[available_vaccines]) {
+    any_var <- vaccine_mapping[["any"]]
+    kr$vax_any <- as.integer(!is.na(kr[[any_var]]) & kr[[any_var]] >= 1)
+  }
+
+  # Derived indicator: "never_vaccinated" — inverse of "any" (h10 == 0)
+  if ("any" %in% names(available_vaccines)[available_vaccines]) {
+    any_var <- vaccine_mapping[["any"]]
+    kr$vax_never_vaccinated <- as.integer(!is.na(kr[[any_var]]) & kr[[any_var]] == 0)
   }
 
   # Add fully_vaccinated if all required vaccines are present

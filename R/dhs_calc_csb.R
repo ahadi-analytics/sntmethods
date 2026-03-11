@@ -1,7 +1,7 @@
-#' Calculate Care-Seeking Behavior from DHS Data (WMR Methodology)
+#' Calculate Care-Seeking Behavior from DHS Data ( Methodology)
 #'
 #' Estimates care-seeking behavior for febrile children under 5 using
-#' the WHO World Malaria Report (WMR) methodology with overlapping indicators.
+#' the WHO World Malaria Report methodology with overlapping indicators.
 #'
 #' @details
 #' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/csb_dhs.yml}
@@ -15,7 +15,7 @@
 #'     \item `stratum`: Stratum variable (default: "v022")
 #'     \item `age`: Child's age in months (default: "hw1")
 #'     \item `fever`: Had fever in last 2 weeks (default: "h22")
-#'     \item `alive`: Child survival status (default: "b5"). NOTE: WMR
+#'     \item `alive`: Child survival status (default: "b5"). NOTE: 
 #'       methodology assumes filtering to living children (b5 == 1) is done
 #'       upstream. This function does NOT filter by alive status.
 #'   }
@@ -26,7 +26,7 @@
 #'     \item `csb`: Category - one of: "public", "chw", "private_formal",
 #'       "private_informal", "pharmacy"
 #'   }
-#'   If NULL, uses default WMR classification. See Details for category
+#'   If NULL, uses default classification. See Details for category
 #'   meanings.
 #' @param source_config **Deprecated**. Use `csb_classification` instead.
 #'   Legacy parameter for backwards compatibility. Named list with:
@@ -52,10 +52,10 @@
 #'   confidence intervals and sample sizes.
 #'
 #' @details
-#' This function implements the WHO World Malaria Report (WMR) methodology
+#' This function implements the WHO World Malaria Report methodology
 #' for care-seeking behavior analysis.
 #'
-#' \strong{WMR 5-Category Classification:}
+#' \strong{5-Category Classification:}
 #' \itemize{
 #'   \item `public`: Government health facilities (hospitals, health
 #'     centers, posts)
@@ -332,7 +332,7 @@ calc_csb_dhs_core <- function(
 
   options(survey.lonely.psu = "adjust")
 
-  dict <- .csb_wmr_conditions()
+  dict <- .csb_conditions()
 
   meta_cols <- tibble::tibble(
     survey_id    = survey_meta$survey_id,
@@ -441,7 +441,7 @@ calc_csb_dhs_core <- function(
   out
 }
 
-#' Default WMR CSB classification
+#' Default CSB classification
 #'
 #' Returns the default WHO World Malaria Report classification mapping
 #' h32 variables to CSB categories.
@@ -507,16 +507,16 @@ calc_csb_dhs_core <- function(
   result
 }
 
-#' Internal: CSB WMR indicator conditions (with filter expressions)
+#' Internal: CSB indicator conditions (with filter expressions)
 #'
 #' Returns a list of indicator specifications following the same pattern
-#' as `.act_wmr_conditions()`. Each condition specifies the outcome variable,
+#' as `.act_conditions()`. Each condition specifies the outcome variable,
 #' indicator metadata, and description.
 #'
 #' @return List of named lists, each with: indicator, indicator_code,
 #'   indicator_title, outcome_var, num_desc, denom_desc, denom_code.
 #' @noRd
-.csb_wmr_conditions <- function() {
+.csb_conditions <- function() {
   denom <- "Under 5 with fever"
   list(
     list(
@@ -622,9 +622,9 @@ calc_csb_dhs_core <- function(
 }
 
 
-#' CSB WMR Indicator Dictionary
+#' CSB Indicator Dictionary
 #'
-#' Returns the full dictionary of WMR CSB indicators with metadata.
+#' Returns the full dictionary of CSB indicators with metadata.
 #' Each indicator measures the proportion of febrile U5 children seeking
 #' care from a specific source type.
 #'
@@ -632,11 +632,11 @@ calc_csb_dhs_core <- function(
 #'   numerator_description, denominator_description, denominator_code.
 #'
 #' @examples
-#' csb_wmr_dictionary()
+#' csb_dictionary()
 #'
 #' @export
-csb_wmr_dictionary <- function() {
-  conds <- .csb_wmr_conditions()
+csb_dictionary <- function() {
+  conds <- .csb_conditions()
   tibble::tibble(
     indicator               = vapply(conds, `[[`, character(1), "indicator"),
     indicator_code          = vapply(conds, `[[`, character(1), "indicator_code"),
@@ -648,9 +648,9 @@ csb_wmr_dictionary <- function() {
 }
 
 
-#' Compute a single CSB WMR indicator (national + optional regional)
+#' Compute a single CSB indicator (national + optional regional)
 #'
-#' Same pattern as `.compute_wmr_indicator()` from ACT, but the outcome
+#' Same pattern as `.compute_dhs_indicator()` from ACT, but the outcome
 #' variable is specified by name instead of always being `has_act`.
 #'
 #' @param data Prepared febrile U5 dataset with CSB columns.
@@ -690,7 +690,7 @@ csb_wmr_dictionary <- function() {
   n_denom <- nrow(filtered)
   if (n_denom == 0) return(tibble::tibble())
 
-  # Weighted counts (matches WMR format: numerator/denominator ≈ point)
+  # Weighted counts (matches format: numerator/denominator ≈ point)
   n_denom_w <- round(sum(filtered$survey_weight, na.rm = TRUE))
   n_numer_w <- round(sum(
     filtered$survey_weight * (filtered$has_act == 1), na.rm = TRUE
@@ -807,7 +807,7 @@ csb_wmr_dictionary <- function() {
 }
 
 
-#' Calculate Care-Seeking Behavior from DHS Data (WMR Methodology)
+#' Calculate Care-Seeking Behavior from DHS Data ( Methodology)
 #'
 #' Main function for calculating care-seeking behavior (CSB)
 #' from DHS children's recode data following the WHO World Malaria Report
@@ -828,7 +828,7 @@ csb_wmr_dictionary <- function() {
 #'   }
 #'
 #' @details
-#' See calc_csb_dhs_core() for full details on the WMR methodology, including:
+#' See calc_csb_dhs_core() for full details on the DHS methodology, including:
 #' \itemize{
 #'   \item The 5-category classification system
 #'   \item How derived indicators are calculated
@@ -836,7 +836,7 @@ csb_wmr_dictionary <- function() {
 #' }
 #'
 #' @examples
-#' # Example with default WMR classification
+#' # Example with default classification
 #' # csb_results <- calc_csb_dhs(
 #' #   dhs_kr = kr_data,
 #' #   gps_data = gps_data,

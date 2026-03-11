@@ -197,29 +197,43 @@ methodology:
     present the design is constructed without strata.
 
 output_format:
-  description: >
-    calc_csb_dhs_core() returns a tibble with one row per grouping unit
-    (region, admin level, or a single national row). All proportion columns
-    are on the 0-1 scale (not percentages). Count columns are unweighted
-    integers.
-  columns:
-    region_var_or_admin: "Grouping variable (region or admin level column)"
-    dhs_n_fever: "Unweighted count of febrile U5 children (denominator)"
-    dhs_csb_any: "Proportion who sought care from any source"
-    dhs_csb_any_low: "Lower 95% CI for dhs_csb_any"
-    dhs_csb_any_upp: "Upper 95% CI for dhs_csb_any"
-    dhs_csb_public: "Proportion seeking care at public sector (incl. CHW)"
-    dhs_csb_public_low: "Lower 95% CI for dhs_csb_public"
-    dhs_csb_public_upp: "Upper 95% CI for dhs_csb_public"
-    dhs_csb_private: "Proportion seeking care at private sector (formal + informal + pharmacy)"
-    dhs_csb_private_low: "Lower 95% CI for dhs_csb_private"
-    dhs_csb_private_upp: "Upper 95% CI for dhs_csb_private"
-    dhs_csb_trained: "Proportion seeking care from trained provider (public + private_formal + pharmacy)"
-    dhs_csb_trained_low: "Lower 95% CI for dhs_csb_trained"
-    dhs_csb_trained_upp: "Upper 95% CI for dhs_csb_trained"
-    dhs_csb_none: "Proportion with no care-seeking (complement of dhs_csb_any)"
-    dhs_csb_none_low: "Lower 95% CI for dhs_csb_none"
-    dhs_csb_none_upp: "Upper 95% CI for dhs_csb_none"
+  dhs_survey_output:
+    description: >
+      Returns a named list with one element per admin level: list(adm0, adm1, ...).
+      Each element is a long-format tibble with one row per indicator per geographic unit.
+      All proportion values are on the 0-1 scale (not percentages).
+    columns:
+      survey_id: "DHS survey identifier"
+      iso3: "ISO3 country code"
+      iso2: "ISO2 country code"
+      survey_type: "Survey type (DHS, MIS, etc.)"
+      survey_year: "Survey year"
+      adm0: "Country name"
+      adm1: "First admin level (adm1 table and below)"
+      type: "Estimate type: 'survey_weighted'"
+      geo_source: "Geographic data source (e.g., 'ge' for GPS/shapefile)"
+      point: "Survey-weighted proportion (0-1 scale, rounded to 3 dp)"
+      ci_l: "Lower 95% CI (clamped to [0,1])"
+      ci_u: "Upper 95% CI (clamped to [0,1])"
+      numerator: "Unweighted count (integer)"
+      denominator: "Unweighted count (integer)"
+      indicator: "Human-readable indicator name"
+      indicator_code: "Machine-readable indicator code"
+      numerator_description: "Description of what the numerator counts"
+      denominator_description: "Description of what the denominator counts"
+      denominator_code: "Short code for the denominator"
+    indicator_codes:
+      - "csb_any: Sought care from any source"
+      - "csb_none: No care sought"
+      - "csb_public: Sought public sector care (incl. CHW)"
+      - "csb_pub_nochw: Sought public sector care (excl. CHW)"
+      - "csb_chw: Sought care from CHW"
+      - "csb_private: Sought private sector care (formal + informal + pharmacy)"
+      - "csb_priv_formal: Sought care at private formal facility"
+      - "csb_pharmacy: Sought care at pharmacy/drug shop"
+      - "csb_priv_informal: Sought care from informal provider"
+      - "csb_priv_form_pha: Sought care at private formal or pharmacy"
+      - "csb_trained: Sought care from trained provider"
 
 status: "implemented"
 note: >

@@ -120,33 +120,46 @@ methodology:
     m14_1 which both refer to the most recent birth.
 
 output_format:
-  mbg_cluster_output:
-    cluster_id: "Cluster identifier"
-    indicator: "Number of women meeting threshold"
-    samplesize: "Total women with recent births"
-    x: "Longitude"
-    y: "Latitude"
-
   dhs_survey_output:
-    grouping_note: >
-      Grouping column is the region variable (v024 by default, or the
-      region_var argument). When no region variable is available, a single
-      row with level = "National" is returned.
+    description: >
+      Returns a named list with one element per admin level: list(adm0, adm1, ...).
+      Each element is a long-format tibble with one row per indicator per geographic unit.
     columns:
-      dhs_anc_1plus: "Proportion with 1+ ANC visits (survey-weighted)"
-      dhs_anc_1plus_low: "Lower 95% CI for ANC 1+ (clamped to 0)"
-      dhs_anc_1plus_upp: "Upper 95% CI for ANC 1+ (clamped to 1)"
-      dhs_anc_3plus: "Proportion with 3+ ANC visits (survey-weighted)"
-      dhs_anc_3plus_low: "Lower 95% CI for ANC 3+ (clamped to 0)"
-      dhs_anc_3plus_upp: "Upper 95% CI for ANC 3+ (clamped to 1)"
-      dhs_anc_4plus: "Proportion with 4+ ANC visits (survey-weighted)"
-      dhs_anc_4plus_low: "Lower 95% CI for ANC 4+ (clamped to 0)"
-      dhs_anc_4plus_upp: "Upper 95% CI for ANC 4+ (clamped to 1)"
-      dhs_anc_8plus: "Proportion with 8+ ANC visits (survey-weighted)"
-      dhs_anc_8plus_low: "Lower 95% CI for ANC 8+ (clamped to 0)"
-      dhs_anc_8plus_upp: "Upper 95% CI for ANC 8+ (clamped to 1)"
-      dhs_n_recent_births: "Unweighted count of eligible women (denominator)"
-    monotonicity: "dhs_anc_1plus >= dhs_anc_3plus >= dhs_anc_4plus >= dhs_anc_8plus"
+      survey_id: "DHS survey identifier"
+      iso3: "ISO3 country code"
+      iso2: "ISO2 country code"
+      survey_type: "Survey type (DHS, MIS, etc.)"
+      survey_year: "Survey year"
+      adm0: "Country name"
+      adm1: "First admin level (adm1 table and below)"
+      type: "Estimate type: 'survey_weighted'"
+      geo_source: "Geographic data source (e.g., 'ge' for GPS/shapefile)"
+      point: "Survey-weighted proportion (0-1 scale, rounded to 3 dp)"
+      ci_l: "Lower 95% CI (clamped to [0,1])"
+      ci_u: "Upper 95% CI (clamped to [0,1])"
+      numerator: "Unweighted count (integer)"
+      denominator: "Unweighted count (integer)"
+      indicator: "Human-readable indicator name"
+      indicator_code: "Machine-readable indicator code"
+      numerator_description: "Description of what the numerator counts"
+      denominator_description: "Description of what the denominator counts"
+      denominator_code: "Short code for the denominator"
+    indicator_codes:
+      - "anc_1plus: ANC 1+ visits"
+      - "anc_2plus: ANC 2+ visits"
+      - "anc_3plus: ANC 3+ visits"
+      - "anc_4plus: ANC 4+ visits"
+      - "anc_8plus: ANC 8+ visits"
+    monotonicity: "anc_1plus >= anc_2plus >= anc_3plus >= anc_4plus >= anc_8plus"
+
+  mbg_cluster_output:
+    description: "Output of calc_anc_mbg() — unweighted cluster-level counts"
+    columns:
+      cluster_id: "Cluster identifier"
+      indicator: "Number of women meeting threshold"
+      samplesize: "Total women with recent births"
+      x: "Longitude"
+      y: "Latitude"
 
 validation:
   - "Birth must be within analysis window"

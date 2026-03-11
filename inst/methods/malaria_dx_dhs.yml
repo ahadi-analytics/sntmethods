@@ -90,6 +90,32 @@ methodology:
     which produces identical point estimates with slightly different
     CI computation.
 
+output_format:
+  dhs_survey_output:
+    description: >
+      Returns a named list with one element per admin level: list(adm0, adm1, ...).
+      Each element is a long-format tibble with one row per indicator per geographic unit.
+    columns:
+      survey_id: "DHS survey identifier"
+      iso3: "ISO3 country code"
+      iso2: "ISO2 country code"
+      survey_type: "Survey type (DHS, MIS, etc.)"
+      survey_year: "Survey year"
+      adm0: "Country name"
+      adm1: "First admin level (adm1 table and below)"
+      type: "Estimate type: 'survey_weighted'"
+      geo_source: "Geographic data source (e.g., 'ge' for GPS/shapefile)"
+      point: "Survey-weighted proportion (0-1 scale, rounded to 3 dp)"
+      ci_l: "Lower 95% CI (clamped to [0,1])"
+      ci_u: "Upper 95% CI (clamped to [0,1])"
+      numerator: "Unweighted count (integer)"
+      denominator: "Unweighted count (integer)"
+      indicator: "Human-readable indicator name"
+      indicator_code: "Machine-readable indicator code: 'malaria_dx'"
+      numerator_description: "Description of what the numerator counts"
+      denominator_description: "Description of what the denominator counts"
+      denominator_code: "Short code for the denominator"
+
 status: "implemented"
 note: >
   Implemented as calc_malaria_dx_dhs_core() and calc_malaria_dx_dhs().

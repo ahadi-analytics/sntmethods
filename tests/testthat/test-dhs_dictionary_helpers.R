@@ -11,7 +11,7 @@ test_that(".enrich_dhs_dictionary overrides label_en and notes", {
 
   labels <- tibble::tribble(
     ~variable, ~label_en, ~label_fr, ~dhs_variable, ~notes,
-    "dhs_fever", "Fever prevalence", "Prevalence de la fievre", "h22", "Step 0 of WMR cascade",
+    "dhs_fever", "Fever prevalence", "Prevalence de la fievre", "h22", "Step 0 of case management cascade",
     "dhs_fever_low", "Fever - lower 95% CI", "Fievre - IC inferieur", "h22", "Survey-weighted 95% CI"
   )
 
@@ -30,7 +30,7 @@ test_that(".enrich_dhs_dictionary overrides label_en and notes", {
   expect_true(is.na(result$label_fr[result$variable == "v024"]))
 
   # notes overridden where defined
-  expect_equal(result$notes[result$variable == "dhs_fever"], "Step 0 of WMR cascade")
+  expect_equal(result$notes[result$variable == "dhs_fever"], "Step 0 of case management cascade")
   expect_equal(result$notes[result$variable == "dhs_fever_low"], "Survey-weighted 95% CI")
   # notes preserved for unmatched rows
   expect_equal(result$notes[result$variable == "v024"], "auto_note3")
