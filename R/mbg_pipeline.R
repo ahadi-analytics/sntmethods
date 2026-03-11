@@ -1425,8 +1425,14 @@ run_mbg_indicator_pipeline <- function(
     labels <- list(numerator = "n_deaths", denominator = "n_exposed")
   } else if (grepl("^anc", ind_name)) {
     labels <- list(numerator = "n_with_visits", denominator = "n_women")
+  } else if (grepl("^febrile_rdt_pos", ind_name)) {
+    labels <- list(numerator = "n_positive", denominator = "n_tested")
+  } else if (grepl("^mal_dx", ind_name)) {
+    labels <- list(numerator = "n_tested", denominator = "n_febrile")
   } else if (grepl("^act", ind_name)) {
     labels <- list(numerator = "n_received_act", denominator = "n_febrile")
+  } else if (grepl("^antimal", ind_name)) {
+    labels <- list(numerator = "n_antimalarial", denominator = "n_febrile")
   } else if (grepl("^csb_", ind_name)) {
     labels <- list(numerator = "n_sought_care", denominator = "n_febrile")
   } else if (grepl("^anemia", ind_name)) {
@@ -1441,8 +1447,6 @@ run_mbg_indicator_pipeline <- function(
     labels <- list(numerator = "n_received_smc", denominator = "n_children")
   } else if (grepl("^fever", ind_name)) {
     labels <- list(numerator = "n_fever", denominator = "n_children")
-  } else if (grepl("^antimalarial", ind_name)) {
-    labels <- list(numerator = "n_antimalarial", denominator = "n_febrile")
   }
 
   labels
@@ -2617,6 +2621,8 @@ run_mbg_indicator_pipeline <- function(
   proportion_patterns <- c(
     "^pfpr_", "^itn_", "^irs_", "^anc_", "^csb_", "^anemia",
     "^severe_anemia", "^iptp_", "^epi_", "^u5mr", "^smc_", "^act_", "^eff_cm",
+    "^antimal_", "^mal_dx_", "^febrile_rdt_pos", "^malaria_dx", "^fever",
+    "^antimalarial",
     "access", "use", "ownership", "coverage", "proportion", "prop_",
     "_low$", "_upp$", "_se$", "^ci_l", "^ci_u",
     "^mean$", "^lower$", "^upper$", "_raw$",
