@@ -42,23 +42,25 @@
   # fall back to h37* series (older DHS surveys use h37a-h for drug-specific treatment).
   # NOTE: ml1 is NOT a safe fallback — in some surveys (e.g. BFA 2021) ml1 = "Times took
   #       Fansidar during pregnancy" (IPTp), not child fever treatment.
-  ml13_vars <- grep("^ml13[a-z]*$", names(dhs_kr), value = TRUE)
-  h37_vars <- grep("^h37[a-h]$", names(dhs_kr), value = TRUE)
+  ml13_vars <- grep("^ml13[a-z]+$", names(dhs_kr), value = TRUE)
+  h37_vars <- grep("^h37[a-z]+$", names(dhs_kr), value = TRUE)
   use_h37_fallback <- FALSE
 
   if (length(ml13_vars) > 0) {
-    # Check if ml13 series has any positive values
-    ml13_has_data <- any(
-      sapply(ml13_vars, function(v) any(dhs_kr[[v]] == 1, na.rm = TRUE))
-    )
+    # Check if ml13 series has any positive values (zap labels for safe comparison)
+    ml13_has_data <- any(sapply(ml13_vars, function(v) {
+      vals <- as.vector(haven::zap_labels(dhs_kr[[v]]))
+      any(vals == 1, na.rm = TRUE)
+    }))
     if (ml13_has_data) {
       cli::cli_alert_info(
         "Detected {length(ml13_vars)} ml13 antimalarial variables: {paste(ml13_vars, collapse = ', ')}"
       )
     } else if (length(h37_vars) > 0) {
-      h37_has_data <- any(
-        sapply(h37_vars, function(v) any(dhs_kr[[v]] == 1, na.rm = TRUE))
-      )
+      h37_has_data <- any(sapply(h37_vars, function(v) {
+        vals <- as.vector(haven::zap_labels(dhs_kr[[v]]))
+        any(vals == 1, na.rm = TRUE)
+      }))
       if (h37_has_data) {
         cli::cli_alert_info(
           "ml13* variables have no positive values; using h37* series which has data: {paste(h37_vars, collapse = ', ')}"

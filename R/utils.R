@@ -564,6 +564,66 @@ dhs_read <- function(
   cli::cli_inform("Path: {short_path}")
 
   # -------------------------------------------
+  # Direct read when filters identify a single survey
+  # -------------------------------------------
+  # open_dataset() across multiple surveys standardises haven labels and
+  # drops variables that don't exist in all surveys. Bypass it when we
+  # can identify a single parquet file to preserve labels + all columns.
+  parquet_file <- NULL
+  if (!is.null(country_code) && length(country_code) == 1 &&
+      !is.null(survey_year) && length(survey_year) == 1) {
+
+    year_dir <- fs::path(ft_path,
+      paste0("country_code=", country_code),
+      paste0("survey_year=", as.integer(survey_year)))
+
+    if (!is.null(survey_id) && length(survey_id) == 1) {
+      # Exact survey_id provided
+      target_dir <- fs::path(year_dir, paste0("survey_id=", survey_id))
+    } else if (fs::dir_exists(year_dir)) {
+      # No survey_id — auto-discover if there's exactly one survey partition
+      survey_dirs <- fs::dir_ls(year_dir, type = "directory")
+      target_dir <- if (length(survey_dirs) == 1) survey_dirs[1] else NULL
+    } else {
+      target_dir <- NULL
+    }
+
+    if (!is.null(target_dir) && fs::dir_exists(target_dir)) {
+      pq_files <- fs::dir_ls(target_dir, glob = "*.parquet")
+      if (length(pq_files) >= 1) {
+        parquet_file <- pq_files[1]
+      }
+    }
+  }
+
+  if (!is.null(parquet_file)) {
+    cli::cli_alert_info(
+      "Direct parquet read for single survey (preserving labels + all variables)"
+    )
+    out <- arrow::read_parquet(parquet_file)
+
+    # Apply survey_type filter if needed (not a partition column)
+    if (!is.null(survey_type) && "survey_type" %in% names(out)) {
+      survey_type_val <- as.character(survey_type)
+      out <- out |> dplyr::filter(.data$survey_type %in% survey_type_val)
+    }
+
+    suppressWarnings(
+      out <- janitor::remove_empty(out, which = c("rows", "cols"))
+    )
+
+    n <- nrow(out)
+    cli::cli_inform("Rows loaded: {format(n, big.mark = ',')}")
+    if (n == 0) {
+      cli::cli_alert_warning("Filter returned zero rows")
+    } else {
+      cli::cli_alert_success("Data loaded successfully")
+    }
+
+    return(out)
+  }
+
+  # -------------------------------------------
   # Open dataset only for specific file_type
   # -------------------------------------------
   cli::cli_inform("Opening Arrow dataset...")

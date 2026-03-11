@@ -224,6 +224,58 @@ test_that("calc_case_management_dhs handles h37e fallback", {
   expect_true(result$dhs_n_antimalarial > 0)
 })
 
+test_that("calc_case_management_dhs handles ml13 placeholders with h37 real data (haven_labelled)", {
+  skip_if_not_installed("survey")
+  skip_if_not_installed("haven")
+
+  set.seed(42)
+  n <- 200
+
+  # Simulate Togo MIS 2017 scenario: ml13 vars exist as placeholders (all 0)
+  # while h37 series has actual data. Variables are haven_labelled.
+  kr_data <- data.frame(
+    v021 = rep(1:20, each = 10),
+    v005 = rep(1000000, n),
+    v022 = rep(1:4, each = 50),
+    hw1 = sample(0:59, n, replace = TRUE),
+    h22 = sample(c(0, 1), n, replace = TRUE, prob = c(0.6, 0.4)),
+    b5 = rep(1, n),
+    stringsAsFactors = FALSE
+  )
+
+  # ml13 series: all zeros (placeholders) — wrapped in haven_labelled
+  kr_data$ml13a <- haven::labelled(
+    rep(0, n), labels = c("No" = 0, "Yes" = 1, "DK" = 8)
+  )
+  kr_data$ml13e <- haven::labelled(
+    rep(0, n), labels = c("No" = 0, "Yes" = 1, "DK" = 8)
+  )
+
+  # h37 series: real data among febrile children — wrapped in haven_labelled
+  febrile <- kr_data$h22 == 1
+  h37a_vals <- rep(NA_real_, n)
+  h37e_vals <- rep(NA_real_, n)
+  h37a_vals[febrile] <- sample(c(0, 1), sum(febrile), replace = TRUE, prob = c(0.7, 0.3))
+  h37e_vals[febrile] <- sample(c(0, 1), sum(febrile), replace = TRUE, prob = c(0.6, 0.4))
+  kr_data$h37a <- haven::labelled(h37a_vals, labels = c("No" = 0, "Yes" = 1))
+  kr_data$h37e <- haven::labelled(h37e_vals, labels = c("No" = 0, "Yes" = 1))
+
+  # h32 series for CSB
+  h32a_vals <- rep(NA_real_, n)
+  h32a_vals[febrile] <- sample(c(0, 1), sum(febrile), replace = TRUE)
+  kr_data$h32a <- haven::labelled(h32a_vals, labels = c("No" = 0, "Yes" = 1))
+
+  result <- calc_case_management_dhs(kr_data)
+
+  expect_s3_class(result, "tbl_df")
+  # Key assertion: ACT should be non-zero because h37e has real data
+  expect_true(!is.na(result$dhs_eff_cm_any))
+  expect_true(result$dhs_eff_cm_any > 0,
+    label = "eff_cm_any should be > 0 when h37e has data (ml13 placeholders)")
+  expect_true(result$dhs_n_antimalarial > 0,
+    label = "n_antimalarial should be > 0 from h37 series")
+})
+
 test_that("calc_case_management_dhs errors with no antimalarial data", {
   skip_if_not_installed("survey")
 
@@ -248,4 +300,66 @@ test_that("calc_case_management_dhs errors with no antimalarial data", {
     calc_case_management_dhs(kr_data),
     "No antimalarial variables found"
   )
+})
+
+
+test_that("calc_case_management_dhs uses composite ACT from multiple labeled variables", {
+  skip_if_not_installed("survey")
+  skip_if_not_installed("haven")
+
+  set.seed(42)
+  n <- 300
+
+  kr_data <- data.frame(
+    v021 = rep(1:30, each = 10),
+    v005 = rep(1000000, n),
+    v022 = rep(1:6, each = 50),
+    hw1 = sample(0:59, n, replace = TRUE),
+    h22 = sample(c(0, 1), n, replace = TRUE, prob = c(0.5, 0.5)),
+    b5 = rep(1, n),
+    stringsAsFactors = FALSE
+  )
+
+  febrile <- kr_data$h22 == 1
+  n_febrile <- sum(febrile)
+
+  # h32a: care-seeking at public facility
+  h32a_vals <- rep(NA_real_, n)
+  h32a_vals[febrile] <- sample(c(0, 1), n_febrile, replace = TRUE, prob = c(0.3, 0.7))
+  kr_data$h32a <- haven::labelled(
+    h32a_vals, labels = c("No" = 0, "Yes" = 1),
+    label = "Sought advice: public hospital"
+  )
+
+  # ml13a: SP/Fansidar (antimalarial, not ACT)
+  ml13a_vals <- rep(NA_real_, n)
+  ml13a_vals[febrile] <- sample(c(0, 1), n_febrile, replace = TRUE, prob = c(0.7, 0.3))
+  kr_data$ml13a <- haven::labelled(
+    ml13a_vals, labels = c("No" = 0, "Yes" = 1),
+    label = "given antimalarial drugs: sp/fansidar"
+  )
+
+  # ml13e: DHA-piperaquine (ACT, few cases ~5%)
+  ml13e_vals <- rep(NA_real_, n)
+  ml13e_vals[febrile] <- sample(c(0, 1), n_febrile, replace = TRUE, prob = c(0.95, 0.05))
+  kr_data$ml13e <- haven::labelled(
+    ml13e_vals, labels = c("No" = 0, "Yes" = 1),
+    label = "Dihydroartemisinin-piperaquine taken for fever"
+  )
+
+  # ml13f: artemether-lumefantrine (ACT, many cases ~60%)
+  ml13f_vals <- rep(NA_real_, n)
+  ml13f_vals[febrile] <- sample(c(0, 1), n_febrile, replace = TRUE, prob = c(0.4, 0.6))
+  kr_data$ml13f <- haven::labelled(
+    ml13f_vals, labels = c("No" = 0, "Yes" = 1),
+    label = "Artemether-lumefantrine taken for fever"
+  )
+
+  result <- calc_case_management_dhs(kr_data)
+
+  expect_s3_class(result, "tbl_df")
+
+  # eff_cm_any should be non-zero and reflect composite ACT
+  expect_true(result$dhs_eff_cm_any > 0,
+    label = "eff_cm_any should use composite ACT (ml13e + ml13f)")
 })

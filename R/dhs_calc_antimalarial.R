@@ -94,9 +94,9 @@ calc_antimalarial_dhs_core <- function(
     ))
   }
 
-  # Check for antimalarial variables (ml13* preferred, h37a-h fallback for older surveys)
-  ml13_vars <- grep("^ml13[a-z]*$", names(dhs_kr), value = TRUE)
-  h37_vars  <- grep("^h37[a-h]$", names(dhs_kr), value = TRUE)
+  # Check for antimalarial variables (ml13 preferred, h37 fallback for older surveys)
+  ml13_vars <- grep("^ml13[a-z]+$", names(dhs_kr), value = TRUE)
+  h37_vars  <- grep("^h37[a-z]+$", names(dhs_kr), value = TRUE)
   if (length(ml13_vars) == 0 && length(h37_vars) == 0) {
     cli::cli_abort(c(
       "No antimalarial treatment variables found in data.",
@@ -469,9 +469,9 @@ calc_antimalarial_dhs <- function(
   metadata$cascade_step <- 3L
   metadata$processed_date <- Sys.Date()
 
-  # Detect antimalarial variables (ml13* preferred, h37a-h fallback)
-  ml13_vars <- grep("^ml13[a-z]*$", names(dhs_kr), value = TRUE)
-  h37_vars  <- grep("^h37[a-h]$", names(dhs_kr), value = TRUE)
+  # Detect antimalarial variables (ml13 preferred, h37 fallback)
+  ml13_vars <- grep("^ml13[a-z]+$", names(dhs_kr), value = TRUE)
+  h37_vars  <- grep("^h37[a-z]+$", names(dhs_kr), value = TRUE)
   if (length(ml13_vars) > 0) {
     metadata$antimalarial_vars_detected <- ml13_vars
     metadata$antimalarial_series <- "ml13"

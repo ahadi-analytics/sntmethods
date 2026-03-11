@@ -48,12 +48,15 @@ test_that("calc_act_dhs returns named list with adm0 tab from h37e fallback", {
   expect_s3_class(adm0, "tbl_df")
 
   # Expected columns in adm0 tab
-  expect_true(all(c("survey_id", "iso3", "iso2", "survey_type", "survey_year",
-                     "adm0", "type", "geo_source",
-                     "point", "ci_l", "ci_u", "counts", "denominator",
-                     "indicator", "indicator_code",
-                     "numerator_description",
-                     "denominator_description") %in% names(adm0)))
+  expected_cols <- c(
+    "survey_id", "iso3", "iso2", "survey_type",
+    "survey_year", "adm0", "type", "geo_source",
+    "point", "ci_l", "ci_u", "counts", "denominator",
+    "indicator", "indicator_code",
+    "numerator_description",
+    "denominator_description", "denominator_code"
+  )
+  expect_true(all(expected_cols %in% names(adm0)))
 
   # type column should always be survey_weighted
   expect_true(all(adm0$type == "survey_weighted"))
@@ -403,8 +406,12 @@ test_that("act_wmr_dictionary returns all 10 indicators", {
   dict <- act_wmr_dictionary()
   expect_s3_class(dict, "tbl_df")
   expect_equal(nrow(dict), 10)
-  expect_true(all(c("indicator", "indicator_code", "numerator_description",
-                     "denominator_description") %in% names(dict)))
+  expect_true(all(
+    c("indicator", "indicator_code",
+      "numerator_description",
+      "denominator_description",
+      "denominator_code") %in% names(dict)
+  ))
 })
 
 

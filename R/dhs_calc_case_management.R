@@ -116,43 +116,68 @@ calc_case_management_dhs <- function(
     include_survey_vars = TRUE
   )
 
+  # Zap labels on the raw dataset for safe comparisons
+  dhs_kr_zapped <- dhs_kr |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
+
   # Build row index matching .prepare_csb_data() filtering (fever + age + alive)
   has_alive_var <- !is.null(survey_vars$alive) &&
-    survey_vars$alive %in% names(dhs_kr)
+    survey_vars$alive %in% names(dhs_kr_zapped)
 
-  febrile_condition <- dhs_kr[[survey_vars$fever]] == 1 &
-    dhs_kr[[survey_vars$age]] >= 0 &
-    dhs_kr[[survey_vars$age]] <= 59
+  febrile_condition <- dhs_kr_zapped[[survey_vars$fever]] == 1 &
+    dhs_kr_zapped[[survey_vars$age]] >= 0 &
+    dhs_kr_zapped[[survey_vars$age]] <= 59
 
   if (has_alive_var) {
     febrile_condition <- febrile_condition &
-      dhs_kr[[survey_vars$alive]] == 1
+      dhs_kr_zapped[[survey_vars$alive]] == 1
   }
 
   febrile_idx <- which(febrile_condition)
 
   # Preserve region_var from original data
   if (!is.null(region_var)) {
-    kr_fever[[region_var]] <- dhs_kr[[region_var]][febrile_idx]
+    kr_fever[[region_var]] <- dhs_kr_zapped[[region_var]][febrile_idx]
   }
 
   # ---- 3. Add antimalarial variable ----
 
-  # Detect ml13 series or h37 fallback (check for positive values)
-  ml13_vars <- grep("^ml13[a-z]+$", names(dhs_kr), value = TRUE)
-  h37_vars <- grep("^h37[a-h]$", names(dhs_kr), value = TRUE)
+  # Detect ml13 series or h37 fallback (check for positive values on zapped data).
+  # IMPORTANT: antimalarial series must align with the ACT variable. If ACT fell
+  # back to h37e (ml13e placeholder), antimalarial must also use h37 series.
+  ml13_vars <- grep("^ml13[a-z]+$", names(dhs_kr_zapped), value = TRUE)
+  h37_vars <- grep("^h37[a-z]+$", names(dhs_kr_zapped), value = TRUE)
 
-  if (length(ml13_vars) > 0) {
-    ml13_has_data <- any(
-      sapply(ml13_vars, function(v) any(dhs_kr[[v]] == 1, na.rm = TRUE))
+  # Detect if ACT fell back to h37e
+  act_var_name <- survey_vars$act %||% "ml13e"
+  act_used_h37 <- FALSE
+  if (act_var_name %in% names(dhs_kr_zapped)) {
+    if (!any(dhs_kr_zapped[[act_var_name]] == 1, na.rm = TRUE) &&
+        "h37e" %in% names(dhs_kr_zapped) &&
+        any(dhs_kr_zapped[["h37e"]] == 1, na.rm = TRUE)) {
+      act_used_h37 <- TRUE
+    }
+  } else if ("h37e" %in% names(dhs_kr_zapped)) {
+    act_used_h37 <- TRUE
+  }
+
+  if (act_used_h37 && length(h37_vars) > 0) {
+    drug_series <- h37_vars
+    cli::cli_alert_info(
+      "Antimalarial composite using {length(h37_vars)} h37 series (aligned with ACT h37e fallback)"
     )
+  } else if (length(ml13_vars) > 0) {
+    ml13_has_data <- any(sapply(ml13_vars, function(v) {
+      any(dhs_kr_zapped[[v]] == 1, na.rm = TRUE)
+    }))
     if (ml13_has_data) {
       drug_series <- ml13_vars
       cli::cli_alert_info("Detected {length(ml13_vars)} ml13 antimalarial variables")
     } else if (length(h37_vars) > 0) {
-      h37_has_data <- any(
-        sapply(h37_vars, function(v) any(dhs_kr[[v]] == 1, na.rm = TRUE))
-      )
+      h37_has_data <- any(sapply(h37_vars, function(v) {
+        any(dhs_kr_zapped[[v]] == 1, na.rm = TRUE)
+      }))
       if (h37_has_data) {
         drug_series <- h37_vars
         cli::cli_alert_info(
@@ -178,8 +203,7 @@ calc_case_management_dhs <- function(
   }
 
   for (dvar in drug_series) {
-    kr_fever[[dvar]] <- haven::zap_labels(dhs_kr[[dvar]][febrile_idx])
-    kr_fever[[dvar]] <- as.vector(kr_fever[[dvar]])
+    kr_fever[[dvar]] <- dhs_kr_zapped[[dvar]][febrile_idx]
     # Recode "don't know" (8) and coded-missing (9) to NA
     kr_fever[[dvar]][!kr_fever[[dvar]] %in% c(0, 1)] <- NA
   }
@@ -201,34 +225,60 @@ calc_case_management_dhs <- function(
     cli::cli_abort("No children received any antimalarial treatment.")
   }
 
-  # ---- 4. Add ACT variable ----
+  # ---- 4. Add ACT variable (composite — ACT is a drug class) ----
 
-  act_var <- survey_vars$act %||% "ml13e"
-  if (act_var %in% names(dhs_kr)) {
-    raw_act <- as.vector(haven::zap_labels(dhs_kr[[act_var]][febrile_idx]))
-    # Check if act_var has any positive values; if not, try h37e fallback
-    if (!any(raw_act == 1, na.rm = TRUE) && "h37e" %in% names(dhs_kr)) {
-      h37e_vals <- as.vector(haven::zap_labels(dhs_kr[["h37e"]][febrile_idx]))
-      if (any(h37e_vals == 1, na.rm = TRUE)) {
-        cli::cli_alert_info(
-          "ACT variable {.var {act_var}} has no positive values; using {.var h37e} which has data"
-        )
-        raw_act <- h37e_vals
-      }
-    }
-    kr_fever$received_act <- dplyr::if_else(raw_act %in% c(0, 1), raw_act, NA_real_)
-  } else if ("h37e" %in% names(dhs_kr)) {
-    cli::cli_alert_info(
-      "ACT variable {.var {act_var}} not found; using {.var h37e} fallback"
-    )
-    raw_act <- as.vector(haven::zap_labels(dhs_kr[["h37e"]][febrile_idx]))
-    kr_fever$received_act <- dplyr::if_else(raw_act %in% c(0, 1), raw_act, NA_real_)
+  act_input <- survey_vars$act %||% "ml13e"
+  if (length(act_input) == 1 && act_input == "ml13e") {
+    act_vars <- .detect_act_vars(dhs_kr, default_vars = act_input)
   } else {
-    cli::cli_abort(c(
-      "ACT variable {.var {act_var}} not found (also tried {.var h37e}).",
-      "i" = "Check your survey_vars$act mapping"
-    ))
+    act_vars <- act_input
   }
+  act_vars <- intersect(act_vars, names(dhs_kr_zapped))
+
+  if (length(act_vars) == 0) {
+    # Try h37 fallback
+    h37_acts <- .detect_act_vars(dhs_kr, default_vars = "h37e")
+    act_vars <- intersect(h37_acts, names(dhs_kr_zapped))
+    if (length(act_vars) > 0) {
+      cli::cli_alert_info(
+        "ml13 ACT variables not found; using h37 series: {paste(act_vars, collapse = ', ')}"
+      )
+    } else {
+      cli::cli_abort(c(
+        "No ACT variables found (tried ml13* and h37*).",
+        "i" = "Check your survey_vars$act mapping"
+      ))
+    }
+  }
+
+  # Check for positive values; fallback to h37e if needed
+  act_has_data <- any(sapply(act_vars, function(v) {
+    any(dhs_kr_zapped[[v]][febrile_idx] == 1, na.rm = TRUE)
+  }))
+
+  if (!act_has_data && "h37e" %in% names(dhs_kr_zapped)) {
+    h37e_vals <- dhs_kr_zapped[["h37e"]][febrile_idx]
+    if (any(h37e_vals == 1, na.rm = TRUE)) {
+      cli::cli_alert_info(
+        "ACT variable{?s} {.var {act_vars}} ha{?s/ve} no positive values; using {.var h37e} which has data"
+      )
+      act_vars <- "h37e"
+    }
+  }
+
+  # Build composite received_act from all ACT variables
+  act_matrix <- sapply(act_vars, function(v) dhs_kr_zapped[[v]][febrile_idx])
+  act_matrix <- matrix(act_matrix, nrow = length(febrile_idx), ncol = length(act_vars))
+  act_matrix[!act_matrix %in% c(0, 1)] <- NA
+  kr_fever$received_act <- apply(act_matrix, 1, function(row) {
+    if (all(is.na(row))) return(NA_real_)
+    if (any(row == 1, na.rm = TRUE)) return(1)
+    return(0)
+  })
+
+  cli::cli_alert_info(
+    "Using {length(act_vars)} ACT variable{?s}: {paste(act_vars, collapse = ', ')}"
+  )
 
   # Binary indicator for ACT among antimalarial recipients
   kr_fever$has_act <- dplyr::if_else(
