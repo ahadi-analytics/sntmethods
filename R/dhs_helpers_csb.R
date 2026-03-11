@@ -124,16 +124,6 @@
   # Apply care-seeking classification from h32 variables
   kr_fever <- .classify_csb_from_h32(kr_fever, h32_cols, csb_classification)
 
-  # For DHS, rename to match expected downstream names
-  if (include_survey_vars) {
-    kr_fever <- kr_fever |>
-      dplyr::mutate(
-        csb_any_treatment = csb_any,
-        csb_no_treatment = csb_none,
-        csb_trained_provider = csb_trained
-      )
-  }
-
   kr_fever
 }
 
@@ -227,16 +217,41 @@
   # Create derived indicators
   data |>
     dplyr::mutate(
-      csb_public = as.numeric(has_public == 1 | has_chw == 1),
+      # Composite sectors
+      csb_public = as.numeric(
+        has_public == 1 | has_chw == 1
+      ),
       csb_private = as.numeric(
-        has_private_formal == 1 | has_private_informal == 1 | has_pharmacy == 1
+        has_private_formal == 1 |
+          has_private_informal == 1 |
+          has_pharmacy == 1
       ),
       csb_private_formal_pha = as.numeric(
         has_private_formal == 1 | has_pharmacy == 1
       ),
-      csb_any = as.numeric(csb_public == 1 | csb_private == 1),
-      csb_none = as.numeric(csb_public == 0 & csb_private == 0),
-      csb_trained = as.numeric(csb_public == 1 | csb_private_formal_pha == 1)
+      csb_any = as.numeric(
+        csb_public == 1 | csb_private == 1
+      ),
+      csb_none = as.numeric(
+        csb_public == 0 & csb_private == 0
+      ),
+      csb_trained = as.numeric(
+        csb_public == 1 | csb_private_formal_pha == 1
+      ),
+      # Granular sectors (WMR indicator alignment)
+      csb_public_nochw = as.numeric(has_public == 1),
+      csb_chw = as.numeric(has_chw == 1),
+      csb_private_formal_ind = as.numeric(
+        has_private_formal == 1
+      ),
+      csb_pharmacy = as.numeric(has_pharmacy == 1),
+      csb_private_informal = as.numeric(
+        has_private_informal == 1
+      ),
+      # Aliases for downstream naming consistency
+      csb_any_treatment = csb_any,
+      csb_trained_provider = csb_trained,
+      csb_no_treatment = csb_none
     )
 }
 

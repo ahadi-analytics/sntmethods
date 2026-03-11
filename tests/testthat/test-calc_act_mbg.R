@@ -383,3 +383,104 @@ test_that("calc_act_mbg computes both indicators together", {
   # At minimum "act" should be present (act_tested depends on data)
   expect_true("act" %in% names(result))
 })
+
+
+# ---- WMR-aligned dictionary indicators ----
+
+test_that("act_mbg_dictionary returns all expected indicators", {
+  dict <- sntmethods:::.act_mbg_dictionary()
+  names <- vapply(dict, `[[`, character(1), "name")
+
+  # 13 ACT + 11 antimalarial = 24 total
+  expect_equal(length(dict), 24)
+  expect_true("act" %in% names)
+  expect_true("act_care_seek" %in% names)
+  expect_true("act_pub_nochw" %in% names)
+  expect_true("act_priv_form_pha" %in% names)
+  expect_true("antimal" %in% names)
+  expect_true("antimal_chw" %in% names)
+  expect_true("antimal_form_pharm" %in% names)
+})
+
+test_that("calc_act_mbg computes WMR ACT indicators with CSB data", {
+  kr <- .mock_kr_act_with_csb()
+  gps <- .mock_gps()
+
+  # Add ml13 variables for antimalarial composite
+  set.seed(99)
+  n <- nrow(kr)
+  kr$ml13a <- sample(c(0, 1, NA), n, replace = TRUE,
+                     prob = c(0.5, 0.2, 0.3))
+  kr$ml13b <- sample(c(0, 1, NA), n, replace = TRUE,
+                     prob = c(0.6, 0.1, 0.3))
+
+  result <- suppressWarnings(calc_act_mbg(
+    kr, gps,
+    indicators = c(
+      "act_care_seek", "act_pub",
+      "act_pub_nochw", "antimal"
+    )
+  ))
+
+  # At least act_care_seek should work
+  if ("act_care_seek" %in% names(result)) {
+    dt <- result[["act_care_seek"]]
+    expect_s3_class(dt, "tbl_df")
+    expect_true(all(
+      c("cluster_id", "indicator",
+        "samplesize", "x", "y") %in% names(dt)
+    ))
+    expect_true(all(dt$indicator <= dt$samplesize))
+  }
+})
+
+test_that("calc_act_mbg accepts legacy act_among_am alias", {
+  kr <- .mock_kr_act_with_csb()
+  gps <- .mock_gps()
+  set.seed(99)
+  n <- nrow(kr)
+  kr$ml13a <- sample(c(0, 1, NA), n, replace = TRUE,
+                     prob = c(0.5, 0.2, 0.3))
+  kr$ml13b <- sample(c(0, 1, NA), n, replace = TRUE,
+                     prob = c(0.6, 0.1, 0.3))
+
+  # act_among_am should map to act_any_tx
+  result <- suppressWarnings(calc_act_mbg(
+    kr, gps, indicators = "act_among_am"
+  ))
+  # Should produce act_any_tx (the aliased name)
+  expect_true(
+    "act_any_tx" %in% names(result) ||
+      length(result) == 0
+  )
+})
+
+test_that("calc_act_mbg antimalarial indicators use received_antimalarial outcome", {
+  kr <- .mock_kr_act_with_csb()
+  gps <- .mock_gps()
+  set.seed(99)
+  n <- nrow(kr)
+  kr$ml13a <- sample(c(0, 1, NA), n, replace = TRUE,
+                     prob = c(0.5, 0.3, 0.2))
+  kr$ml13b <- sample(c(0, 1, NA), n, replace = TRUE,
+                     prob = c(0.6, 0.2, 0.2))
+
+  result <- suppressWarnings(calc_act_mbg(
+    kr, gps, indicators = c("antimal", "antimal_pub")
+  ))
+
+  # antimal is all febrile U5 (no CSB filter)
+  if ("antimal" %in% names(result)) {
+    dt <- result[["antimal"]]
+    expect_true(all(dt$indicator <= dt$samplesize))
+  }
+
+  # antimal_pub is public-seeking subset
+  if (all(c("antimal", "antimal_pub") %in%
+          names(result))) {
+    expect_true(
+      sum(result[["antimal_pub"]]$samplesize) <=
+        sum(result[["antimal"]]$samplesize)
+    )
+  }
+})

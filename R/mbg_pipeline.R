@@ -1195,7 +1195,12 @@ run_mbg_indicator_pipeline <- function(
         calc_csb_mbg(
           dhs_kr = survey_data$KR,
           gps_data = gps_data,
-          indicators = c("any", "public", "private", "none")
+          indicators = c(
+            "any", "public", "public_nochw", "chw",
+            "private", "private_formal", "pharmacy",
+            "private_informal", "private_formal_pha",
+            "trained", "none"
+          )
         )
       }, error = function(e) {
         results$skipped <<- glue::glue("Calculation error: {e$message}")
@@ -1203,8 +1208,16 @@ run_mbg_indicator_pipeline <- function(
       })
     },
 
-    act_public = ,
-    act_among_am = ,
+    act_care_seek = , act_antimal = , act_any_tx = ,
+    act_trained = , act_pub = , act_pub_nochw = ,
+    act_chw = , act_priv = , act_priv_formal = ,
+    act_priv_pharm = , act_priv_informal = ,
+    act_priv_form_pha = ,
+    antimal = , antimal_any_tx = , antimal_trained = ,
+    antimal_pub = , antimal_pub_nochw = , antimal_chw = ,
+    antimal_priv = , antimal_formal = , antimal_pharm = ,
+    antimal_priv_informal = , antimal_form_pharm = ,
+    act_public = , act_among_am = ,
     act = {
       if (!"KR" %in% names(survey_data)) {
         return(skip_indicator("Missing KR data (Children Recode)"))
@@ -1213,7 +1226,19 @@ run_mbg_indicator_pipeline <- function(
         calc_act_mbg(
           dhs_kr = survey_data$KR,
           gps_data = gps_data,
-          indicators = c("act", "act_public", "act_among_am")
+          indicators = c(
+            "act", "act_care_seek", "act_antimal",
+            "act_any_tx", "act_trained", "act_pub",
+            "act_pub_nochw", "act_chw", "act_priv",
+            "act_priv_formal", "act_priv_pharm",
+            "act_priv_informal", "act_priv_form_pha",
+            "antimal", "antimal_any_tx",
+            "antimal_trained", "antimal_pub",
+            "antimal_pub_nochw", "antimal_chw",
+            "antimal_priv", "antimal_formal",
+            "antimal_pharm", "antimal_priv_informal",
+            "antimal_form_pharm"
+          )
         )
       }, error = function(e) {
         results$skipped <<- glue::glue("Calculation error: {e$message}")

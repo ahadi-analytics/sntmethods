@@ -9,12 +9,20 @@
 #'
 #' @param dhs_kr DHS Children's Recode (KR) dataset.
 #' @param gps_data DHS GPS dataset with cluster coordinates.
-#' @param indicators Character vector of indicators to calculate:
+#' @param indicators Character vector of indicators to
+#'   calculate. WMR-aligned sector breakdown:
 #'   \itemize{
-#'     \item "any": Sought care anywhere
-#'     \item "public": Sought care at public facility
-#'     \item "private": Sought care at private facility
-#'     \item "trained": Sought care from trained provider
+#'     \item "any": Sought care anywhere (public or private)
+#'     \item "public": Public sector including CHW
+#'     \item "public_nochw": Public sector excluding CHW
+#'     \item "chw": Community health worker only
+#'     \item "private": Any private sector
+#'     \item "private_formal": Private formal sector only
+#'     \item "pharmacy": Pharmacy / drug shop only
+#'     \item "private_informal": Private informal only
+#'     \item "private_formal_pha": Private formal or pharmacy
+#'     \item "trained": Trained provider (public + formal +
+#'       pharmacy)
 #'     \item "none": Did not seek care
 #'   }
 #'   Default: c("any", "public", "private", "none").
@@ -75,10 +83,17 @@ calc_csb_mbg <- function(
     cli::cli_abort("`gps_data` must be a data.frame or tibble")
   }
 
-  valid_indicators <- c("any", "public", "private", "trained", "none")
+  valid_indicators <- c(
+    "any", "public", "public_nochw", "chw",
+    "private", "private_formal", "pharmacy",
+    "private_informal", "private_formal_pha",
+    "trained", "none"
+  )
   invalid <- setdiff(indicators, valid_indicators)
   if (length(invalid) > 0) {
-    cli::cli_abort("Invalid indicators: {.val {invalid}}")
+    cli::cli_abort(
+      "Invalid indicators: {.val {invalid}}"
+    )
   }
 
   # ---- Prepare data using shared helpers ----
@@ -94,18 +109,32 @@ calc_csb_mbg <- function(
 
   # ---- Calculate cluster-level indicators ----
 
+  # Maps short indicator name → CSB column in data
   indicator_map <- list(
     any = "csb_any",
     public = "csb_public",
+    public_nochw = "csb_public_nochw",
+    chw = "csb_chw",
     private = "csb_private",
+    private_formal = "csb_private_formal_ind",
+    pharmacy = "csb_pharmacy",
+    private_informal = "csb_private_informal",
+    private_formal_pha = "csb_private_formal_pha",
     trained = "csb_trained",
     none = "csb_none"
   )
 
+  # Maps short indicator name → output key name
   result_names <- list(
     any = "csb_any",
     public = "csb_public",
+    public_nochw = "csb_public_nochw",
+    chw = "csb_chw",
     private = "csb_private",
+    private_formal = "csb_private_formal",
+    pharmacy = "csb_pharmacy",
+    private_informal = "csb_private_informal",
+    private_formal_pha = "csb_private_formal_pha",
     trained = "csb_trained",
     none = "csb_none"
   )
