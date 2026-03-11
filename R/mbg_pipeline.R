@@ -107,7 +107,7 @@ NULL
 #'
 #' @examples
 #' \dontrun{
-#' results <- run_mbg_indicator_pipeline(
+#' results <- run_mbg_pipeline(
 #'   country_iso3 = "bdi",
 #'   adm0_sf = adm0,
 #'   adm1_sf = adm1,
@@ -124,7 +124,7 @@ NULL
 #' }
 #'
 #' @export
-run_mbg_indicator_pipeline <- function(
+run_mbg_pipeline <- function(
   country_iso3,
   adm0_sf,
   adm1_sf,
@@ -153,10 +153,10 @@ run_mbg_indicator_pipeline <- function(
 ) {
 
   # Check for required spatial packages
-  .check_spatial_pkg("sf", "run_mbg_indicator_pipeline")
-  .check_spatial_pkg("terra", "run_mbg_indicator_pipeline")
-  .check_spatial_pkg("fs", "run_mbg_indicator_pipeline")
-  .check_spatial_pkg("countrycode", "run_mbg_indicator_pipeline")
+  .check_spatial_pkg("sf", "run_mbg_pipeline")
+  .check_spatial_pkg("terra", "run_mbg_pipeline")
+  .check_spatial_pkg("fs", "run_mbg_pipeline")
+  .check_spatial_pkg("countrycode", "run_mbg_pipeline")
 
   # Warn about MBG dependencies (soft check - will abort later if run_mbg = TRUE)
   mbg_deps_missing <- character(0)
@@ -2686,3 +2686,9 @@ run_mbg_indicator_pipeline <- function(
   })
   as.character(rel)
 }
+
+
+#' @rdname mbg_pipeline
+#' @usage # Deprecated: use run_mbg_pipeline() instead
+#' @export
+run_mbg_indicator_pipeline <- run_mbg_pipeline

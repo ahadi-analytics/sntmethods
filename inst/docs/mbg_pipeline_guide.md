@@ -35,7 +35,7 @@ to the files you need.
 
 ## 1. What the Pipeline Does
 
-`run_mbg_indicator_pipeline()` is the single entry point for all DHS-based spatial indicator
+`run_mbg_pipeline()` is the single entry point for all DHS-based spatial indicator
 work. It:
 
 1. **Discovers** all available DHS/MIS surveys for a country (parquet archive)
@@ -195,7 +195,7 @@ pop_raster_u5_paths <- list(
 ## 4. Running the Pipeline
 
 ```r
-results_dhs <- sntmethods::run_mbg_indicator_pipeline(
+results_dhs <- sntmethods::run_mbg_pipeline(
   country_iso3          = toupper(country_iso3),  # e.g. "BDI"
   adm0_sf               = adm0_sf,
   adm1_sf               = adm1_sf,
