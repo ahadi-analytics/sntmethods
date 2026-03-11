@@ -93,6 +93,98 @@ test_that(".enrich_dhs_dictionary adds all new DHS columns", {
   expect_equal(result$dhs_denominator_var, "h22")
 })
 
+# ---- .mbg_indicator_meta pop_type ----
+
+test_that(".mbg_indicator_meta returns correct pop_type for all indicators", {
+  # U5 indicators
+  u5_indicators <- c(
+    "fever", "csb_any", "csb_public", "csb_private", "csb_none", "csb_trained",
+    "malaria_dx", "antimalarial", "antimalarial_public",
+    "act", "act_public", "act_tested",
+    "febrile_rdt_pos", "febrile_rdt_pos_act",
+    "pfpr_rdt", "pfpr_mic", "pfpr_rdt_u5", "pfpr_mic_u5",
+    "pfpr_either_u5", "pfpr_combined_u5",
+    "use_itn_chu5",
+    "severe_anemia", "anemia_any", "anemia_moderate_plus",
+    "epi_bcg", "epi_dpt3", "epi_measles1",
+    "u5mr", "smc_coverage",
+    "eff_cm_any", "eff_cm_public"
+  )
+  for (ind in u5_indicators) {
+    expect_equal(.mbg_indicator_meta(ind)$pop_type, "u5", info = ind)
+  }
+
+  # WRA indicators
+  wra_indicators <- c(
+    "anc_1plus", "anc_3plus", "anc_4plus", "anc_8plus",
+    "iptp_1plus", "iptp_2plus", "iptp_3plus", "iptp_4plus",
+    "iptp_1only", "iptp_2only", "iptp_3only",
+    "use_itn_preg"
+  )
+  for (ind in wra_indicators) {
+    expect_equal(.mbg_indicator_meta(ind)$pop_type, "wra", info = ind)
+  }
+
+  # All-population indicators
+  all_indicators <- c(
+    "enough_itn", "with_itn", "access_itn", "use_itn",
+    "use_itn_if_access", "irs_coverage"
+  )
+  for (ind in all_indicators) {
+    expect_equal(.mbg_indicator_meta(ind)$pop_type, "all", info = ind)
+  }
+
+  # Age-stratified ITN
+  expect_equal(.mbg_indicator_meta("use_itn_5_10")$pop_type, "5_10")
+  expect_equal(.mbg_indicator_meta("use_itn_10_20")$pop_type, "10_20")
+  expect_equal(.mbg_indicator_meta("use_itn_20plus")$pop_type, "20plus")
+})
+
+test_that(".mbg_indicator_meta defaults pop_type to 'all' for unknown indicators", {
+  meta <- .mbg_indicator_meta("nonexistent_indicator_xyz")
+  expect_equal(meta$pop_type, "all")
+})
+
+# ---- .mbg_indicator_pop_type ----
+
+test_that(".mbg_indicator_pop_type returns correct type for individual indicators", {
+  expect_equal(.mbg_indicator_pop_type("pfpr_rdt_u5"), "u5")
+  expect_equal(.mbg_indicator_pop_type("fever"), "u5")
+  expect_equal(.mbg_indicator_pop_type("act"), "u5")
+  expect_equal(.mbg_indicator_pop_type("epi_bcg"), "u5")
+  expect_equal(.mbg_indicator_pop_type("smc_coverage"), "u5")
+  expect_equal(.mbg_indicator_pop_type("use_itn_chu5"), "u5")
+
+  expect_equal(.mbg_indicator_pop_type("use_itn"), "all")
+  expect_equal(.mbg_indicator_pop_type("irs_coverage"), "all")
+  expect_equal(.mbg_indicator_pop_type("enough_itn"), "all")
+
+  expect_equal(.mbg_indicator_pop_type("use_itn_5_10"), "5_10")
+  expect_equal(.mbg_indicator_pop_type("use_itn_10_20"), "10_20")
+  expect_equal(.mbg_indicator_pop_type("use_itn_20plus"), "20plus")
+
+  expect_equal(.mbg_indicator_pop_type("iptp_3plus"), "wra")
+  expect_equal(.mbg_indicator_pop_type("anc_4plus"), "wra")
+  expect_equal(.mbg_indicator_pop_type("use_itn_preg"), "wra")
+})
+
+test_that(".mbg_indicator_pop_type returns correct type for category dispatch keys", {
+  expect_equal(.mbg_indicator_pop_type("pfpr"), "u5")
+  expect_equal(.mbg_indicator_pop_type("itn"), "all")
+  expect_equal(.mbg_indicator_pop_type("irs"), "all")
+  expect_equal(.mbg_indicator_pop_type("anc"), "wra")
+  expect_equal(.mbg_indicator_pop_type("csb"), "u5")
+  expect_equal(.mbg_indicator_pop_type("act"), "u5")
+  expect_equal(.mbg_indicator_pop_type("anemia"), "u5")
+  expect_equal(.mbg_indicator_pop_type("iptp"), "wra")
+  expect_equal(.mbg_indicator_pop_type("epi"), "u5")
+  expect_equal(.mbg_indicator_pop_type("u5mr"), "u5")
+  expect_equal(.mbg_indicator_pop_type("smc"), "u5")
+  expect_equal(.mbg_indicator_pop_type("fever"), "u5")
+  expect_equal(.mbg_indicator_pop_type("antimalarial"), "u5")
+  expect_equal(.mbg_indicator_pop_type("eff_cm"), "u5")
+})
+
 test_that(".enrich_dhs_dictionary reorders columns correctly", {
   dict <- tibble::tibble(
     variable = "x",

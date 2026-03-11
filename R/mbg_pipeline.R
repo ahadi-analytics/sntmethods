@@ -39,8 +39,21 @@ NULL
 #'     \item Already-loaded SpatRaster object (used for all years)
 #'   }
 #' @param pop_raster_u5 Under-5 population raster(s) (optional). Same format as
-#'   `pop_raster`. Used for u5-specific indicators (pfpr, itn). If NULL, uses
-#'   `pop_raster` for all indicators.
+#'   `pop_raster`. Used for indicators targeting children 0-59 months (PfPR,
+#'   fever, CSB, ACT, antimalarial, anemia, EPI, U5MR, SMC, ITN use U5).
+#'   If NULL, falls back to `pop_raster`.
+#' @param pop_raster_5_10 Population raster for ages 5-10 (optional). Same
+#'   format as `pop_raster`. Used for `use_itn_5_10`. Falls back to
+#'   `pop_raster` if NULL.
+#' @param pop_raster_10_20 Population raster for ages 10-20 (optional). Same
+#'   format as `pop_raster`. Used for `use_itn_10_20`. Falls back to
+#'   `pop_raster` if NULL.
+#' @param pop_raster_20plus Population raster for ages 20+ (optional). Same
+#'   format as `pop_raster`. Used for `use_itn_20plus`. Falls back to
+#'   `pop_raster` if NULL.
+#' @param pop_raster_wra Women of reproductive age (15-49) population raster
+#'   (optional). Same format as `pop_raster`. Used for ANC, IPTp, and ITN
+#'   use among pregnant women. Falls back to `pop_raster` if NULL.
 #' @param path_dhs_parquet Path to DHS parquet archive.
 #' @param table_out_path Output directory for tables (CSV, XLSX).
 #' @param raster_out_path Output directory for prediction rasters.
@@ -138,6 +151,10 @@ run_mbg_pipeline <- function(
   raster_out_path,
   intermediate_out_path,
   pop_raster_u5 = NULL,
+  pop_raster_5_10 = NULL,
+  pop_raster_10_20 = NULL,
+  pop_raster_20plus = NULL,
+  pop_raster_wra = NULL,
   country_iso2 = NULL,
   survey_year = NULL,
   min_year = "2005",
@@ -291,6 +308,18 @@ run_mbg_pipeline <- function(
     .validate_raster_paths(pop_raster, country_iso3, "pop_raster")
     if (!is.null(pop_raster_u5)) {
       .validate_raster_paths(pop_raster_u5, country_iso3, "pop_raster_u5")
+    }
+    if (!is.null(pop_raster_5_10)) {
+      .validate_raster_paths(pop_raster_5_10, country_iso3, "pop_raster_5_10")
+    }
+    if (!is.null(pop_raster_10_20)) {
+      .validate_raster_paths(pop_raster_10_20, country_iso3, "pop_raster_10_20")
+    }
+    if (!is.null(pop_raster_20plus)) {
+      .validate_raster_paths(pop_raster_20plus, country_iso3, "pop_raster_20plus")
+    }
+    if (!is.null(pop_raster_wra)) {
+      .validate_raster_paths(pop_raster_wra, country_iso3, "pop_raster_wra")
     }
   }
 
@@ -585,18 +614,22 @@ run_mbg_pipeline <- function(
       NULL
     })
 
-    # Load u5 population raster for this year (if provided)
-    pop_rast_u5 <- NULL
-    if (!is.null(pop_raster_u5)) {
-      pop_rast_u5 <- tryCatch({
-        .load_raster_for_year(pop_raster_u5, current_year, "u5 population")
+    # Load age-specific population rasters for this year (if provided)
+    .load_optional_raster <- function(raster_input, label) {
+      if (is.null(raster_input)) return(NULL)
+      tryCatch({
+        .load_raster_for_year(raster_input, current_year, label)
       }, error = function(e) {
-        cli::cli_alert_warning(
-          "Could not load u5 population raster: {e$message}"
-        )
+        cli::cli_alert_warning("Could not load {label} raster: {e$message}")
         NULL
       })
     }
+
+    pop_rast_u5     <- .load_optional_raster(pop_raster_u5,     "u5 population")
+    pop_rast_5_10   <- .load_optional_raster(pop_raster_5_10,   "5-10 population")
+    pop_rast_10_20  <- .load_optional_raster(pop_raster_10_20,  "10-20 population")
+    pop_rast_20plus <- .load_optional_raster(pop_raster_20plus, "20+ population")
+    pop_rast_wra    <- .load_optional_raster(pop_raster_wra,    "WRA population")
 
     # Abort if run_mbg = TRUE but population raster is missing
     if (isTRUE(run_mbg) && is.null(pop_rast)) {
@@ -681,6 +714,10 @@ run_mbg_pipeline <- function(
           adm3_sf = adm3_aligned,
           pop_rast = pop_rast,
           pop_rast_u5 = pop_rast_u5,
+          pop_rast_5_10 = pop_rast_5_10,
+          pop_rast_10_20 = pop_rast_10_20,
+          pop_rast_20plus = pop_rast_20plus,
+          pop_rast_wra = pop_rast_wra,
           output_dirs = output_dirs,
           country_iso3 = country_iso3,
           survey_year = current_year,
@@ -983,6 +1020,10 @@ run_mbg_pipeline <- function(
   adm3_sf = NULL,
   pop_rast,
   pop_rast_u5 = NULL,
+  pop_rast_5_10 = NULL,
+  pop_rast_10_20 = NULL,
+  pop_rast_20plus = NULL,
+  pop_rast_wra = NULL,
   output_dirs,
   country_iso3,
   survey_year,
@@ -996,20 +1037,29 @@ run_mbg_pipeline <- function(
 ) {
   # Select population raster based on indicator's target population
   ind_pop_type <- .mbg_indicator_pop_type(category)
-  use_u5 <- ind_pop_type == "u5" && !is.null(pop_rast_u5)
-  pop_for_indicator <- if (use_u5) pop_rast_u5 else pop_rast
+
+  pop_for_indicator <- switch(ind_pop_type,
+    u5     = pop_rast_u5     %||% pop_rast,
+    `5_10` = pop_rast_5_10   %||% pop_rast,
+    `10_20`= pop_rast_10_20  %||% pop_rast,
+    `20plus` = pop_rast_20plus %||% pop_rast,
+    wra    = pop_rast_wra    %||% pop_rast,
+    pop_rast
+  )
 
   # Log which population raster is being used (debug only)
   if (isTRUE(debug)) {
+    pop_label <- if (!is.null(pop_for_indicator) && !identical(pop_for_indicator, pop_rast)) {
+      ind_pop_type
+    } else {
+      "total"
+    }
     cli::cli_alert_info(
-      "Indicator {.val {category}} pop_type={.val {ind_pop_type}}"
+      "Indicator {.val {category}} pop_type={.val {ind_pop_type}}, using={.val {pop_label}}"
     )
-    if (use_u5) {
-      pop_src <- terra::sources(pop_rast_u5)
-      cli::cli_alert_info("Using u5 population raster: {.file {basename(pop_src)}}")
-    } else if (!is.null(pop_rast)) {
-      pop_src <- terra::sources(pop_rast)
-      cli::cli_alert_info("Using total population raster: {.file {basename(pop_src)}}")
+    if (!is.null(pop_for_indicator)) {
+      pop_src <- terra::sources(pop_for_indicator)
+      cli::cli_alert_info("Population raster: {.file {basename(pop_src)}}")
     }
   }
 

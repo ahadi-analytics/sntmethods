@@ -146,9 +146,9 @@
     use_itn           = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "all ages",     pop_type = "all"),
     use_itn_chu5      = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "0-59 months",  pop_type = "u5"),
     use_itn_preg      = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "women 15-49",  pop_type = "wra"),
-    use_itn_5_10      = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "5-10 years",   pop_type = "all"),
-    use_itn_10_20     = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "10-20 years",  pop_type = "all"),
-    use_itn_20plus    = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "20+ years",    pop_type = "all"),
+    use_itn_5_10      = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "5-10 years",   pop_type = "5_10"),
+    use_itn_10_20     = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "10-20 years",  pop_type = "10_20"),
+    use_itn_20plus    = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "20+ years",    pop_type = "20plus"),
     use_itn_if_access = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "all ages",     pop_type = "all"),
     # Anemia — PR module
     severe_anemia      = list(recode = "PR", category = "Nutrition",    cascade = na_int, age = "6-59 months",  pop_type = "u5"),
