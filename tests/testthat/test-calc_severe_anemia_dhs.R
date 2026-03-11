@@ -67,6 +67,25 @@ test_that("calc_severe_anemia_dhs_core calculates correct prevalence", {
   expect_equal(result$dhs_severe_anemia, 0.30)
   expect_equal(result$dhs_n_tested_hb, 10)
   expect_equal(result$dhs_n_severe_anemia, 3)
+
+  # Check additional anemia severity indicators are present
+  expect_true("dhs_anemia_any" %in% names(result))
+  expect_true("dhs_anemia_moderate_plus" %in% names(result))
+  expect_true("dhs_anemia_mild_only" %in% names(result))
+  expect_true("dhs_anemia_moderate_only" %in% names(result))
+  expect_true("dhs_anemia_severe_only" %in% names(result))
+
+  # Hb values in g/dL: 6.0, 7.0, 7.5, 8.5, 9.0, 9.5, 10.0, 11.0, 12.0, 13.0
+  # any (< 11): 7/10 = 0.70 (6.0, 7.0, 7.5, 8.5, 9.0, 9.5, 10.0)
+  expect_equal(result$dhs_anemia_any, 0.70)
+  # moderate_plus (< 10): 6/10 = 0.60 (6.0, 7.0, 7.5, 8.5, 9.0, 9.5)
+  expect_equal(result$dhs_anemia_moderate_plus, 0.60)
+  # mild_only (>= 10 & < 11): 1/10 = 0.10 (Hb=10.0)
+  expect_equal(result$dhs_anemia_mild_only, 0.10)
+  # moderate_only (>= 8 & < 10): 3/10 = 0.30 (Hb=8.5, 9.0, 9.5)
+  expect_equal(result$dhs_anemia_moderate_only, 0.30)
+  # severe_only (< 8): 3/10 = 0.30 (Hb=6.0, 7.0, 7.5)
+  expect_equal(result$dhs_anemia_severe_only, 0.30)
 })
 
 test_that("calc_severe_anemia_dhs_core respects custom threshold", {
@@ -133,7 +152,7 @@ test_that("calc_severe_anemia_dhs_core filters by age correctly", {
   expect_equal(result$dhs_n_severe_anemia, 6)  # All have severe anemia
 })
 
-test_that("calc_severe_anemia_dhs returns list with data, dict, and metadata", {
+test_that("calc_severe_anemia_dhs returns named list with adm0", {
   skip_if_not_installed("survey")
   skip_if_not_installed("sntutils")
 
@@ -157,55 +176,37 @@ test_that("calc_severe_anemia_dhs returns list with data, dict, and metadata", {
 
   # Check structure
   expect_type(result, "list")
-  expect_named(result, c("data", "dict", "metadata"))
+  expect_true("adm0" %in% names(result))
+  expect_s3_class(result$adm0, "tbl_df")
 
-  # Check data
-  expect_s3_class(result$data, "tbl_df")
-  expect_true("dhs_severe_anemia" %in% names(result$data))
+  # Long-format output should contain indicator_code column
+  expect_true("severe_anemia" %in% result$adm0$indicator_code)
 
-  # Check metadata
-  expect_type(result$metadata, "list")
-  expect_equal(result$metadata$country_code, "BF8")
-  expect_equal(result$metadata$survey_year, 2021)
-  expect_equal(result$metadata$file_type, "PR")
-  expect_equal(result$metadata$analysis_type, "Severe Anemia (Hb < 8.0 g/dL)")
-  expect_equal(result$metadata$age_group, "6-59 months")
-
-  # Check dictionary
-  expect_s3_class(result$dict, "data.frame")
-  expect_true("variable" %in% names(result$dict))
+  # Expected long-format columns
+  expected_cols <- c(
+    "survey_id", "iso3", "iso2", "survey_type", "survey_year",
+    "adm0", "type", "geo_source", "point", "ci_l", "ci_u",
+    "numerator", "denominator", "indicator", "indicator_code",
+    "numerator_description", "denominator_description", "denominator_code"
+  )
+  for (col in expected_cols) {
+    expect_true(col %in% names(result$adm0), info = paste("Missing column:", col))
+  }
 })
 
-test_that("extract_dhs_metadata_anemia extracts correct metadata", {
-  pr_data <- data.frame(
-    hv000 = rep("ML8", 150),
-    hv007 = rep(2021, 150),
-    hv001 = rep(1:15, each = 10),
-    hc1 = sample(6:59, 150, replace = TRUE),
-    hc56 = sample(50:150, 150, replace = TRUE),
-    hv103 = rep(1, 150),
-    hv042 = rep(1, 150)
-  )
+test_that("severe_anemia_dictionary returns expected indicators", {
+  dict <- severe_anemia_dictionary()
 
-  metadata <- extract_dhs_metadata_anemia(
-    pr_data,
-    survey_vars = list(
-      cluster = "hv001",
-      age = "hc1",
-      hemoglobin = "hc56"
-    ),
-    altitude_adjusted = FALSE
+  expect_s3_class(dict, "tbl_df")
+  expect_true("indicator_code" %in% names(dict))
+  expected_codes <- c(
+    "severe_anemia", "anemia_any", "anemia_moderate_plus",
+    "anemia_mild_only", "anemia_moderate_only", "anemia_severe_only"
   )
-
-  expect_equal(metadata$country_code, "ML8")
-  expect_equal(metadata$survey_year, 2021)
-  expect_equal(metadata$file_type, "PR")
-  expect_equal(metadata$total_records, 150)
-  expect_equal(metadata$total_clusters, 15)
-  expect_true(metadata$has_hemoglobin)
-  expect_equal(metadata$analysis_type, "Severe Anemia (Hb < 8.0 g/dL)")
-  expect_false(metadata$altitude_adjusted)
-  expect_equal(metadata$hemoglobin_variable, "hc56")
+  for (code in expected_codes) {
+    expect_true(code %in% dict$indicator_code, info = paste("Missing:", code))
+  }
+  expect_equal(nrow(dict), 6)
 })
 
 test_that("calc_severe_anemia_dhs_core handles missing hemoglobin values", {
@@ -312,7 +313,7 @@ test_that("calc_severe_anemia_dhs_core errors when altitude-adjusted var missing
   expect_s3_class(result, "tbl_df")
 })
 
-test_that("calc_severe_anemia_dhs metadata includes altitude adjustment info", {
+test_that("calc_severe_anemia_dhs works with both altitude adjusted and raw Hb", {
   skip_if_not_installed("survey")
   skip_if_not_installed("sntutils")
 
@@ -335,11 +336,15 @@ test_that("calc_severe_anemia_dhs metadata includes altitude adjustment info", {
 
   # Test with altitude_adjusted = TRUE (default)
   result_adj <- calc_severe_anemia_dhs(pr_data, altitude_adjusted = TRUE)
-  expect_true(result_adj$metadata$altitude_adjusted)
-  expect_equal(result_adj$metadata$hemoglobin_variable, "hw53")
+  expect_type(result_adj, "list")
+  expect_true("adm0" %in% names(result_adj))
+  expect_s3_class(result_adj$adm0, "tbl_df")
+  expect_true("severe_anemia" %in% result_adj$adm0$indicator_code)
 
   # Test with altitude_adjusted = FALSE
   result_raw <- calc_severe_anemia_dhs(pr_data, altitude_adjusted = FALSE)
-  expect_false(result_raw$metadata$altitude_adjusted)
-  expect_equal(result_raw$metadata$hemoglobin_variable, "hc56")
+  expect_type(result_raw, "list")
+  expect_true("adm0" %in% names(result_raw))
+  expect_s3_class(result_raw$adm0, "tbl_df")
+  expect_true("severe_anemia" %in% result_raw$adm0$indicator_code)
 })

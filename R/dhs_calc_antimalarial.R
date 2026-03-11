@@ -2,7 +2,7 @@
 #'
 #' Estimates the proportion of febrile children under 5 who received any
 #' antimalarial drug using survey-weighted methods. This is step 3 of the
-#' WMR case management cascade.
+#' case management cascade.
 #'
 #' @details
 #' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/antimalarial_dhs.yml}
@@ -125,6 +125,16 @@ calc_antimalarial_dhs_core <- function(
     survey_vars = survey_vars,
     include_survey_vars = TRUE
   )
+
+  # ---- 2b. Classify public sector from h32 treatment-seeking variables ----
+
+  kr_fever$antimalarial_public <- tryCatch({
+    csb <- .classify_csb_from_h32(kr_fever)
+    as.integer(kr_fever$has_antimalarial == 1 & csb$csb_public == 1)
+  }, error = function(e) {
+    cli::cli_warn("Cannot compute antimalarial_public: {e$message}")
+    NA_real_
+  })
 
   # ---- 3. Spatial join if GPS + shapefile provided ----
 
@@ -288,6 +298,73 @@ calc_antimalarial_dhs_core <- function(
       dhs_antimalarial_upp = `ci_u.has_antimalarial`
     )
 
+  # ---- 5b. Calculate antimalarial_public indicator ----
+
+  has_am_public <- !all(is.na(kr_fever$antimalarial_public))
+
+  if (has_am_public) {
+    if (!is.null(class_var)) {
+      am_public_results <- tryCatch({
+        survey::svyby(
+          ~antimalarial_public,
+          by = group_formula,
+          design = des,
+          FUN = survey::svymean,
+          vartype = "ci",
+          na.rm = TRUE,
+          keep.names = FALSE
+        ) |>
+          tibble::as_tibble()
+      }, error = function(e) {
+        if (grepl("has only one PSU", e$message)) {
+          des_no_strata <- survey::svydesign(
+            ids = ~cluster_id, weights = ~survey_weight,
+            data = kr_fever, nest = TRUE
+          )
+          survey::svyby(
+            ~antimalarial_public, by = group_formula, design = des_no_strata,
+            FUN = survey::svymean, vartype = "ci", na.rm = TRUE,
+            keep.names = FALSE
+          ) |> tibble::as_tibble()
+        } else {
+          stop(e)
+        }
+      })
+    } else {
+      am_pub_mean <- survey::svymean(~antimalarial_public, design = des, na.rm = TRUE)
+      am_pub_ci <- stats::confint(am_pub_mean)
+
+      am_public_results <- tibble::tibble(
+        level = "National",
+        antimalarial_public = as.numeric(am_pub_mean["antimalarial_public"]),
+        `ci_l.antimalarial_public` = am_pub_ci["antimalarial_public", 1],
+        `ci_u.antimalarial_public` = am_pub_ci["antimalarial_public", 2]
+      )
+    }
+
+    # Normalize CI column names
+    names(am_public_results)[names(am_public_results) == "ci_l"] <- "ci_l.antimalarial_public"
+    names(am_public_results)[names(am_public_results) == "ci_u"] <- "ci_u.antimalarial_public"
+
+    am_public_results <- am_public_results |>
+      dplyr::rename(
+        dhs_antimalarial_public = antimalarial_public,
+        dhs_antimalarial_public_low = `ci_l.antimalarial_public`,
+        dhs_antimalarial_public_upp = `ci_u.antimalarial_public`
+      )
+
+    # Join to main results
+    if (!is.null(class_var)) {
+      am_results <- am_results |>
+        dplyr::left_join(am_public_results, by = class_var)
+    } else {
+      am_results <- am_results |>
+        dplyr::bind_cols(
+          am_public_results |> dplyr::select(-dplyr::any_of("level"))
+        )
+    }
+  }
+
   # ---- 6. Calculate sample sizes ----
 
   if (!is.null(class_var)) {
@@ -296,6 +373,7 @@ calc_antimalarial_dhs_core <- function(
       dplyr::summarise(
         dhs_n_febrile = dplyr::n(),
         dhs_n_antimalarial = sum(has_antimalarial == 1, na.rm = TRUE),
+        dhs_n_antimalarial_public = sum(antimalarial_public == 1, na.rm = TRUE),
         .groups = "drop"
       )
 
@@ -305,6 +383,9 @@ calc_antimalarial_dhs_core <- function(
     am_results$dhs_n_febrile <- nrow(kr_fever)
     am_results$dhs_n_antimalarial <- sum(
       kr_fever$has_antimalarial == 1, na.rm = TRUE
+    )
+    am_results$dhs_n_antimalarial_public <- sum(
+      kr_fever$antimalarial_public == 1, na.rm = TRUE
     )
   }
 
@@ -329,7 +410,7 @@ calc_antimalarial_dhs_core <- function(
 
   # Ensure count columns are integers
   count_cols <- intersect(
-    c("dhs_n_febrile", "dhs_n_antimalarial"),
+    c("dhs_n_febrile", "dhs_n_antimalarial", "dhs_n_antimalarial_public"),
     names(am_results)
   )
   am_results <- am_results |>
@@ -356,29 +437,42 @@ calc_antimalarial_dhs_core <- function(
 }
 
 
-#' Calculate Antimalarial Treatment from DHS Data (Wrapper)
+#' Calculate Antimalarial Treatment from DHS Data (Standardized)
 #'
-#' Convenience wrapper around calc_antimalarial_dhs_core() that also extracts
-#' survey metadata and builds a data dictionary.
+#' Computes antimalarial treatment indicators from DHS Children's Recode (KR)
+#' data. Returns survey-weighted proportions with logit confidence intervals
+#' in standardized long format.
+#'
+#' @details
+#' Computes two indicators:
+#' \itemize{
+#'   \item Any antimalarial treatment among febrile U5 children
+#'   \item Antimalarial from public sector facility among febrile U5 children
+#' }
+#' See [antimalarial_dictionary()] for the full indicator list.
 #'
 #' @inheritParams calc_antimalarial_dhs_core
+#' @param ci_method Method for confidence intervals. Default: "logit".
 #'
-#' @return List with:
-#'   \itemize{
-#'     \item `data`: Tibble with antimalarial estimates by admin level
-#'     \item `dict`: Data dictionary from sntutils::build_dictionary()
-#'     \item `metadata`: List with survey metadata
+#' @return Named list of tibbles:
+#'   \describe{
+#'     \item{`adm0`}{National-level estimates (always present)}
+#'     \item{`adm1`}{Admin-1 estimates (when `region_var` provided)}
 #'   }
+#'   Each tibble contains columns: survey_id, iso3, iso2, survey_type,
+#'   survey_year, adm0, [adm1], type, geo_source, point, ci_l, ci_u,
+#'   numerator, denominator, indicator, indicator_code,
+#'   numerator_description, denominator_description, denominator_code.
 #'
 #' @examples
 #' \dontrun{
-#' am <- calc_antimalarial_dhs(
-#'   dhs_kr = kr_data,
-#'   region_var = "v024"
-#' )
-#' am$data
+#' am <- calc_antimalarial_dhs(dhs_kr = kr_data, region_var = "v024")
+#' am$adm0
+#' am$adm1
 #' }
 #'
+#' @seealso [antimalarial_dictionary()] for indicator metadata,
+#'   [calc_antimalarial_dhs_core()] for legacy wide-format output
 #' @export
 calc_antimalarial_dhs <- function(
   dhs_kr,
@@ -391,95 +485,146 @@ calc_antimalarial_dhs <- function(
     alive = "b5"
   ),
   region_var = NULL,
-  gps_data = NULL,
-  gps_vars = list(
-    cluster = "DHSCLUST",
-    lat = "LATNUM",
-    lon = "LONGNUM"
-  ),
-  shapefile = NULL,
-  admin_level = NULL,
-  join_nearest = TRUE
+  ci_method = "logit"
 ) {
-  metadata <- .extract_dhs_metadata_antimalarial(
-    dhs_kr = dhs_kr,
-    survey_vars = survey_vars
-  )
+  # ---- 1. Extract survey metadata ----
+  survey_meta <- .extract_survey_meta(dhs_kr)
 
-  am_data <- calc_antimalarial_dhs_core(
+  # ---- 2. Prepare febrile U5 dataset ----
+  kr_fever <- .prepare_antimalarial_data(
     dhs_kr = dhs_kr,
     survey_vars = survey_vars,
-    region_var = region_var,
-    gps_data = gps_data,
-    gps_vars = gps_vars,
-    shapefile = shapefile,
-    admin_level = admin_level,
-    join_nearest = join_nearest
+    include_survey_vars = TRUE
   )
 
-  labels <- tibble::tribble(
-    ~variable, ~label_en, ~label_fr, ~dhs_variable, ~numerator, ~denominator, ~dhs_numerator_var, ~dhs_denominator_var, ~notes,
-    "dhs_antimalarial", "Any antimalarial treatment", "Traitement antipaludique (tout type)", "ml13a-h (or h37a-h)", "Febrile children receiving antimalarial", "Febrile children under 5", "ml13a-h (or h37a-h)", "h22", "Step 3 of WMR cascade; ml13* used when present, h37a-h fallback for older surveys (e.g. BFA 2021)",
-    "dhs_antimalarial_low", "Antimalarial - lower 95% CI", "Antipaludique - IC 95% inferieur", "ml13a-h (or h37a-h)", NA_character_, NA_character_, NA_character_, NA_character_, "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_antimalarial_upp", "Antimalarial - upper 95% CI", "Antipaludique - IC 95% superieur", "ml13a-h (or h37a-h)", NA_character_, NA_character_, NA_character_, NA_character_, "Survey-weighted 95% CI, clamped to [0,1]",
-    "dhs_n_febrile", "Number of febrile children (denominator)", "Nombre d'enfants febriles (denominateur)", "h22", NA_character_, NA_character_, NA_character_, NA_character_, "Unweighted count",
-    "dhs_n_antimalarial", "Number receiving antimalarial (numerator)", "Nombre recevant un antipaludique (numerateur)", "ml13a-h (or h37a-h)", NA_character_, NA_character_, NA_character_, NA_character_, "Unweighted count"
+  # ---- 2b. Classify public sector from h32 treatment-seeking variables ----
+  kr_fever$antimalarial_public <- tryCatch({
+    csb <- .classify_csb_from_h32(kr_fever)
+    as.integer(kr_fever$has_antimalarial == 1 & csb$csb_public == 1)
+  }, error = function(e) {
+    cli::cli_warn("Cannot compute antimalarial_public: {e$message}")
+    NA_real_
+  })
+
+  cli::cli_alert_success(
+    "Under 5 with fever: {format(nrow(kr_fever), big.mark = ',')} children"
   )
 
-  dict <- sntutils::build_dictionary(am_data)
-  dict <- .enrich_dhs_dictionary(dict, labels)
+  # ---- 3. Resolve region labels ----
+  group_var <- NULL
+  geo_src <- NA_character_
 
-  list(
-    data = am_data,
-    dict = dict,
-    metadata = metadata
+  if (!is.null(region_var)) {
+    if (!region_var %in% names(dhs_kr)) {
+      cli::cli_abort("Column {.var {region_var}} not found in `dhs_kr`.")
+    }
+    # Build lookup from full dataset, then apply to febrile subset
+    resolved_all <- .resolve_region_labels(
+      dhs_kr[[region_var]], region_var
+    )
+    raw_all <- as.character(as.vector(haven::zap_labels(dhs_kr[[region_var]])))
+    lookup <- stats::setNames(resolved_all, raw_all)
+    febrile_raw <- as.character(kr_fever[[region_var]])
+    kr_fever$region <- unname(lookup[febrile_raw])
+    group_var <- "region"
+    geo_src <- "survey"
+  }
+
+  # ---- 4. Get conditions ----
+  conditions <- .antimalarial_conditions()
+
+  # ---- 5. Compute national results ----
+  national_results <- purrr::map_dfr(conditions, function(cond) {
+    .compute_dhs_indicator_generic(
+      data = kr_fever,
+      condition = cond,
+      group_var = NULL,
+      ci_method = ci_method
+    )
+  })
+
+  # ---- 6. Compute regional results ----
+  regional_results <- tibble::tibble()
+  if (!is.null(group_var)) {
+    regional_results <- purrr::map_dfr(conditions, function(cond) {
+      .compute_dhs_indicator_generic(
+        data = kr_fever,
+        condition = cond,
+        group_var = group_var,
+        subnational_level = "adm1",
+        ci_method = ci_method
+      )
+    })
+    # Keep only regional rows
+    regional_results <- regional_results |>
+      dplyr::filter(level != "adm0")
+  }
+
+  # ---- 7. Assemble output ----
+  .assemble_dhs_output(
+    national_results = national_results,
+    regional_results = regional_results,
+    survey_meta = survey_meta,
+    geo_source = geo_src,
+    admin_col = "adm1"
   )
 }
 
 
-#' Extract metadata from DHS KR dataset for antimalarial analysis
+# =============================================================================
+# Indicator conditions
+# =============================================================================
+
+#' Internal: Antimalarial indicator conditions
 #'
-#' @param dhs_kr DHS children's recode dataset.
-#' @param survey_vars Named list of survey variable mappings.
-#'
-#' @return List containing survey metadata.
+#' @return List of named lists, each with indicator specification.
 #' @noRd
-.extract_dhs_metadata_antimalarial <- function(dhs_kr, survey_vars = NULL) {
-  metadata <- list()
+.antimalarial_conditions <- function() {
+  denom <- "Under 5 with fever"
+  list(
+    list(
+      indicator       = "ANTIMALARIAL",
+      indicator_code  = "antimalarial",
+      indicator_title = "Any antimalarial treatment among febrile U5",
+      denom_code      = "feb_u5",
+      filter_expr     = NULL,
+      outcome_var     = "has_antimalarial",
+      num_desc        = "Febrile children receiving any antimalarial",
+      denom_desc      = denom
+    ),
+    list(
+      indicator       = "ANTIMALARIAL_PUBLIC",
+      indicator_code  = "antimalarial_public",
+      indicator_title = "Antimalarial from public sector among febrile U5",
+      denom_code      = "feb_u5",
+      filter_expr     = NULL,
+      outcome_var     = "antimalarial_public",
+      num_desc        = "Febrile children receiving antimalarial from public sector",
+      denom_desc      = denom
+    )
+  )
+}
 
-  if ("v000" %in% names(dhs_kr)) {
-    metadata$country_code <- unique(dhs_kr$v000)[1]
-  } else {
-    metadata$country_code <- NA_character_
-  }
 
-  if ("v007" %in% names(dhs_kr)) {
-    metadata$survey_year <- unique(dhs_kr$v007)[1]
-  } else {
-    metadata$survey_year <- NA_integer_
-  }
-
-  metadata$survey_type <- "DHS"
-  metadata$file_type <- "KR"
-  metadata$total_records <- nrow(dhs_kr)
-  metadata$analysis_type <- "Antimalarial Treatment"
-  metadata$methodology <- "WHO World Malaria Report (WMR)"
-  metadata$age_group <- "0-59 months"
-  metadata$condition <- "Fever in last 2 weeks"
-  metadata$cascade_step <- 3L
-  metadata$processed_date <- Sys.Date()
-
-  # Detect antimalarial variables (ml13 preferred, h37 fallback)
-  ml13_vars <- grep("^ml13[a-z]+$", names(dhs_kr), value = TRUE)
-  h37_vars  <- grep("^h37[a-z]+$", names(dhs_kr), value = TRUE)
-  if (length(ml13_vars) > 0) {
-    metadata$antimalarial_vars_detected <- ml13_vars
-    metadata$antimalarial_series <- "ml13"
-  } else {
-    metadata$antimalarial_vars_detected <- h37_vars
-    metadata$antimalarial_series <- if (length(h37_vars) > 0) "h37" else "none"
-  }
-  metadata$n_antimalarial_vars <- length(metadata$antimalarial_vars_detected)
-
-  metadata
+#' Antimalarial Indicator Dictionary
+#'
+#' Returns the full dictionary of antimalarial indicators with metadata.
+#'
+#' @return Tibble with columns: indicator, indicator_code, indicator_title,
+#'   numerator_description, denominator_description, denominator_code.
+#'
+#' @examples
+#' antimalarial_dictionary()
+#'
+#' @export
+antimalarial_dictionary <- function() {
+  conds <- .antimalarial_conditions()
+  tibble::tibble(
+    indicator               = vapply(conds, `[[`, character(1), "indicator"),
+    indicator_code          = vapply(conds, `[[`, character(1), "indicator_code"),
+    indicator_title         = vapply(conds, `[[`, character(1), "indicator_title"),
+    numerator_description   = vapply(conds, `[[`, character(1), "num_desc"),
+    denominator_description = vapply(conds, `[[`, character(1), "denom_desc"),
+    denominator_code        = vapply(conds, `[[`, character(1), "denom_code")
+  )
 }

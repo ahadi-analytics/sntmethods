@@ -185,7 +185,7 @@ test_that("calc_antimalarial_dhs_core works with region_var", {
   expect_equal(nrow(result), 2)
 })
 
-test_that("calc_antimalarial_dhs returns list with data, dict, metadata", {
+test_that("calc_antimalarial_dhs returns named list with adm0", {
   skip_if_not_installed("survey")
 
   set.seed(111)
@@ -209,10 +209,71 @@ test_that("calc_antimalarial_dhs returns list with data, dict, metadata", {
   result <- calc_antimalarial_dhs(kr_data)
 
   expect_type(result, "list")
-  expect_named(result, c("data", "dict", "metadata"))
-  expect_s3_class(result$data, "tbl_df")
-  expect_type(result$metadata, "list")
-  expect_equal(result$metadata$analysis_type, "Antimalarial Treatment")
-  expect_equal(result$metadata$cascade_step, 3L)
-  expect_true(result$metadata$n_antimalarial_vars > 0)
+  expect_true("adm0" %in% names(result))
+  expect_s3_class(result$adm0, "tbl_df")
+
+  # Long-format output should contain indicator_code column
+
+  # antimalarial indicator should always be present
+  expect_true("antimalarial" %in% result$adm0$indicator_code)
+
+  # Expected long-format columns
+  expected_cols <- c(
+    "survey_id", "iso3", "iso2", "survey_type", "survey_year",
+    "adm0", "type", "geo_source", "point", "ci_l", "ci_u",
+    "numerator", "denominator", "indicator", "indicator_code",
+    "numerator_description", "denominator_description", "denominator_code"
+  )
+  for (col in expected_cols) {
+    expect_true(col %in% names(result$adm0), info = paste("Missing column:", col))
+  }
+})
+
+test_that("antimalarial_dictionary returns expected indicators", {
+  dict <- antimalarial_dictionary()
+
+  expect_s3_class(dict, "tbl_df")
+  expect_true("indicator_code" %in% names(dict))
+  expect_true("antimalarial" %in% dict$indicator_code)
+  expect_true("antimalarial_public" %in% dict$indicator_code)
+  expect_equal(nrow(dict), 2)
+})
+
+test_that("calc_antimalarial_dhs_core computes antimalarial_public when h32 vars present", {
+  skip_if_not_installed("survey")
+
+  set.seed(222)
+  n <- 200
+
+  kr_data <- data.frame(
+    v021 = rep(1:20, each = 10),
+    v005 = rep(1000000, n),
+    v022 = rep(1:4, each = 50),
+    v024 = rep(c("REGION1", "REGION2"), each = 100),
+    hw1 = sample(0:59, n, replace = TRUE),
+    h22 = sample(c(0, 1), n, replace = TRUE, prob = c(0.6, 0.4)),
+    ml13a = NA_real_,
+    ml13e = NA_real_,
+    h32a = 0L,  # public hospital
+    h32b = 0L,  # public health center
+    h32c = 0L,  # private hospital
+    stringsAsFactors = FALSE
+  )
+
+  febrile <- kr_data$h22 == 1
+  kr_data$ml13a[febrile] <- sample(c(0, 1), sum(febrile), replace = TRUE, prob = c(0.6, 0.4))
+  kr_data$ml13e[febrile] <- sample(c(0, 1), sum(febrile), replace = TRUE, prob = c(0.7, 0.3))
+  # Some febrile children sought care at public facility
+  kr_data$h32a[febrile] <- sample(c(0, 1), sum(febrile), replace = TRUE, prob = c(0.5, 0.5))
+
+  result <- calc_antimalarial_dhs_core(kr_data)
+
+  expect_s3_class(result, "tbl_df")
+  expect_true("dhs_antimalarial" %in% names(result))
+  # antimalarial_public should be present when h32 vars are available
+  expect_true("dhs_antimalarial_public" %in% names(result))
+  expect_true("dhs_n_antimalarial_public" %in% names(result))
+
+  # antimalarial_public should be <= antimalarial (subset)
+  expect_true(all(result$dhs_antimalarial_public <= result$dhs_antimalarial))
 })
