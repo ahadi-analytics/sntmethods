@@ -402,18 +402,27 @@ test_that("calc_act_dhs excludes artemisinin monotherapies from composite ACT", 
 })
 
 
-test_that("act_wmr_dictionary returns all 11 indicators with titles", {
+test_that("act_wmr_dictionary returns all 32 indicators", {
   dict <- act_wmr_dictionary()
   expect_s3_class(dict, "tbl_df")
-  expect_equal(nrow(dict), 11)
+  expect_equal(nrow(dict), 32)
   expect_true(all(
     c("indicator", "indicator_code", "indicator_title",
       "numerator_description",
       "denominator_description",
       "denominator_code") %in% names(dict)
   ))
-  # All titles should contain "ACTs"
-  expect_true(all(grepl("ACTs", dict$indicator_title)))
+  # ACT indicators
+  expect_true("act_antimal" %in% dict$indicator_code)
+  expect_true("act_pub" %in% dict$indicator_code)
+  # ANTIMALARIAL indicators
+  expect_true("antimal" %in% dict$indicator_code)
+  expect_true("antimal_pub" %in% dict$indicator_code)
+  # MALARIA_DX indicators
+  expect_true("mal_dx_am" %in% dict$indicator_code)
+  expect_true("mal_dx_pub_am" %in% dict$indicator_code)
+  # ACT_PRIVATE_ANTIMALARIAL
+  expect_true("act_priv" %in% dict$indicator_code)
 })
 
 
@@ -489,4 +498,190 @@ test_that("calc_act_dhs with v000/v007 populates survey metadata", {
   expect_equal(adm0$survey_year[1], 2017L)
   expect_equal(adm0$adm0[1], "TOGO")
   expect_equal(adm0$geo_source[1], "survey")
+})
+
+
+# --- Test: ANTIMALARIAL indicators -------------------------------------------
+
+test_that("calc_act_dhs computes ANTIMALARIAL indicators", {
+  skip_if_not_installed("survey")
+  skip_if_not_installed("haven")
+
+  set.seed(42)
+  n <- 300
+
+  kr_data <- data.frame(
+    v021 = rep(1:30, each = 10),
+    v005 = rep(1000000, n),
+    v022 = rep(1:6, each = 50),
+    hw1 = sample(0:59, n, replace = TRUE),
+    h22 = sample(c(0, 1), n, replace = TRUE, prob = c(0.5, 0.5)),
+    b5 = rep(1, n),
+    stringsAsFactors = FALSE
+  )
+
+  febrile <- kr_data$h22 == 1
+  n_febrile <- sum(febrile)
+
+  # ACT variable
+  ml13e_vals <- rep(NA_real_, n)
+  ml13e_vals[febrile] <- sample(c(0, 1), n_febrile, replace = TRUE, prob = c(0.7, 0.3))
+  kr_data$ml13e <- ml13e_vals
+
+  # Another antimalarial (SP/fansidar)
+  ml13a_vals <- rep(NA_real_, n)
+  ml13a_vals[febrile] <- sample(c(0, 1), n_febrile, replace = TRUE, prob = c(0.6, 0.4))
+  kr_data$ml13a <- haven::labelled(
+    ml13a_vals, labels = c("No" = 0, "Yes" = 1),
+    label = "given antimalarial drugs: sp/fansidar"
+  )
+
+  # h32 CSB variables
+  h32a_vals <- rep(NA_real_, n)
+  h32a_vals[febrile] <- sample(c(0, 1), n_febrile, replace = TRUE, prob = c(0.4, 0.6))
+  kr_data$h32a <- haven::labelled(h32a_vals, labels = c("No" = 0, "Yes" = 1))
+  h32b_vals <- rep(NA_real_, n)
+  h32b_vals[febrile] <- sample(c(0, 1), n_febrile, replace = TRUE, prob = c(0.7, 0.3))
+  kr_data$h32b <- haven::labelled(h32b_vals, labels = c("No" = 0, "Yes" = 1))
+
+  result <- calc_act_dhs(
+    kr_data,
+    indicators = c("ANTIMALARIAL", "ANTIMALARIAL_ANY_TREATMENT",
+                    "ANTIMALARIAL_PUBLIC")
+  )
+
+  adm0 <- result$adm0
+
+  # ANTIMALARIAL (overall) should be present
+  am <- adm0[adm0$indicator_code == "antimal", ]
+  expect_true(nrow(am) == 1)
+  expect_true(am$point > 0)
+  expect_true(am$denominator > am$numerator)  # not everyone gets antimalarial
+
+  # ANTIMALARIAL_ANY_TREATMENT should be present (CSB filtered)
+  am_any <- adm0[adm0$indicator_code == "antimal_any_tx", ]
+  expect_true(nrow(am_any) >= 1)  # may be 0 if no CSB data
+})
+
+
+# --- Test: MALARIA_DX indicators --------------------------------------------
+
+test_that("calc_act_dhs computes MALARIA_DX indicators when ml1 present", {
+  skip_if_not_installed("survey")
+  skip_if_not_installed("haven")
+
+  set.seed(42)
+  n <- 300
+
+  kr_data <- data.frame(
+    v021 = rep(1:30, each = 10),
+    v005 = rep(1000000, n),
+    v022 = rep(1:6, each = 50),
+    hw1 = sample(0:59, n, replace = TRUE),
+    h22 = sample(c(0, 1), n, replace = TRUE, prob = c(0.5, 0.5)),
+    b5 = rep(1, n),
+    stringsAsFactors = FALSE
+  )
+
+  febrile <- kr_data$h22 == 1
+  n_febrile <- sum(febrile)
+
+  # ACT variable
+  ml13e_vals <- rep(NA_real_, n)
+  ml13e_vals[febrile] <- sample(c(0, 1), n_febrile, replace = TRUE, prob = c(0.7, 0.3))
+  kr_data$ml13e <- ml13e_vals
+
+  # Antimalarial (SP)
+  ml13a_vals <- rep(NA_real_, n)
+  ml13a_vals[febrile] <- sample(c(0, 1), n_febrile, replace = TRUE, prob = c(0.5, 0.5))
+  kr_data$ml13a <- haven::labelled(
+    ml13a_vals, labels = c("No" = 0, "Yes" = 1),
+    label = "given antimalarial drugs: sp/fansidar"
+  )
+
+  # Malaria diagnostic test (ml1)
+  ml1_vals <- rep(NA_real_, n)
+  ml1_vals[febrile] <- sample(c(0, 1), n_febrile, replace = TRUE, prob = c(0.6, 0.4))
+  kr_data$ml1 <- ml1_vals
+
+  # h32 CSB variables
+  h32a_vals <- rep(NA_real_, n)
+  h32a_vals[febrile] <- sample(c(0, 1), n_febrile, replace = TRUE, prob = c(0.4, 0.6))
+  kr_data$h32a <- haven::labelled(h32a_vals, labels = c("No" = 0, "Yes" = 1))
+
+  result <- calc_act_dhs(
+    kr_data,
+    indicators = c("MALARIA_DX_ANTIMALARIAL", "MALARIA_DX_PUBLIC_ANTIMALARIAL")
+  )
+
+  adm0 <- result$adm0
+
+  # MALARIA_DX_ANTIMALARIAL should be present
+  mdx <- adm0[adm0$indicator_code == "mal_dx_am", ]
+  expect_true(nrow(mdx) == 1)
+  expect_true(mdx$point > 0)
+  expect_true(mdx$point <= 1)
+
+  # CI ordering
+  valid <- !is.na(mdx$ci_l) & !is.na(mdx$ci_u)
+  if (any(valid)) {
+    expect_true(all(mdx$ci_l[valid] <= mdx$point[valid]))
+    expect_true(all(mdx$point[valid] <= mdx$ci_u[valid]))
+  }
+})
+
+
+# --- Test: ACT_PRIVATE_ANTIMALARIAL indicator --------------------------------
+
+test_that("calc_act_dhs computes ACT_PRIVATE_ANTIMALARIAL", {
+  skip_if_not_installed("survey")
+  skip_if_not_installed("haven")
+
+  set.seed(42)
+  n <- 300
+
+  kr_data <- data.frame(
+    v021 = rep(1:30, each = 10),
+    v005 = rep(1000000, n),
+    v022 = rep(1:6, each = 50),
+    hw1 = sample(0:59, n, replace = TRUE),
+    h22 = sample(c(0, 1), n, replace = TRUE, prob = c(0.5, 0.5)),
+    b5 = rep(1, n),
+    stringsAsFactors = FALSE
+  )
+
+  febrile <- kr_data$h22 == 1
+  n_febrile <- sum(febrile)
+
+  # ACT variable
+  ml13e_vals <- rep(NA_real_, n)
+  ml13e_vals[febrile] <- sample(c(0, 1), n_febrile, replace = TRUE, prob = c(0.6, 0.4))
+  kr_data$ml13e <- ml13e_vals
+
+  # Antimalarial
+  ml13a_vals <- rep(NA_real_, n)
+  ml13a_vals[febrile] <- sample(c(0, 1), n_febrile, replace = TRUE, prob = c(0.5, 0.5))
+  kr_data$ml13a <- haven::labelled(
+    ml13a_vals, labels = c("No" = 0, "Yes" = 1),
+    label = "given antimalarial drugs: sp/fansidar"
+  )
+
+  # h32 CSB — need private sector (h32j = private hospital/clinic)
+  h32a_vals <- rep(NA_real_, n)
+  h32a_vals[febrile] <- sample(c(0, 1), n_febrile, replace = TRUE, prob = c(0.5, 0.5))
+  kr_data$h32a <- haven::labelled(h32a_vals, labels = c("No" = 0, "Yes" = 1))
+  h32j_vals <- rep(NA_real_, n)
+  h32j_vals[febrile] <- sample(c(0, 1), n_febrile, replace = TRUE, prob = c(0.5, 0.5))
+  kr_data$h32j <- haven::labelled(
+    h32j_vals, labels = c("No" = 0, "Yes" = 1),
+    label = "private hospital/clinic"
+  )
+
+  result <- calc_act_dhs(
+    kr_data, indicators = "ACT_PRIVATE_ANTIMALARIAL"
+  )
+
+  adm0 <- result$adm0
+  act_priv <- adm0[adm0$indicator_code == "act_priv", ]
+  expect_true(nrow(act_priv) >= 1)
 })

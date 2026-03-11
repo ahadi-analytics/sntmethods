@@ -379,6 +379,36 @@ calc_act_dhs <- function(
     cli::cli_alert_success("CSB indicators created")
   }
 
+  # ---- 5b. Add malaria diagnostic test variable (ml1) ----
+  # ml1 = "blood taken from finger/heel for malaria testing"
+  # Used for MALARIA_DX indicators
+  malaria_dx_var <- survey_vars$malaria_dx %||% "ml1"
+  if (malaria_dx_var %in% names(kr_fever)) {
+    kr_fever$had_test <- dplyr::if_else(
+      kr_fever[[malaria_dx_var]] == 1, 1, 0, missing = NA_real_
+    )
+    n_tested <- sum(kr_fever$had_test == 1, na.rm = TRUE)
+    cli::cli_alert_info(
+      "Malaria diagnostic test ({.var {malaria_dx_var}}): {n_tested}/{nrow(kr_fever)}"
+    )
+  } else {
+    # Try h47 as fallback
+    if ("h47" %in% names(kr_fever)) {
+      kr_fever$had_test <- dplyr::if_else(
+        kr_fever$h47 == 1, 1, 0, missing = NA_real_
+      )
+      n_tested <- sum(kr_fever$had_test == 1, na.rm = TRUE)
+      cli::cli_alert_info(
+        "Malaria diagnostic test ({.var h47}): {n_tested}/{nrow(kr_fever)}"
+      )
+    } else {
+      cli::cli_alert_warning(
+        "No malaria diagnostic test variable ({.var {malaria_dx_var}}/{.var h47}) found; MALARIA_DX indicators will be skipped"
+      )
+      kr_fever$had_test <- NA_real_
+    }
+  }
+
   # ---- 6. Spatial join (GE + shapefile) or region grouping ----
 
   group_var <- NULL
@@ -645,108 +675,17 @@ calc_act_dhs <- function(
 #'
 #' @export
 act_wmr_dictionary <- function() {
-  n <- 11L
+  conds <- .act_wmr_conditions()
   tibble::tibble(
-    indicator = c(
-      "ACT_CARE_SEEKERS",
-      "ACT_ANTIMALARIAL",
-      "ACT_ANY_TREATMENT",
-      "ACT_TRAINED_ANTIMALARIAL",
-      "ACT_PUBLIC_ANTIMALARIAL",
-      "ACT_PUBLIC_NOCHW_ANTIMALARIAL",
-      "ACT_PUBLIC_CHW_ANTIMALARIAL",
-      "ACT_PRIVATE_FORMAL_ANTIMALARIAL",
-      "ACT_PRIVATE_PHARMACY_ANTIMALARIAL",
-      "ACT_PRIVATE_INFORMAL_ANTIMALARIAL",
-      "ACT_PRIVATE_FORMAL_PHA_ANTIMALARIAL"
-    ),
-    indicator_code = c(
-      "act_care_seek",
-      "act_antimal", "act_any_tx",
-      "act_trained", "act_pub",
-      "act_pub_nochw", "act_chw",
-      "act_priv_formal", "act_priv_pharm",
-      "act_priv_informal", "act_priv_form_pha"
-    ),
-    indicator_title = c(
-      "Use of ACTs among care seekers",
-      "Use of ACTs among antimalarial recipients",
-      "Use of ACTs among care seekers treated with antimalarial",
-      "Use of ACTs among trained provider + antimalarial",
-      "Use of ACTs among public sector + antimalarial",
-      "Use of ACTs among public sector excl. CHW + antimalarial",
-      "Use of ACTs among CHW + antimalarial",
-      "Use of ACTs among private formal + antimalarial",
-      "Use of ACTs among pharmacy + antimalarial",
-      "Use of ACTs among private informal + antimalarial",
-      "Use of ACTs among private formal or pharmacy + antimalarial"
-    ),
-    numerator_description = rep(
-      "Received ACT treatment", n
-    ),
-    denominator_description = c(
-      "Under 5 with fever who sought any treatment (public or private)",
-      "Under 5 with fever who received any antimalarial",
-      paste0(
-        "Under 5 with fever who sought any treatment ",
-        "(public or private) and received ",
-        "antimalarial"
-      ),
-      paste0(
-        "Under 5 with fever who saw trained provider ",
-        "and received antimalarial"
-      ),
-      paste0(
-        "Under 5 with fever who sought public sector ",
-        "care (incl. CHW) and received ",
-        "antimalarial"
-      ),
-      paste0(
-        "Under 5 with fever who sought public sector ",
-        "care (excl. CHW) and received ",
-        "antimalarial"
-      ),
-      paste0(
-        "Under 5 with fever who sought CHW care and ",
-        "received antimalarial"
-      ),
-      paste0(
-        "Under 5 with fever who sought private formal ",
-        "sector care and received antimalarial"
-      ),
-      paste0(
-        "Under 5 with fever who sought pharmacy care ",
-        "and received antimalarial"
-      ),
-      paste0(
-        "Under 5 with fever who sought private ",
-        "informal sector care and received ",
-        "antimalarial"
-      ),
-      paste0(
-        "Under 5 with fever who sought private formal ",
-        "or pharmacy care and received ",
-        "antimalarial"
-      )
-    ),
-    denominator_code = c(
-      "feb_u5_any_tx",
-      "feb_u5_am", "feb_u5_any_tx_am",
-      "feb_u5_trained_am", "feb_u5_pub_am",
-      "feb_u5_pub_nochw_am", "feb_u5_chw_am",
-      "feb_u5_priv_formal_am",
-      "feb_u5_priv_pharm_am",
-      "feb_u5_priv_informal_am",
-      "feb_u5_priv_form_pha_am"
-    ),
-    wmr_cascade_step = c(3L, rep(4L, 10L)),
-    requires_csb = c(
-      TRUE, FALSE, TRUE, TRUE, TRUE, TRUE,
-      TRUE, TRUE, TRUE, TRUE, TRUE
-    ),
-    requires_am = c(
-      FALSE, rep(TRUE, 10L)
-    )
+    indicator = vapply(conds, `[[`, character(1), "indicator"),
+    indicator_code = vapply(conds, `[[`, character(1), "indicator_code"),
+    indicator_title = vapply(conds, `[[`, character(1), "indicator_title"),
+    outcome_var = vapply(conds, function(x) x$outcome_var %||% "has_act",
+                          character(1)),
+    numerator_description = vapply(conds, `[[`, character(1), "num_desc"),
+    denominator_description = vapply(conds, `[[`, character(1), "denom_desc"),
+    denominator_code = vapply(conds, `[[`, character(1), "denom_code"),
+    data_level = "adm0"
   )
 }
 
@@ -905,6 +844,300 @@ act_wmr_dictionary <- function() {
         "Under 5 with fever who sought private ",
         "formal or pharmacy care and ",
         "received antimalarial")
+    ),
+    # ACT_PRIVATE_ANTIMALARIAL (private sector + antimalarial)
+    list(
+      indicator      = "ACT_PRIVATE_ANTIMALARIAL",
+      indicator_code = "act_priv",
+      indicator_title = "Use of ACTs among private sector + antimalarial",
+      denom_code     = "feb_u5_priv_am",
+      filter_expr    = quote(
+        csb_private == 1 & received_antimalarial == 1),
+      num_desc       = num,
+      denom_desc     = paste0(
+        "Under 5 with fever who sought private ",
+        "sector care and received antimalarial")
+    ),
+
+    # ====================================================================
+    # ANTIMALARIAL indicators — outcome: received_antimalarial
+    # ====================================================================
+    list(
+      indicator      = "ANTIMALARIAL",
+      indicator_code = "antimal",
+      indicator_title = "Receive antimalarial",
+      denom_code     = "feb_u5",
+      filter_expr    = NULL,
+      outcome_var    = "received_antimalarial",
+      num_desc       = "Receive antimalarial",
+      denom_desc     = "Under 5 with fever"
+    ),
+    list(
+      indicator      = "ANTIMALARIAL_ANY_TREATMENT",
+      indicator_code = "antimal_any_tx",
+      indicator_title = "Receive antimalarial among care seekers",
+      denom_code     = "feb_u5_any_tx",
+      filter_expr    = quote(csb_any_treatment == 1),
+      outcome_var    = "received_antimalarial",
+      num_desc       = "Receive antimalarial",
+      denom_desc     = paste0(
+        "Under 5 with fever who sought any ",
+        "treatment (public or private)")
+    ),
+    list(
+      indicator      = "ANTIMALARIAL_TRAINED",
+      indicator_code = "antimal_trained",
+      indicator_title = "Receive antimalarial among trained provider",
+      denom_code     = "feb_u5_trained",
+      filter_expr    = quote(csb_trained_provider == 1),
+      outcome_var    = "received_antimalarial",
+      num_desc       = "Receive antimalarial",
+      denom_desc     = paste0(
+        "Under 5 with fever who sought treatment ",
+        "in trained provider")
+    ),
+    list(
+      indicator      = "ANTIMALARIAL_PUBLIC",
+      indicator_code = "antimal_pub",
+      indicator_title = "Receive antimalarial among public sector",
+      denom_code     = "feb_u5_pub",
+      filter_expr    = quote(csb_public == 1),
+      outcome_var    = "received_antimalarial",
+      num_desc       = "Receive antimalarial",
+      denom_desc     = paste0(
+        "Under 5 with fever who sought treatment ",
+        "in public sector")
+    ),
+    list(
+      indicator      = "ANTIMALARIAL_PUBLIC_NOCHW",
+      indicator_code = "antimal_pub_nochw",
+      indicator_title = paste0(
+        "Receive antimalarial among public sector ",
+        "excl. CHW"),
+      denom_code     = "feb_u5_pub_nochw",
+      filter_expr    = quote(csb_public_nochw == 1),
+      outcome_var    = "received_antimalarial",
+      num_desc       = "Receive antimalarial",
+      denom_desc     = paste0(
+        "Under 5 with fever who sought treatment ",
+        "in public sector (excluding CHW)")
+    ),
+    list(
+      indicator      = "ANTIMALARIAL_CHW",
+      indicator_code = "antimal_chw",
+      indicator_title = "Receive antimalarial among CHW",
+      denom_code     = "feb_u5_chw",
+      filter_expr    = quote(csb_chw == 1),
+      outcome_var    = "received_antimalarial",
+      num_desc       = "Receive antimalarial",
+      denom_desc     = paste0(
+        "Under 5 with fever who sought treatment ",
+        "in CHW")
+    ),
+    list(
+      indicator      = "ANTIMALARIAL_PRIVATE",
+      indicator_code = "antimal_priv",
+      indicator_title = "Receive antimalarial among private sector",
+      denom_code     = "feb_u5_priv",
+      filter_expr    = quote(csb_private == 1),
+      outcome_var    = "received_antimalarial",
+      num_desc       = "Receive antimalarial",
+      denom_desc     = paste0(
+        "Under 5 with fever who sought treatment ",
+        "in private sector")
+    ),
+    list(
+      indicator      = "ANTIMALARIAL_FORMAL",
+      indicator_code = "antimal_formal",
+      indicator_title = "Receive antimalarial among private formal",
+      denom_code     = "feb_u5_priv_formal",
+      filter_expr    = quote(csb_private_formal_ind == 1),
+      outcome_var    = "received_antimalarial",
+      num_desc       = "Receive antimalarial",
+      denom_desc     = paste0(
+        "Under 5 with fever who sought treatment ",
+        "in private formal sector")
+    ),
+    list(
+      indicator      = "ANTIMALARIAL_PHARMACY",
+      indicator_code = "antimal_pharm",
+      indicator_title = "Receive antimalarial among pharmacy",
+      denom_code     = "feb_u5_pharm",
+      filter_expr    = quote(csb_pharmacy == 1),
+      outcome_var    = "received_antimalarial",
+      num_desc       = "Receive antimalarial",
+      denom_desc     = paste0(
+        "Under 5 with fever who sought treatment ",
+        "in pharmacy")
+    ),
+    list(
+      indicator      = "ANTIMALARIAL_PRIVATE_INFORMAL",
+      indicator_code = "antimal_priv_informal",
+      indicator_title = "Receive antimalarial among private informal",
+      denom_code     = "feb_u5_priv_informal",
+      filter_expr    = quote(csb_private_informal == 1),
+      outcome_var    = "received_antimalarial",
+      num_desc       = "Receive antimalarial",
+      denom_desc     = paste0(
+        "Under 5 with fever who sought treatment ",
+        "in private informal")
+    ),
+    list(
+      indicator      = "ANTIMALARIAL_FORMAL_PHARMACY",
+      indicator_code = "antimal_form_pharm",
+      indicator_title = paste0(
+        "Receive antimalarial among private ",
+        "formal or pharmacy"),
+      denom_code     = "feb_u5_priv_form_pha",
+      filter_expr    = quote(csb_private_formal_pha == 1),
+      outcome_var    = "received_antimalarial",
+      num_desc       = "Receive antimalarial",
+      denom_desc     = paste0(
+        "Under 5 with fever who sought treatment ",
+        "in private formal or pharmacy")
+    ),
+
+    # ====================================================================
+    # MALARIA_DX indicators — outcome: had_test (malaria diagnostic)
+    # ====================================================================
+    list(
+      indicator      = "MALARIA_DX_ANTIMALARIAL",
+      indicator_code = "mal_dx_am",
+      indicator_title = "Get malaria diagnostic test among AM recipients",
+      denom_code     = "feb_u5_am",
+      filter_expr    = quote(received_antimalarial == 1),
+      outcome_var    = "had_test",
+      num_desc       = "Get malaria diagnostic test",
+      denom_desc     = paste0(
+        "Under 5 with fever who received ",
+        "antimalarial")
+    ),
+    list(
+      indicator      = "MALARIA_DX_PUBLIC_ANTIMALARIAL",
+      indicator_code = "mal_dx_pub_am",
+      indicator_title = paste0(
+        "Get malaria diagnostic test among ",
+        "public sector + AM"),
+      denom_code     = "feb_u5_pub_am",
+      filter_expr    = quote(
+        csb_public == 1 & received_antimalarial == 1),
+      outcome_var    = "had_test",
+      num_desc       = "Get malaria diagnostic test",
+      denom_desc     = paste0(
+        "Under 5 with fever who sought treatment ",
+        "in public sector and received antimalarial")
+    ),
+    list(
+      indicator      = "MALARIA_DX_PUBLIC_NOCHW_ANTIMALARIAL",
+      indicator_code = "mal_dx_pub_nochw_am",
+      indicator_title = paste0(
+        "Get malaria diagnostic test among ",
+        "public excl. CHW + AM"),
+      denom_code     = "feb_u5_pub_nochw_am",
+      filter_expr    = quote(
+        csb_public_nochw == 1 & received_antimalarial == 1),
+      outcome_var    = "had_test",
+      num_desc       = "Get malaria diagnostic test",
+      denom_desc     = paste0(
+        "Under 5 with fever who sought treatment ",
+        "in public sector (excluding CHW) and ",
+        "received antimalarial")
+    ),
+    list(
+      indicator      = "MALARIA_DX_CSB_CHW_ANTIMALARIAL",
+      indicator_code = "mal_dx_chw_am",
+      indicator_title = paste0(
+        "Get malaria diagnostic test among ",
+        "CHW + AM"),
+      denom_code     = "feb_u5_chw_am",
+      filter_expr    = quote(
+        csb_chw == 1 & received_antimalarial == 1),
+      outcome_var    = "had_test",
+      num_desc       = "Get malaria diagnostic test",
+      denom_desc     = paste0(
+        "Under 5 with fever who sought treatment ",
+        "in CHW and received antimalarial")
+    ),
+    list(
+      indicator      = "MALARIA_DX_CSB_PRIVATE_ANTIMALARIAL",
+      indicator_code = "mal_dx_priv_am",
+      indicator_title = paste0(
+        "Get malaria diagnostic test among ",
+        "private sector + AM"),
+      denom_code     = "feb_u5_priv_am",
+      filter_expr    = quote(
+        csb_private == 1 & received_antimalarial == 1),
+      outcome_var    = "had_test",
+      num_desc       = "Get malaria diagnostic test",
+      denom_desc     = paste0(
+        "Under 5 with fever who sought treatment ",
+        "in private sector and received antimalarial")
+    ),
+    list(
+      indicator      = "MALARIA_DX_CSB_PRIVATE_FORMAL_ANTIMALARIAL",
+      indicator_code = "mal_dx_priv_formal_am",
+      indicator_title = paste0(
+        "Get malaria diagnostic test among ",
+        "private formal + AM"),
+      denom_code     = "feb_u5_priv_formal_am",
+      filter_expr    = quote(
+        csb_private_formal_ind == 1 &
+          received_antimalarial == 1),
+      outcome_var    = "had_test",
+      num_desc       = "Get malaria diagnostic test",
+      denom_desc     = paste0(
+        "Under 5 with fever who sought treatment ",
+        "in private formal sector and ",
+        "received antimalarial")
+    ),
+    list(
+      indicator      = "MALARIA_DX_CSB_PHARMACY_ANTIMALARIAL",
+      indicator_code = "mal_dx_pharm_am",
+      indicator_title = paste0(
+        "Get malaria diagnostic test among ",
+        "pharmacy + AM"),
+      denom_code     = "feb_u5_pharm_am",
+      filter_expr    = quote(
+        csb_pharmacy == 1 & received_antimalarial == 1),
+      outcome_var    = "had_test",
+      num_desc       = "Get malaria diagnostic test",
+      denom_desc     = paste0(
+        "Under 5 with fever who sought treatment ",
+        "in pharmacy and received antimalarial")
+    ),
+    list(
+      indicator      = "MALARIA_DX_PRIVATE_INFORMAL_ANTIMALARIAL",
+      indicator_code = "mal_dx_priv_informal_am",
+      indicator_title = paste0(
+        "Get malaria diagnostic test among ",
+        "private informal + AM"),
+      denom_code     = "feb_u5_priv_informal_am",
+      filter_expr    = quote(
+        csb_private_informal == 1 &
+          received_antimalarial == 1),
+      outcome_var    = "had_test",
+      num_desc       = "Get malaria diagnostic test",
+      denom_desc     = paste0(
+        "Under 5 with fever who sought treatment ",
+        "in private informal and ",
+        "received antimalarial")
+    ),
+    list(
+      indicator      = "MALARIA_DX_CSB_PRIVATE_FORMAL_PHA_ANTIMALARIAL",
+      indicator_code = "mal_dx_priv_form_pha_am",
+      indicator_title = paste0(
+        "Get malaria diagnostic test among ",
+        "private formal or pharmacy + AM"),
+      denom_code     = "feb_u5_priv_form_pha_am",
+      filter_expr    = quote(
+        csb_private_formal_pha == 1 &
+          received_antimalarial == 1),
+      outcome_var    = "had_test",
+      num_desc       = "Get malaria diagnostic test",
+      denom_desc     = paste0(
+        "Under 5 with fever who sought treatment ",
+        "in private formal or pharmacy and ",
+        "received antimalarial")
     )
   )
 }
@@ -1058,43 +1291,95 @@ act_wmr_dictionary <- function() {
                                     subnational_level = NULL,
                                     ci_method = "logit") {
 
-  # Apply condition filter
-  filtered <- tryCatch(
-    dplyr::filter(data, !!condition$filter_expr),
-    error = function(e) tibble::tibble()
-  )
+  # Determine outcome variable (default: has_act for backwards compat)
+  outcome_var <- condition$outcome_var %||% "has_act"
+
+  # Apply condition filter (NULL means no filter — use all data)
+  if (is.null(condition$filter_expr)) {
+    filtered <- data
+  } else {
+    filtered <- tryCatch(
+      dplyr::filter(data, !!condition$filter_expr),
+      error = function(e) tibble::tibble()
+    )
+  }
 
   ind_title <- condition$indicator_title
-  n_denom <- nrow(filtered)  # denominator (matches denominator_description)
+
+  # Check outcome var exists
+
+  if (!outcome_var %in% names(filtered)) {
+    return(tibble::tibble())
+  }
+
+  # Set the outcome column as .wmr_outcome for survey estimation
+  filtered$.wmr_outcome <- filtered[[outcome_var]]
+
+  # Drop rows with NA outcome
+  filtered <- filtered[!is.na(filtered$.wmr_outcome), ]
+
+  n_denom <- nrow(filtered)
   if (n_denom == 0) {
-    # Drop indicators with 0 observations — no estimate possible
     return(tibble::tibble())
   }
 
   # --- Survey design ---
+  n_clusters <- dplyr::n_distinct(filtered$cluster_id)
   use_strata <- dplyr::n_distinct(filtered$stratum_id) > 1
 
-  svy <- if (use_strata) {
-    survey::svydesign(
-      ids = ~cluster_id, strata = ~stratum_id,
-      weights = ~survey_weight, data = filtered, nest = TRUE
+  # If only 1 cluster, can't estimate variance
+  if (n_clusters < 2) {
+    n_denom_w <- round(sum(filtered$survey_weight, na.rm = TRUE))
+    n_numer_w <- round(sum(
+      filtered$survey_weight * (filtered$.wmr_outcome == 1), na.rm = TRUE
+    ))
+    point_est <- n_numer_w / n_denom_w
+    national <- tibble::tibble(
+      level = "adm0", location = "National",
+      point = point_est, ci_l = NA_real_, ci_u = NA_real_,
+      numerator = n_numer_w, denominator = n_denom_w
     )
-  } else {
+    return(
+      national |>
+        dplyr::mutate(
+          indicator               = condition$indicator_title,
+          indicator_code          = condition$indicator_code,
+          numerator_description   = condition$num_desc,
+          denominator_description = condition$denom_desc,
+          denominator_code        = condition$denom_code
+        )
+    )
+  }
+
+  svy <- tryCatch({
+    if (use_strata) {
+      survey::svydesign(
+        ids = ~cluster_id, strata = ~stratum_id,
+        weights = ~survey_weight, data = filtered, nest = TRUE
+      )
+    } else {
+      survey::svydesign(
+        ids = ~cluster_id, weights = ~survey_weight,
+        data = filtered, nest = TRUE
+      )
+    }
+  }, error = function(e) {
     survey::svydesign(
       ids = ~cluster_id, weights = ~survey_weight,
       data = filtered, nest = TRUE
     )
-  }
+  })
 
   # --- National estimate ---
   # Weighted counts (matches WMR format: numerator/denominator ≈ point)
   n_denom_w <- round(sum(filtered$survey_weight, na.rm = TRUE))
   n_numer_w <- round(sum(
-    filtered$survey_weight * (filtered$has_act == 1), na.rm = TRUE
+    filtered$survey_weight * (filtered$.wmr_outcome == 1), na.rm = TRUE
   ))
 
   national <- tryCatch({
-    est <- survey::svyciprop(~has_act, svy, method = ci_method, na.rm = TRUE)
+    est <- survey::svyciprop(~.wmr_outcome, svy, method = ci_method,
+                              na.rm = TRUE)
     ci  <- stats::confint(est)
     tibble::tibble(
       level       = "adm0",
@@ -1124,7 +1409,7 @@ act_wmr_dictionary <- function() {
 
     regional <- tryCatch({
       by_result <- survey::svyby(
-        ~has_act,
+        ~.wmr_outcome,
         by       = group_formula,
         design   = svy,
         FUN      = survey::svyciprop,
@@ -1140,7 +1425,7 @@ act_wmr_dictionary <- function() {
         dplyr::group_by(.data[[group_var]]) |>
         dplyr::summarise(
           numerator = round(sum(
-            survey_weight * (has_act == 1), na.rm = TRUE
+            survey_weight * (.wmr_outcome == 1), na.rm = TRUE
           )),
           .groups = "drop"
         )
@@ -1154,15 +1439,15 @@ act_wmr_dictionary <- function() {
         )
 
       # Normalize CI column names (svyby names vary)
-      names(by_result)[names(by_result) == "ci_l"] <- "ci_l.has_act"
-      names(by_result)[names(by_result) == "ci_u"] <- "ci_u.has_act"
+      names(by_result)[names(by_result) == "ci_l"] <- "ci_l..wmr_outcome"
+      names(by_result)[names(by_result) == "ci_u"] <- "ci_u..wmr_outcome"
 
       by_result |>
         dplyr::rename(
           location = !!group_var,
-          point    = has_act,
-          ci_l     = `ci_l.has_act`,
-          ci_u     = `ci_u.has_act`
+          point    = .wmr_outcome,
+          ci_l     = `ci_l..wmr_outcome`,
+          ci_u     = `ci_u..wmr_outcome`
         ) |>
         dplyr::mutate(location = as.character(location)) |>
         dplyr::left_join(
@@ -1178,7 +1463,8 @@ act_wmr_dictionary <- function() {
           by = "location"
         ) |>
         dplyr::mutate(level = sub_level) |>
-        dplyr::select(level, location, point, ci_l, ci_u, numerator, denominator)
+        dplyr::select(level, location, point, ci_l, ci_u, numerator,
+                       denominator)
 
     }, error = function(e) {
       cli::cli_alert_warning(
@@ -1186,8 +1472,6 @@ act_wmr_dictionary <- function() {
       )
       tibble::tibble()
     })
-
-    # region already contains text labels (set in section 6), no mapping needed
   }
 
   # --- Combine ---
