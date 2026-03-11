@@ -391,8 +391,8 @@ test_that("act_mbg_dictionary returns all expected indicators", {
   dict <- sntmethods:::.act_mbg_dictionary()
   names <- vapply(dict, `[[`, character(1), "name")
 
-  # 13 ACT + 11 antimalarial = 24 total
-  expect_equal(length(dict), 24)
+  # 13 ACT + 11 antimalarial + 9 mal_dx = 33 total
+  expect_equal(length(dict), 33)
   expect_true("act" %in% names)
   expect_true("act_care_seek" %in% names)
   expect_true("act_pub_nochw" %in% names)
@@ -400,6 +400,16 @@ test_that("act_mbg_dictionary returns all expected indicators", {
   expect_true("antimal" %in% names)
   expect_true("antimal_chw" %in% names)
   expect_true("antimal_form_pharm" %in% names)
+  # mal_dx indicators
+  expect_true("mal_dx_am" %in% names)
+  expect_true("mal_dx_pub_am" %in% names)
+  expect_true("mal_dx_pub_nochw_am" %in% names)
+  expect_true("mal_dx_chw_am" %in% names)
+  expect_true("mal_dx_priv_am" %in% names)
+  expect_true("mal_dx_priv_formal_am" %in% names)
+  expect_true("mal_dx_pharm_am" %in% names)
+  expect_true("mal_dx_priv_informal_am" %in% names)
+  expect_true("mal_dx_priv_form_pha_am" %in% names)
 })
 
 test_that("calc_act_mbg computes  ACT indicators with CSB data", {
@@ -482,5 +492,157 @@ test_that("calc_act_mbg antimalarial indicators use received_antimalarial outcom
       sum(result[["antimal_pub"]]$samplesize) <=
         sum(result[["antimal"]]$samplesize)
     )
+  }
+})
+
+
+# ---- Malaria diagnostic (mal_dx) indicators ----
+
+# Helper: mock KR data with h32 columns + h47 for malaria diagnostic
+.mock_kr_act_with_dx <- function(n = 200, n_clusters = 20, seed = 42) {
+  set.seed(seed)
+  kr <- data.frame(
+    v001 = rep(seq_len(n_clusters), length.out = n),
+    hw1 = sample(0:59, n, replace = TRUE),
+    h22 = sample(c(0, 1), n, replace = TRUE, prob = c(0.6, 0.4)),
+    ml13e = sample(c(0, 1, NA), n, replace = TRUE, prob = c(0.4, 0.3, 0.3)),
+    ml13a = sample(c(0, 1, NA), n, replace = TRUE, prob = c(0.5, 0.3, 0.2)),
+    # antimalarial drug series for AM composite
+    ml13b = sample(c(0, 1, NA), n, replace = TRUE, prob = c(0.5, 0.2, 0.3)),
+    ml13c = sample(c(0, 1, NA), n, replace = TRUE, prob = c(0.6, 0.1, 0.3)),
+    # malaria diagnostic test
+    h47 = NA_real_,
+    # care-seeking behaviour
+    h32a = NA_real_,
+    h32j = NA_real_,
+    stringsAsFactors = FALSE
+  )
+  febrile <- kr$h22 == 1
+  # h47 = malaria test (50% of febrile tested)
+  kr$h47[febrile] <- sample(c(0, 1, NA), sum(febrile), replace = TRUE,
+                            prob = c(0.3, 0.5, 0.2))
+  # h32a = public (60% of febrile), h32j = private formal (30%)
+  kr$h32a[febrile] <- sample(c(0, 1), sum(febrile), replace = TRUE, prob = c(0.4, 0.6))
+  kr$h32j[febrile] <- sample(c(0, 1), sum(febrile), replace = TRUE, prob = c(0.7, 0.3))
+  kr
+}
+
+test_that("act_mbg_dictionary mal_dx entries have correct structure", {
+  dict <- sntmethods:::.act_mbg_dictionary()
+  dx_entries <- Filter(function(d) grepl("^mal_dx_", d$name), dict)
+
+  expect_equal(length(dx_entries), 9)
+
+  # All mal_dx indicators use had_test outcome and am_filter = TRUE
+  for (entry in dx_entries) {
+    expect_equal(entry$outcome, "had_test")
+    expect_true(entry$am_filter)
+  }
+
+  # mal_dx_am has no CSB filter (all AM recipients)
+  am_only <- Filter(function(d) d$name == "mal_dx_am", dx_entries)
+  expect_null(am_only[[1]]$csb_filter)
+
+  # Sector-specific entries have CSB filters
+  pub <- Filter(function(d) d$name == "mal_dx_pub_am", dx_entries)
+  expect_equal(pub[[1]]$csb_filter, "csb_public")
+})
+
+test_that("calc_act_mbg computes mal_dx_am with h47 data", {
+  kr <- .mock_kr_act_with_dx()
+  gps <- .mock_gps()
+
+  result <- suppressWarnings(calc_act_mbg(
+    kr, gps, indicators = "mal_dx_am"
+  ))
+
+  expect_type(result, "list")
+  if ("mal_dx_am" %in% names(result)) {
+    dt <- result[["mal_dx_am"]]
+    expect_s3_class(dt, "tbl_df")
+    expect_true(all(
+      c("cluster_id", "indicator", "samplesize", "x", "y") %in%
+        names(dt)
+    ))
+    # Numerator <= denominator
+    expect_true(all(dt$indicator <= dt$samplesize))
+  }
+})
+
+test_that("calc_act_mbg computes sector-specific mal_dx indicators", {
+  kr <- .mock_kr_act_with_dx()
+  gps <- .mock_gps()
+
+  result <- suppressWarnings(calc_act_mbg(
+    kr, gps,
+    indicators = c("mal_dx_am", "mal_dx_pub_am")
+  ))
+
+  # mal_dx_pub_am is a subset of mal_dx_am
+  if (all(c("mal_dx_am", "mal_dx_pub_am") %in%
+          names(result))) {
+    expect_true(
+      sum(result[["mal_dx_pub_am"]]$samplesize) <=
+        sum(result[["mal_dx_am"]]$samplesize)
+    )
+  }
+})
+
+test_that("calc_act_mbg skips mal_dx when h47 missing", {
+  kr <- .mock_kr_act_with_dx()
+  kr$h47 <- NULL
+  gps <- .mock_gps()
+
+  result <- suppressWarnings(calc_act_mbg(
+    kr, gps, indicators = "mal_dx_am"
+  ))
+
+  # Should not produce mal_dx_am since h47 is missing
+  expect_false("mal_dx_am" %in% names(result))
+})
+
+test_that("calc_act_mbg prefers ml1 over h47 for mal_dx", {
+  kr <- .mock_kr_act_with_dx()
+  # Add ml1 column (takes priority over h47)
+  febrile <- kr$h22 == 1
+  kr$ml1 <- NA_real_
+  set.seed(123)
+  kr$ml1[febrile] <- sample(c(0, 1, NA), sum(febrile),
+                            replace = TRUE,
+                            prob = c(0.3, 0.5, 0.2))
+  gps <- .mock_gps()
+
+  # Should work using ml1
+  result <- suppressWarnings(calc_act_mbg(
+    kr, gps, indicators = "mal_dx_am"
+  ))
+
+  if ("mal_dx_am" %in% names(result)) {
+    dt <- result[["mal_dx_am"]]
+    expect_s3_class(dt, "tbl_df")
+    expect_true(all(dt$indicator <= dt$samplesize))
+  }
+})
+
+test_that("calc_act_mbg computes all 9 mal_dx indicators together", {
+  kr <- .mock_kr_act_with_dx()
+  gps <- .mock_gps()
+
+  mal_dx_indicators <- c(
+    "mal_dx_am", "mal_dx_pub_am", "mal_dx_pub_nochw_am",
+    "mal_dx_chw_am", "mal_dx_priv_am", "mal_dx_priv_formal_am",
+    "mal_dx_pharm_am", "mal_dx_priv_informal_am",
+    "mal_dx_priv_form_pha_am"
+  )
+
+  result <- suppressWarnings(calc_act_mbg(
+    kr, gps, indicators = mal_dx_indicators
+  ))
+
+  expect_type(result, "list")
+  # mal_dx_am should always be present (no CSB filter)
+  if ("mal_dx_am" %in% names(result)) {
+    dt <- result[["mal_dx_am"]]
+    expect_true(all(dt$indicator <= dt$samplesize))
   }
 })

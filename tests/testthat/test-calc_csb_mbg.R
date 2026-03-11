@@ -200,16 +200,16 @@ test_that("prep_csb_mbg returns single tibble", {
 
 # ---- Granular Long-format indicators ----
 
-test_that("calc_csb_mbg computes public_nochw indicator", {
+test_that("calc_csb_mbg computes pub_nochw indicator", {
   kr <- .mock_kr_csb_mbg()
   gps <- .mock_gps_csb()
 
   result <- calc_csb_mbg(
-    kr, gps, indicators = "public_nochw"
+    kr, gps, indicators = "pub_nochw"
   )
-  expect_true("csb_public_nochw" %in% names(result))
+  expect_true("csb_pub_nochw" %in% names(result))
 
-  dt <- result[["csb_public_nochw"]]
+  dt <- result[["csb_pub_nochw"]]
   expect_s3_class(dt, "tbl_df")
   expect_true(all(dt$indicator <= dt$samplesize))
 })
@@ -224,36 +224,36 @@ test_that("calc_csb_mbg computes pharmacy indicator", {
   expect_true("csb_pharmacy" %in% names(result))
 })
 
-test_that("calc_csb_mbg computes private_formal indicator", {
+test_that("calc_csb_mbg computes priv_formal indicator", {
   kr <- .mock_kr_csb_mbg()
   gps <- .mock_gps_csb()
 
   result <- calc_csb_mbg(
-    kr, gps, indicators = "private_formal"
+    kr, gps, indicators = "priv_formal"
   )
-  expect_true("csb_private_formal" %in% names(result))
+  expect_true("csb_priv_formal" %in% names(result))
 })
 
-test_that("calc_csb_mbg computes private_informal indicator", {
+test_that("calc_csb_mbg computes priv_informal indicator", {
   kr <- .mock_kr_csb_mbg()
   gps <- .mock_gps_csb()
 
   result <- calc_csb_mbg(
-    kr, gps, indicators = "private_informal"
+    kr, gps, indicators = "priv_informal"
   )
-  expect_true("csb_private_informal" %in% names(result))
+  expect_true("csb_priv_informal" %in% names(result))
 })
 
-test_that("calc_csb_mbg computes private_formal_pha indicator", {
+test_that("calc_csb_mbg computes priv_form_pha indicator", {
   kr <- .mock_kr_csb_mbg()
   gps <- .mock_gps_csb()
 
   result <- calc_csb_mbg(
     kr, gps,
-    indicators = "private_formal_pha"
+    indicators = "priv_form_pha"
   )
   expect_true(
-    "csb_private_formal_pha" %in% names(result)
+    "csb_priv_form_pha" %in% names(result)
   )
 })
 
@@ -262,21 +262,21 @@ test_that("calc_csb_mbg computes all 11 indicators together", {
   gps <- .mock_gps_csb()
 
   all_inds <- c(
-    "any", "public", "public_nochw", "chw",
-    "private", "private_formal", "pharmacy",
-    "private_informal", "private_formal_pha",
+    "any", "public", "pub_nochw", "chw",
+    "private", "priv_formal", "pharmacy",
+    "priv_informal", "priv_form_pha",
     "trained", "none"
   )
   result <- calc_csb_mbg(kr, gps, indicators = all_inds)
 
   # All should be present (mock data has public, pharmacy,
-  # private_formal, private_informal)
+  # priv_formal, priv_informal)
   for (ind in c("csb_any", "csb_public", "csb_private",
                 "csb_trained", "csb_none",
-                "csb_public_nochw", "csb_pharmacy",
-                "csb_private_formal",
-                "csb_private_informal",
-                "csb_private_formal_pha")) {
+                "csb_pub_nochw", "csb_pharmacy",
+                "csb_priv_formal",
+                "csb_priv_informal",
+                "csb_priv_form_pha")) {
     expect_true(
       ind %in% names(result),
       info = paste("Missing indicator:", ind)
@@ -284,17 +284,17 @@ test_that("calc_csb_mbg computes all 11 indicators together", {
   }
 })
 
-test_that("public_nochw is subset of public", {
+test_that("pub_nochw is subset of public", {
   kr <- .mock_kr_csb_mbg()
   gps <- .mock_gps_csb()
 
   result <- calc_csb_mbg(
     kr, gps,
-    indicators = c("public", "public_nochw")
+    indicators = c("public", "pub_nochw")
   )
 
   pub <- result[["csb_public"]]
-  nochw <- result[["csb_public_nochw"]]
+  nochw <- result[["csb_pub_nochw"]]
 
   # Public includes CHW, so public >= public_nochw
   expect_true(
