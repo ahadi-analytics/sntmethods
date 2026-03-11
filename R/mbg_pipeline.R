@@ -102,8 +102,16 @@ NULL
 #'   (aggregation tables, ID rasters) when available. Set to FALSE to force
 #'   regeneration of all intermediate outputs.
 #' @param verbose Logical. If TRUE, prints detailed progress. Default: TRUE.
-#' @param debug Logical. If TRUE, prints additional diagnostic messages for
-#'   troubleshooting. Default: FALSE.
+#' @param debug Logical. If TRUE, prints additional
+#'   diagnostic messages for troubleshooting.
+#'   Default: FALSE.
+#' @param derived_pairs Named list of derived indicator
+#'   pairs for raster multiplication (case management).
+#'   Each element is a list with \code{csb} and \code{act}
+#'   keys specifying the component indicator names.
+#'   Default (NULL) uses:
+#'   \code{eff_cm_any = csb_any * act_antimal} and
+#'   \code{eff_cm_public = csb_public * act_pub}.
 #'
 #' @return A list containing:
 #'   \itemize{
@@ -165,7 +173,8 @@ run_mbg_indicator_pipeline <- function(
   generate_maps = TRUE,
   cache = TRUE,
   verbose = TRUE,
-  debug = FALSE
+  debug = FALSE,
+  derived_pairs = NULL
 ) {
 
   # Check for required spatial packages
@@ -762,7 +771,7 @@ run_mbg_indicator_pipeline <- function(
 
     # ---- Compute derived indicators (eff_cm = CSB x ACT) ----
     if (isTRUE(run_mbg) && length(year_results$raster_paths) > 0) {
-      derived <- .compute_derived_rasters(
+      derived_args <- list(
         raster_paths = year_results$raster_paths,
         primary_sf = if (aggregation_level == "adm3") adm3_aligned else adm2_aligned,
         output_dirs = output_dirs,
@@ -771,6 +780,12 @@ run_mbg_indicator_pipeline <- function(
         survey_type = current_survey_type,
         save_rasters = save_rasters,
         cache = cache
+      )
+      if (!is.null(derived_pairs)) {
+        derived_args$derived_pairs <- derived_pairs
+      }
+      derived <- do.call(
+        .compute_derived_rasters, derived_args
       )
       for (name in names(derived$mbg_estimates)) {
         year_results$mbg_estimates[[name]] <- derived$mbg_estimates[[name]]
@@ -1825,29 +1840,33 @@ run_mbg_indicator_pipeline <- function(
 }
 
 
-#' Compute Derived Rasters (Effective Coverage of Case Management)
+#' Compute Derived Rasters (Effective Coverage)
 #'
-#' Multiplies CSB and ACT raster surfaces to produce effective coverage
-#' of case management indicators. Produces two derived indicators:
+#' Multiplies component raster surfaces to produce derived
+#' indicators. By default produces effective case management
+#' coverage:
 #' \itemize{
-#'   \item \code{eff_cm_any}: CSB(any) x ACT
-#'   \item \code{eff_cm_public}: CSB(public) x ACT(public care seekers)
+#'   \item \code{eff_cm_any}: CSB(any) x ACT(among AM)
+#'   \item \code{eff_cm_public}: CSB(public) x ACT(public+AM)
 #' }
 #'
-#' @param raster_paths Named list of raster paths from the indicator loop.
-#'   Each element is a list with \code{mean}, \code{lower}, \code{upper} paths.
+#' @param raster_paths Named list of raster paths from the
+#'   indicator loop. Each element is a list with \code{mean},
+#'   \code{lower}, \code{upper} paths.
 #' @param primary_sf sf object for admin-level extraction.
-#' @param output_dirs List with output directory paths (must include \code{rasters}).
+#' @param output_dirs List with output directory paths.
 #' @param country_iso3 Three-letter ISO country code.
 #' @param survey_year Survey year.
 #' @param survey_type Survey type (e.g., "DHS").
-#' @param save_rasters Logical. If TRUE, writes derived rasters to disk.
+#' @param save_rasters Logical. If TRUE, writes derived
+#'   rasters to disk.
+#' @param cache Logical. Reuse cached derived rasters.
+#' @param derived_pairs Named list of pairs to multiply.
+#'   Each pair must have \code{csb} and \code{act} keys
+#'   naming component indicators in \code{raster_paths}.
 #'
-#' @return A list with:
-#'   \itemize{
-#'     \item \code{mbg_estimates}: Named list of admin-level estimate data frames
-#'     \item \code{raster_paths}: Named list of raster path lists for derived indicators
-#'   }
+#' @return A list with \code{mbg_estimates} and
+#'   \code{raster_paths} for each derived indicator.
 #'
 #' @noRd
 .compute_derived_rasters <- function(
@@ -1856,18 +1875,24 @@ run_mbg_indicator_pipeline <- function(
   output_dirs,
   country_iso3,
   survey_year,
-
   survey_type,
   save_rasters = TRUE,
-  cache = FALSE
-) {
-  result <- list(mbg_estimates = list(), raster_paths = list())
-
-  # Define pairs: derived_name = list(csb_indicator, act_indicator)
-  pairs <- list(
-    eff_cm_any    = list(csb = "csb_any",    act = "act"),
-    eff_cm_public = list(csb = "csb_public", act = "act_public")
+  cache = FALSE,
+  derived_pairs = list(
+    eff_cm_any = list(
+      csb = "csb_any", act = "act_antimal"
+    ),
+    eff_cm_public = list(
+      csb = "csb_public", act = "act_pub"
+    )
   )
+) {
+  result <- list(
+    mbg_estimates = list(),
+    raster_paths = list()
+  )
+
+  pairs <- derived_pairs
 
   for (derived_name in names(pairs)) {
     pair <- pairs[[derived_name]]
