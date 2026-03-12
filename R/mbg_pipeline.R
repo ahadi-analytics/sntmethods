@@ -1943,7 +1943,8 @@ run_mbg_pipeline <- function(
     covariate_rasters = covariates,
     aggregation_table = aggregation_table,
     aggregation_levels = agg_levels,
-    population_raster = pop_rast
+    population_raster = pop_rast,
+    verbose = FALSE
   )
 
   if (isTRUE(debug)) {

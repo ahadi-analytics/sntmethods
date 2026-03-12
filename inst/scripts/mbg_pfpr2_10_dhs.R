@@ -209,7 +209,8 @@ model_runner <- mbg::MbgModelRunner$new(
   covariate_rasters = covariates,
   aggregation_table = aggregation_table,
   aggregation_levels = list(adm2 = c("adm2", "adm1", "adm0")),
-  population_raster = pop_rast
+  population_raster = pop_rast,
+  verbose = FALSE
 )
 
 model_runner$run_mbg_pipeline()
