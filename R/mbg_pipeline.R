@@ -275,7 +275,8 @@ run_mbg_pipeline <- function(
   }
 
   # Expand derived indicators to include their dependencies
-  eff_cm_indicators <- c("eff_cm", "eff_cm_any", "eff_cm_public")
+  eff_cm_pairs <- eval(formals(.compute_derived_rasters)$derived_pairs)
+  eff_cm_indicators <- c("eff_cm", names(eff_cm_pairs))
   if (any(eff_cm_indicators %in% indicators)) {
     # Ensure "eff_cm" is present so derived raster computation runs
     if (!"eff_cm" %in% indicators) {
@@ -711,8 +712,9 @@ run_mbg_pipeline <- function(
     processed_indicators <- character()
 
     # Derived indicators are computed after primary processing
-    # Include both the category key and individual output names
-    derived_indicators <- c("eff_cm", "eff_cm_any", "eff_cm_public")
+    # Pull output names dynamically from .compute_derived_rasters() defaults
+    default_pairs <- eval(formals(.compute_derived_rasters)$derived_pairs)
+    derived_indicators <- c("eff_cm", names(default_pairs))
     primary_indicators <- setdiff(indicators, derived_indicators)
 
     ind_pb <- cli::cli_progress_bar(

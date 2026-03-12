@@ -324,3 +324,70 @@ test_that("calc_csb_mbg any + none equals total per cluster", {
     merged$samplesize_any
   )
 })
+
+
+# ---- CSB label detection picks up CHW and pharmacy ----
+
+test_that(".detect_csb_from_labels classifies CHW from haven labels", {
+  # Simulate DHS-7 data where CHW is in a public slot (h32h)
+  kr <- data.frame(
+    h32a = c(1, 0, 0),
+    h32h = c(0, 1, 0),
+    h32j = c(0, 0, 1),
+    stringsAsFactors = FALSE
+  )
+  # Add haven-style labels
+  attr(kr$h32a, "label") <- "CS public: government hospital"
+  attr(kr$h32h, "label") <- "CS public: community health worker"
+  attr(kr$h32j, "label") <- "CS private: private hospital/clinic"
+
+  result <- .detect_csb_from_labels(kr)
+
+  expect_true(nrow(result) > 0)
+  expect_equal(result$csb[result$variable == "h32a"], "public")
+  expect_equal(result$csb[result$variable == "h32h"], "chw")
+  expect_equal(result$csb[result$variable == "h32j"], "private_formal")
+})
+
+test_that(".detect_csb_from_labels classifies pharmacy from haven labels", {
+  kr <- data.frame(
+    h32a = c(1, 0),
+    h32n = c(0, 1),
+    stringsAsFactors = FALSE
+  )
+  attr(kr$h32a, "label") <- "CS public: government hospital"
+  attr(kr$h32n, "label") <- "CS other: pharmacy"
+
+  result <- .detect_csb_from_labels(kr)
+
+  expect_true("pharmacy" %in% result$csb)
+  expect_equal(result$csb[result$variable == "h32n"], "pharmacy")
+})
+
+test_that(".prepare_csb_data uses label detection for CHW classification", {
+  set.seed(99)
+  n <- 50
+  kr <- data.frame(
+    v001 = rep(1:5, each = 10),
+    hw1 = sample(0:59, n, replace = TRUE),
+    h22 = sample(c(0, 1), n, replace = TRUE, prob = c(0.5, 0.5)),
+    stringsAsFactors = FALSE
+  )
+  # DHS-7 style: h32h is CHW (labeled), not in default CHW slots (h32na-h32ne)
+  kr$h32a <- ifelse(kr$h22 == 1,
+    sample(c(0, 1), sum(kr$h22 == 1), replace = TRUE), NA)
+  kr$h32h <- ifelse(kr$h22 == 1,
+    sample(c(0, 1), sum(kr$h22 == 1), replace = TRUE, prob = c(0.7, 0.3)), NA)
+  attr(kr$h32a, "label") <- "CS public: government hospital"
+  attr(kr$h32h, "label") <- "CS public: community health worker"
+
+  result <- .prepare_csb_data(
+    dhs_kr = kr,
+    survey_vars = list(cluster = "v001", age = "hw1", fever = "h22"),
+    include_survey_vars = FALSE
+  )
+
+  # csb_chw should have non-zero values (from h32h labeled as CHW)
+  expect_true("csb_chw" %in% names(result))
+  expect_true(sum(result$csb_chw, na.rm = TRUE) > 0)
+})

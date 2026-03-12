@@ -251,20 +251,14 @@ calc_csb_dhs_core <- function(
     include_survey_vars = TRUE
   )
 
-  # Add granular CSB columns needed by indicator conditions
+  # Add aliases needed by indicator conditions (.csb_conditions() outcome_var)
+  # Granular columns (csb_public_nochw, csb_chw, etc.) are already created
+  # by .classify_csb_from_h32() — don't redefine them here
   kr_fever <- kr_fever |>
     dplyr::mutate(
       csb_any_treatment      = csb_any,
       csb_no_treatment       = csb_none,
-      csb_trained_provider   = csb_trained,
-      csb_public_nochw       = as.numeric(has_public == 1 & has_chw == 0),
-      csb_chw                = as.numeric(has_chw == 1),
-      csb_private_formal_ind = as.numeric(has_private_formal == 1),
-      csb_pharmacy           = as.numeric(has_pharmacy == 1),
-      csb_private_informal   = as.numeric(has_private_informal == 1),
-      csb_private_formal_pha = as.numeric(
-        has_private_formal == 1 | has_pharmacy == 1
-      )
+      csb_trained_provider   = csb_trained
     )
 
   cli::cli_alert_success(
