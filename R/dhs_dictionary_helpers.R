@@ -130,6 +130,40 @@
     act               = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
     act_public        = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
     act_tested        = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    act_care_seek     = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    act_antimal       = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    act_any_tx        = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    act_trained       = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    act_pub           = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    act_pub_nochw     = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    act_chw           = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    act_priv          = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    act_priv_formal   = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    act_priv_pharm    = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    act_priv_informal = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    act_priv_form_pha = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    # Antimalarial sub-indicators (from .act_mbg_dictionary)
+    antimal           = list(recode = "KR",    category = "Malaria",    cascade = 3L, age = "0-59 months",  pop_type = "u5"),
+    antimal_any_tx    = list(recode = "KR",    category = "Malaria",    cascade = 3L, age = "0-59 months",  pop_type = "u5"),
+    antimal_trained   = list(recode = "KR",    category = "Malaria",    cascade = 3L, age = "0-59 months",  pop_type = "u5"),
+    antimal_pub       = list(recode = "KR",    category = "Malaria",    cascade = 3L, age = "0-59 months",  pop_type = "u5"),
+    antimal_pub_nochw = list(recode = "KR",    category = "Malaria",    cascade = 3L, age = "0-59 months",  pop_type = "u5"),
+    antimal_chw       = list(recode = "KR",    category = "Malaria",    cascade = 3L, age = "0-59 months",  pop_type = "u5"),
+    antimal_priv      = list(recode = "KR",    category = "Malaria",    cascade = 3L, age = "0-59 months",  pop_type = "u5"),
+    antimal_formal    = list(recode = "KR",    category = "Malaria",    cascade = 3L, age = "0-59 months",  pop_type = "u5"),
+    antimal_pharm     = list(recode = "KR",    category = "Malaria",    cascade = 3L, age = "0-59 months",  pop_type = "u5"),
+    antimal_priv_informal = list(recode = "KR", category = "Malaria",   cascade = 3L, age = "0-59 months",  pop_type = "u5"),
+    antimal_form_pharm = list(recode = "KR",   category = "Malaria",    cascade = 3L, age = "0-59 months",  pop_type = "u5"),
+    # Malaria diagnostic sub-indicators (from .act_mbg_dictionary)
+    mal_dx_am         = list(recode = "KR",    category = "Malaria",    cascade = 2L, age = "0-59 months",  pop_type = "u5"),
+    mal_dx_pub_am     = list(recode = "KR",    category = "Malaria",    cascade = 2L, age = "0-59 months",  pop_type = "u5"),
+    mal_dx_pub_nochw_am = list(recode = "KR",  category = "Malaria",    cascade = 2L, age = "0-59 months",  pop_type = "u5"),
+    mal_dx_chw_am     = list(recode = "KR",    category = "Malaria",    cascade = 2L, age = "0-59 months",  pop_type = "u5"),
+    mal_dx_priv_am    = list(recode = "KR",    category = "Malaria",    cascade = 2L, age = "0-59 months",  pop_type = "u5"),
+    mal_dx_priv_formal_am = list(recode = "KR", category = "Malaria",   cascade = 2L, age = "0-59 months",  pop_type = "u5"),
+    mal_dx_pharm_am   = list(recode = "KR",    category = "Malaria",    cascade = 2L, age = "0-59 months",  pop_type = "u5"),
+    mal_dx_priv_informal_am = list(recode = "KR", category = "Malaria", cascade = 2L, age = "0-59 months",  pop_type = "u5"),
+    mal_dx_priv_form_pha_am = list(recode = "KR", category = "Malaria", cascade = 2L, age = "0-59 months",  pop_type = "u5"),
     febrile_rdt_pos   = list(recode = "KR+PR", category = "Malaria",    cascade = 2L, age = "0-59 months",  pop_type = "u5"),
     febrile_rdt_pos_act = list(recode = "KR+PR", category = "Malaria",  cascade = 4L, age = "0-59 months",  pop_type = "u5"),
     # PfPR — PR module
@@ -253,86 +287,31 @@
 #'
 #' Returns human-readable indicator name, numerator description,
 #' denominator description, and denominator code for an MBG indicator.
-#' Used to build long-format output matching the DHS column structure.
+#' Pulls detailed metadata from DHS \code{_conditions()} functions
+#' (single source of truth) so MBG output matches DHS output exactly.
 #'
 #' @param ind Character indicator code (e.g., "act", "pfpr_rdt").
 #' @return Named list with `indicator`, `numerator_description`,
 #'   `denominator_description`, `denominator_code`.
 #' @noRd
 .mbg_indicator_label <- function(ind) {
+  # Look up detailed metadata from DHS conditions functions
+  detail <- .dhs_indicator_lookup()[[ind]]
+
+  if (!is.null(detail)) {
+    return(list(
+      indicator             = detail$indicator_title %||% detail$indicator,
+      numerator_description = detail$num_desc,
+      denominator_description = detail$denom_desc,
+      denominator_code      = detail$denom_code
+    ))
+  }
+
+  # Fall back to meta-based generic labels for indicators without
+  # a _conditions() entry (e.g. derived / combined indicators)
   meta <- .mbg_indicator_meta(ind)
+  indicator_name <- gsub("_", " ", ind)
 
-  # ---- Indicator display name ----
-  labels <- list(
-    # Fever / care-seeking cascade
-    fever             = "Fever prevalence (U5)",
-    csb_public        = "Care-seeking: public sector",
-    csb_private       = "Care-seeking: private sector",
-    csb_none          = "Care-seeking: none",
-    csb_any           = "Care-seeking: any provider",
-    csb_trained       = "Care-seeking: trained provider",
-    malaria_dx        = "Malaria diagnostic testing (U5)",
-    antimalarial      = "Antimalarial treatment (U5)",
-    antimalarial_public = "Antimalarial treatment: public sector",
-    # ACT
-    act               = "ACT treatment (U5)",
-    act_public        = "ACT treatment: public sector",
-    act_tested        = "ACT among test-positive (U5)",
-    febrile_rdt_pos   = "Febrile RDT positive (U5)",
-    febrile_rdt_pos_act = "ACT among febrile RDT positive (U5)",
-    # PfPR
-    pfpr_rdt          = "PfPR by RDT",
-    pfpr_mic          = "PfPR by microscopy",
-    pfpr_rdt_u5       = "PfPR by RDT (U5)",
-    pfpr_mic_u5       = "PfPR by microscopy (U5)",
-    pfpr_either_u5    = "PfPR by RDT or microscopy (U5)",
-    pfpr_combined_u5  = "PfPR combined (U5)",
-    # ITN
-    enough_itn        = "Sufficient ITNs (1 per 2 people)",
-    with_itn          = "Household owns at least 1 ITN",
-    access_itn        = "Population with access to ITN",
-    use_itn           = "ITN use (slept under ITN)",
-    use_itn_chu5      = "ITN use: children under 5",
-    use_itn_preg      = "ITN use: pregnant women",
-    use_itn_5_10      = "ITN use: ages 5-10",
-    use_itn_10_20     = "ITN use: ages 10-20",
-    use_itn_20plus    = "ITN use: ages 20+",
-    use_itn_if_access = "ITN use given access",
-    # Anemia
-    severe_anemia      = "Severe anemia (U5)",
-    anemia_any         = "Any anemia (U5)",
-    anemia_moderate_plus = "Moderate+ anemia (U5)",
-    anemia_severe      = "Severe anemia (U5)",
-    anemia_mild_only   = "Mild anemia only (U5)",
-    anemia_moderate_only = "Moderate anemia only (U5)",
-    anemia_severe_only = "Severe anemia only (U5)",
-    # ANC
-    anc_1plus          = "ANC 1+ visits",
-    anc_3plus          = "ANC 3+ visits",
-    anc_4plus          = "ANC 4+ visits",
-    anc_8plus          = "ANC 8+ visits",
-    # IPTp
-    iptp_1plus         = "IPTp 1+ doses",
-    iptp_2plus         = "IPTp 2+ doses",
-    iptp_3plus         = "IPTp 3+ doses",
-    iptp_4plus         = "IPTp 4+ doses",
-    iptp_1only         = "IPTp 1 dose only",
-    iptp_2only         = "IPTp 2 doses only",
-    iptp_3only         = "IPTp 3 doses only",
-    # IRS
-    irs_coverage       = "IRS coverage",
-    # SMC
-    smc_coverage       = "SMC coverage (U5)",
-    # U5MR
-    u5mr               = "Under-5 mortality rate",
-    # Derived
-    eff_cm_any         = "Effective case management (any provider)",
-    eff_cm_public      = "Effective case management (public sector)"
-  )
-
-  indicator_name <- labels[[ind]] %||% gsub("_", " ", ind)
-
-  # ---- Denominator descriptions from age/population ----
   denom_map <- list(
     "0-59 months"  = list(desc = "Children under 5 years",          code = "u5"),
     "6-59 months"  = list(desc = "Children 6-59 months",            code = "ch_6_59m"),
@@ -349,6 +328,56 @@
     denominator_description  = denom_info$desc,
     denominator_code         = denom_info$code
   )
+}
+
+
+# Cache environment for DHS indicator detail lookup
+.indicator_detail_env <- new.env(parent = emptyenv())
+
+#' Build Indicator Detail Lookup from DHS Conditions
+#'
+#' Collects metadata from all DHS \code{_conditions()} functions and
+#' indexes by \code{indicator_code}. Cached after first call.
+#'
+#' @return Named list keyed by indicator_code, each entry a conditions list.
+#' @noRd
+.dhs_indicator_lookup <- function() {
+  if (!is.null(.indicator_detail_env$lookup)) {
+    return(.indicator_detail_env$lookup)
+  }
+
+  # Collect all conditions from DHS calc functions
+  cond_fns <- list(
+    .act_conditions,
+    .csb_conditions,
+    .fever_conditions,
+    .pfpr_conditions,
+    .itn_conditions,
+    .anc_conditions,
+    .iptp_conditions,
+    .epi_conditions,
+    .severe_anemia_conditions,
+    .antimalarial_conditions,
+    .malaria_dx_conditions,
+    .irs_conditions,
+    .smc_conditions,
+    .u5mr_conditions,
+    .case_management_conditions
+  )
+
+  lookup <- list()
+  for (fn in cond_fns) {
+    conds <- tryCatch(fn(), error = function(e) list())
+    for (cond in conds) {
+      code <- cond$indicator_code
+      if (!is.null(code) && !code %in% names(lookup)) {
+        lookup[[code]] <- cond
+      }
+    }
+  }
+
+  .indicator_detail_env$lookup <- lookup
+  lookup
 }
 
 
