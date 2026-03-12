@@ -1987,10 +1987,10 @@ run_mbg_pipeline <- function(
   if (isTRUE(debug)) {
     model_runner$run_mbg_pipeline()
   } else {
-    invisible(utils::capture.output(
+    suppressMessages(invisible(utils::capture.output(
       model_runner$run_mbg_pipeline(),
       type = "output"
-    ))
+    )))
   }
   if (isTRUE(debug)) cli::cli_alert_success("MBG model complete")
 
