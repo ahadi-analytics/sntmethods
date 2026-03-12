@@ -48,15 +48,15 @@
     dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
     dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
 
-  # Build core columns
+  # Build core columns (force numeric to guard against haven character residuals)
   pr <- pr |>
     dplyr::mutate(
       cluster_id = .data[[survey_vars$cluster]],
-      age = .data[[survey_vars$age]],
-      present = .data[[survey_vars$present]],
-      mother = if (has_mother_col) .data[[survey_vars$mother]] else 1L,
-      rdt_res = if (survey_vars$rdt %in% names(dhs_pr)) .data[[survey_vars$rdt]] else NA_real_,
-      mic_res = if (survey_vars$mic %in% names(dhs_pr)) .data[[survey_vars$mic]] else NA_real_
+      age = suppressWarnings(as.numeric(as.character(.data[[survey_vars$age]]))),
+      present = suppressWarnings(as.numeric(as.character(.data[[survey_vars$present]]))),
+      mother = if (has_mother_col) suppressWarnings(as.numeric(as.character(.data[[survey_vars$mother]]))) else 1L,
+      rdt_res = if (survey_vars$rdt %in% names(dhs_pr)) suppressWarnings(as.numeric(as.character(.data[[survey_vars$rdt]]))) else NA_real_,
+      mic_res = if (survey_vars$mic %in% names(dhs_pr)) suppressWarnings(as.numeric(as.character(.data[[survey_vars$mic]]))) else NA_real_
     )
 
   if (include_survey_vars) {

@@ -10,7 +10,7 @@ prep_iptp_mbg(
   doses = 3,
   birth_window_months = 36,
   survey_vars = list(cluster = "v001", interview_date = "v008", birth_date = "b3_01",
-    sp_doses = "m49a_1"),
+    sp_doses = "ml1_1", sp_taken = "m49a_1"),
   gps_vars = list(cluster = "DHSCLUST", lat = "LATNUM", lon = "LONGNUM")
 )
 }

@@ -75,6 +75,12 @@
     dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
     dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
 
+  # Force ITN columns to numeric (guards against haven character residuals)
+  itn_num_cols <- if (itn_method == "hml7_treated") treated_vars else itn_vars
+  for (col in itn_num_cols) {
+    hr[[col]] <- suppressWarnings(as.numeric(as.character(hr[[col]])))
+  }
+
   # Count ITNs per household based on detection method
   if (itn_method == "hml7_treated") {
     # Conventionally treated nets: count nets dipped within last 12 months
@@ -148,7 +154,16 @@
 
   pr <- dhs_pr |>
     dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
-    dplyr::mutate(dplyr::across(dplyr::everything(), as.vector)) |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
+
+  # Force indicator columns to numeric (guards against haven character residuals)
+  for (col in c(survey_vars$itn_use, survey_vars$age, survey_vars$pregnant)) {
+    if (!is.null(col) && col %in% names(pr)) {
+      pr[[col]] <- suppressWarnings(as.numeric(as.character(pr[[col]])))
+    }
+  }
+
+  pr <- pr |>
     dplyr::transmute(
       cluster_id = .data[[survey_vars$cluster]],
       hhid = .data[[survey_vars$hhid]],

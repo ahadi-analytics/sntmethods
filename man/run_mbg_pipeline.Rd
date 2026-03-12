@@ -25,7 +25,7 @@ run_mbg_pipeline(
   survey_year = NULL,
   min_year = "2005",
   survey_type = NULL,
-  indicators = c("pfpr", "itn", "irs", "anc", "csb", "anemia", "iptp", "fever",
+  indicators = c("pfpr", "itn", "irs", "anc", "csb", "anemia", "iptp", "epi", "fever",
     "antimalarial"),
   aggregation_level = c("adm2", "adm3"),
   run_mbg = TRUE,

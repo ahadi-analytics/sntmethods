@@ -81,12 +81,12 @@
     dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
     dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
 
-  # Build selection
+  # Build selection (force numeric to guard against haven character residuals)
   kr <- kr |>
     dplyr::mutate(
       cluster_id = .data[[survey_vars$cluster]],
-      age_months = .data[[survey_vars$age]],
-      had_fever = .data[[survey_vars$fever]]
+      age_months = suppressWarnings(as.numeric(as.character(.data[[survey_vars$age]]))),
+      had_fever = suppressWarnings(as.numeric(as.character(.data[[survey_vars$fever]])))
     )
 
   if (include_survey_vars) {
@@ -102,7 +102,9 @@
     survey_vars$alive %in% names(dhs_kr)
   if (has_alive) {
     kr <- kr |>
-      dplyr::mutate(child_alive = .data[[survey_vars$alive]])
+      dplyr::mutate(
+        child_alive = suppressWarnings(as.numeric(as.character(.data[[survey_vars$alive]])))
+      )
   }
 
   # Filter to U5 children with fever

@@ -56,8 +56,8 @@
     dplyr::mutate(dplyr::across(dplyr::everything(), as.vector)) |>
     dplyr::mutate(
       cluster_id = .data[[survey_vars$cluster]],
-      age_months = .data[[survey_vars$age]],
-      smc_receipt = .data[[smc_var]]
+      age_months = suppressWarnings(as.numeric(as.character(.data[[survey_vars$age]]))),
+      smc_receipt = suppressWarnings(as.numeric(as.character(.data[[smc_var]])))
     )
 
   if (include_survey_vars) {

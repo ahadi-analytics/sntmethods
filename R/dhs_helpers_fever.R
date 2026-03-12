@@ -42,12 +42,12 @@
     dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
     dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
 
-  # Build columns
+  # Build columns (force numeric to guard against haven character residuals)
   kr <- kr |>
     dplyr::mutate(
       cluster_id = .data[[survey_vars$cluster]],
-      age_months = .data[[survey_vars$age]],
-      fever_raw = .data[[survey_vars$fever]]
+      age_months = suppressWarnings(as.numeric(as.character(.data[[survey_vars$age]]))),
+      fever_raw = suppressWarnings(as.numeric(as.character(.data[[survey_vars$fever]])))
     )
 
   # Check alive variable if present
@@ -56,7 +56,9 @@
 
   if (has_alive) {
     kr <- kr |>
-      dplyr::mutate(child_alive = .data[[survey_vars$alive]])
+      dplyr::mutate(
+        child_alive = suppressWarnings(as.numeric(as.character(.data[[survey_vars$alive]])))
+      )
   }
 
   if (include_survey_vars) {

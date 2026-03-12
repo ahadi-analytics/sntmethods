@@ -66,7 +66,7 @@
     dplyr::mutate(dplyr::across(dplyr::everything(), as.vector)) |>
     dplyr::mutate(
       cluster_id = .data[[survey_vars$cluster]],
-      irs_sprayed = .data[[irs_col]]
+      irs_sprayed = suppressWarnings(as.numeric(as.character(.data[[irs_col]])))
     )
 
   if (include_survey_vars) {

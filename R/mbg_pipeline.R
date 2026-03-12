@@ -167,7 +167,7 @@ run_mbg_pipeline <- function(
   survey_type = NULL,
   indicators = c(
     "pfpr", "itn", "irs", "anc", "csb", "anemia", "iptp",
-    "fever", "antimalarial"
+    "epi", "fever", "antimalarial"
   ),
   aggregation_level = c("adm2", "adm3"),
   run_mbg = TRUE,
@@ -1166,7 +1166,7 @@ run_mbg_pipeline <- function(
     act = 35L,
     anemia = 3L,
     iptp = 4L,
-    epi = 5L,
+    epi = 13L,
     u5mr = 1L,
     smc = 1L,
     fever = 1L,
@@ -1549,7 +1549,12 @@ run_mbg_pipeline <- function(
         calc_epi_mbg(
           dhs_kr = survey_data$KR,
           gps_data = gps_data,
-          indicators = c("bcg", "dpt2", "dpt3", "polio2", "polio3", "measles1", "measles2")
+          indicators = c(
+            "bcg", "dpt1", "dpt2", "dpt3",
+            "polio0", "polio1", "polio2", "polio3",
+            "measles1", "measles2",
+            "fully_vaccinated", "any", "never_vaccinated"
+          )
         )
       }, error = function(e) {
         results$skipped <<- glue::glue("Calculation error: {e$message}")

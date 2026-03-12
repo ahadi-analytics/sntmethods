@@ -160,7 +160,7 @@
     dplyr::mutate(dplyr::across(dplyr::everything(), as.vector)) |>
     dplyr::mutate(
       cluster_id = .data[[survey_vars$cluster]],
-      age_months = .data[[survey_vars$age]]
+      age_months = suppressWarnings(as.numeric(as.character(.data[[survey_vars$age]])))
     )
 
   if (include_survey_vars) {
@@ -189,6 +189,13 @@
   )
 
   # Add binary vaccination columns for each available vaccine
+
+  # Ensure vaccine columns are numeric (guards against residual haven labels
+  # or character values in older DHS surveys -- same issue as CSB h32 fix)
+  for (vax_name in names(available_vaccines)[available_vaccines]) {
+    var_name <- vaccine_mapping[[vax_name]]
+    kr[[var_name]] <- suppressWarnings(as.numeric(as.character(kr[[var_name]])))
+  }
 
   # Vaccines that need special coding (not the standard 1/2/3 pattern)
   special_vaccines <- c("any")

@@ -10,7 +10,7 @@ calc_iptp_mbg(
   indicators = c("iptp_1plus", "iptp_2plus", "iptp_3plus"),
   birth_window_months = 36,
   survey_vars = list(cluster = "v001", interview_date = "v008", birth_date = "b3_01",
-    sp_doses = "m49a_1"),
+    sp_doses = "ml1_1", sp_taken = "m49a_1"),
   gps_vars = list(cluster = "DHSCLUST", lat = "LATNUM", lon = "LONGNUM")
 )
 }
@@ -56,11 +56,10 @@ Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst
 
 No ANC attendance restriction is applied; the denominator is all women
 with a birth in the analysis window and a valid SP response
-(\code{sp_doses <= 7}). The default \code{survey_vars$sp_doses = "m49a_1"} is a
-\strong{binary} variable (0 = No, 1 = Yes). Applying \verb{>= 2}, \verb{>= 3}, or \verb{>= 4}
-against a binary variable will always produce zero -- users must remap
-\code{sp_doses} to \code{"ml1_1"} (the actual dose count, 0-7) to compute 2+, 3+,
-and 4+ indicators correctly.
+(\code{sp_doses <= 7}). The default \code{survey_vars$sp_doses = "ml1_1"} is
+the dose count variable (0-7). If \code{ml1_1} is not available, the helper
+falls back to \code{sp_taken} (\code{"m49a_1"}, binary 0/1), in which case only
+IPTp 1+ will produce meaningful results.
 }
 \examples{
 \dontrun{

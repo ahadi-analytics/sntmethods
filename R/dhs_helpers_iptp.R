@@ -27,13 +27,24 @@
     cli::cli_abort("`dhs_ir` is empty.")
   }
 
-  # Check SP variable
+
+  # Check SP variable -- prefer dose count (ml1_1) over binary (m49a_1)
   sp_var <- survey_vars$sp_doses %||% survey_vars$sp_taken
   if (!sp_var %in% names(dhs_ir)) {
-    cli::cli_warn(
-      "IPTp variable {.var {sp_var}} not found; IPTp not available for this survey"
-    )
-    return(NULL)
+    # Fallback: try sp_taken if sp_doses column missing
+    sp_fallback <- survey_vars$sp_taken
+    if (!is.null(sp_fallback) && sp_fallback != sp_var &&
+        sp_fallback %in% names(dhs_ir)) {
+      cli::cli_warn(
+        "IPTp dose variable {.var {sp_var}} not found; falling back to binary {.var {sp_fallback}} (only IPTp 1+ will be meaningful)"
+      )
+      sp_var <- sp_fallback
+    } else {
+      cli::cli_warn(
+        "IPTp variable {.var {sp_var}} not found; IPTp not available for this survey"
+      )
+      return(NULL)
+    }
   }
 
   # Zap labels
@@ -41,13 +52,17 @@
     dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
     dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
 
-  # Build core columns
+  # Build core columns (force numeric to guard against haven character residuals)
   ir <- ir |>
     dplyr::mutate(
       cluster_id = .data[[survey_vars$cluster]],
-      interview_cmc = .data[[survey_vars$interview_date %||% survey_vars$interview_cmc]],
-      birth_cmc = .data[[survey_vars$birth_date %||% survey_vars$birth_cmc]],
-      sp_doses = .data[[sp_var]]
+      interview_cmc = suppressWarnings(as.numeric(as.character(
+        .data[[survey_vars$interview_date %||% survey_vars$interview_cmc]]
+      ))),
+      birth_cmc = suppressWarnings(as.numeric(as.character(
+        .data[[survey_vars$birth_date %||% survey_vars$birth_cmc]]
+      ))),
+      sp_doses = suppressWarnings(as.numeric(as.character(.data[[sp_var]])))
     )
 
   if (include_survey_vars) {

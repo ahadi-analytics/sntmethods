@@ -184,6 +184,13 @@
     dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
     dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
 
+  # Force indicator columns to numeric (guards against haven character residuals)
+  for (col in c(act_vars, survey_vars$fever, survey_vars$age, survey_vars$alive, survey_vars$test)) {
+    if (!is.null(col) && col %in% names(kr)) {
+      kr[[col]] <- suppressWarnings(as.numeric(as.character(kr[[col]])))
+    }
+  }
+
   # Build composite received_act from all ACT variables
   # (same pattern as received_antimalarial in .prepare_antimalarial_data)
   act_matrix <- as.matrix(kr[, act_vars, drop = FALSE])
@@ -320,6 +327,11 @@
   pr <- dhs_pr |>
     dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
     dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
+
+  # Force RDT column to numeric (guards against haven character residuals)
+  if (rdt_var %in% names(pr)) {
+    pr[[rdt_var]] <- suppressWarnings(as.numeric(as.character(pr[[rdt_var]])))
+  }
 
   # Subset PR: link vars + RDT result (valid tests only: 0 = negative, 1 = positive)
   pr_link <- pr |>

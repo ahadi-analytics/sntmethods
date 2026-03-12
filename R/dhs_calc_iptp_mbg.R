@@ -35,11 +35,10 @@
 #' @details
 #' No ANC attendance restriction is applied; the denominator is all women
 #' with a birth in the analysis window and a valid SP response
-#' (`sp_doses <= 7`). The default `survey_vars$sp_doses = "m49a_1"` is a
-#' **binary** variable (0 = No, 1 = Yes). Applying `>= 2`, `>= 3`, or `>= 4`
-#' against a binary variable will always produce zero -- users must remap
-#' `sp_doses` to `"ml1_1"` (the actual dose count, 0-7) to compute 2+, 3+,
-#' and 4+ indicators correctly.
+#' (`sp_doses <= 7`). The default `survey_vars$sp_doses = "ml1_1"` is
+#' the dose count variable (0-7). If `ml1_1` is not available, the helper
+#' falls back to `sp_taken` (`"m49a_1"`, binary 0/1), in which case only
+#' IPTp 1+ will produce meaningful results.
 #'
 #' @examples
 #' \dontrun{
@@ -61,7 +60,8 @@ calc_iptp_mbg <- function(
     cluster = "v001",
     interview_date = "v008",
     birth_date = "b3_01",
-    sp_doses = "m49a_1"
+    sp_doses = "ml1_1",
+    sp_taken = "m49a_1"
   ),
   gps_vars = list(
     cluster = "DHSCLUST",
@@ -141,7 +141,8 @@ prep_iptp_mbg <- function(
     cluster = "v001",
     interview_date = "v008",
     birth_date = "b3_01",
-    sp_doses = "m49a_1"
+    sp_doses = "ml1_1",
+    sp_taken = "m49a_1"
   ),
   gps_vars = list(
     cluster = "DHSCLUST",

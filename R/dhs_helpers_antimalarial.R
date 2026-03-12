@@ -131,6 +131,17 @@
     dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
     dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
 
+  # Force indicator columns to numeric (guards against haven character residuals)
+  num_cols <- c(
+    survey_vars$age, survey_vars$fever, survey_vars$alive,
+    if (use_h37_fallback) h37_vars else ml13_vars
+  )
+  for (col in num_cols) {
+    if (!is.null(col) && col %in% names(kr)) {
+      kr[[col]] <- suppressWarnings(as.numeric(as.character(kr[[col]])))
+    }
+  }
+
   # Build columns
   kr <- kr |>
     dplyr::mutate(
