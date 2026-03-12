@@ -450,15 +450,6 @@ run_mbg_pipeline <- function(
   }
 
   surveys_to_process <- available_surveys
-  years_to_process <- sort(unique(surveys_to_process$DHSYEAR))
-
-  process_str <- paste(
-    apply(surveys_to_process, 1, function(r) paste0(r["survey_type"], " ", r["DHSYEAR"])),
-    collapse = ", "
-  )
-  cli::cli_alert_info(
-    "Processing {nrow(surveys_to_process)} survey(s): {process_str}"
-  )
 
   # Apply min_year filter if specified
   if (!is.null(min_year)) {
@@ -478,7 +469,6 @@ run_mbg_pipeline <- function(
 
     surveys_to_process <- surveys_to_process |>
       dplyr::filter(DHSYEAR >= min_year)
-    years_to_process <- sort(unique(surveys_to_process$DHSYEAR))
 
     if (nrow(surveys_to_process) == 0) {
       cli::cli_abort(c(
@@ -486,15 +476,17 @@ run_mbg_pipeline <- function(
         "i" = "Available surveys: {avail_str}"
       ))
     }
-
-    remaining_str <- paste(
-      apply(surveys_to_process, 1, function(r) paste0(r["survey_type"], " ", r["DHSYEAR"])),
-      collapse = ", "
-    )
-    cli::cli_alert_success(
-      "Processing {nrow(surveys_to_process)} survey(s) >= {min_year}: {remaining_str}"
-    )
   }
+
+  years_to_process <- sort(unique(surveys_to_process$DHSYEAR))
+
+  process_str <- paste(
+    apply(surveys_to_process, 1, function(r) paste0(r["survey_type"], " ", r["DHSYEAR"])),
+    collapse = ", "
+  )
+  cli::cli_alert_info(
+    "Processing {nrow(surveys_to_process)} survey(s): {process_str}"
+  )
 
   # Determine which DHS file types we need based on requested indicators.
   # Individual indicator codes (e.g. "use_itn", "pfpr_rdt_u5") are resolved
