@@ -95,8 +95,10 @@ calc_antimalarial_dhs_core <- function(
   }
 
   # Check for antimalarial variables (ml13 preferred, h37 fallback for older surveys)
-  ml13_vars <- grep("^ml13[a-z]+$", names(dhs_kr), value = TRUE)
-  h37_vars  <- grep("^h37[a-z]+$", names(dhs_kr), value = TRUE)
+  # Use standard drug slots (a-h) for presence check — actual label-based filtering
+  # happens downstream in .prepare_antimalarial_data()
+  ml13_vars <- grep("^ml13[a-h]$", names(dhs_kr), value = TRUE)
+  h37_vars  <- grep("^h37[a-h]$", names(dhs_kr), value = TRUE)
   if (length(ml13_vars) == 0 && length(h37_vars) == 0) {
     cli::cli_abort(c(
       "No antimalarial treatment variables found in data.",

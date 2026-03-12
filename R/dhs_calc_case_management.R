@@ -161,8 +161,39 @@ calc_case_management_dhs <- function(
 
   # ---- 4. Add antimalarial variable ----
 
-  ml13_vars <- grep("^ml13[a-z]+$", names(dhs_kr_zapped), value = TRUE)
-  h37_vars <- grep("^h37[a-z]+$", names(dhs_kr_zapped), value = TRUE)
+  # Label-based antimalarial variable detection: only include variables whose
+  # labels contain actual drug names — excludes non-drug response codes
+  # ("Don't know", "Other", etc.) that would inflate the antimalarial composite.
+  antimalarial_pattern <- paste0(
+    "antimalarial|fansidar|chloroquine|amodiaquine|quinine|",
+    "artemether|artesunate|dihydroartemis|artemisinin|coartem|",
+    "\\bsp\\b|\\bcta\\b|\\bact\\b|mefloquine|piperaquine|lumefantrine"
+  )
+
+  .detect_am_labels_cm <- function(candidates) {
+    matched <- character(0)
+    for (v in candidates) {
+      lbl <- attr(dhs_kr[[v]], "label")
+      if (is.null(lbl) || !is.character(lbl) ||
+          length(lbl) != 1) next
+      if (grepl(antimalarial_pattern, lbl, ignore.case = TRUE)) {
+        matched <- c(matched, v)
+      }
+    }
+    matched
+  }
+
+  ml13_candidates <- grep("^ml13[a-z]+$", names(dhs_kr), value = TRUE)
+  h37_candidates  <- grep("^h37[a-z]+$", names(dhs_kr), value = TRUE)
+
+  ml13_vars <- .detect_am_labels_cm(ml13_candidates)
+  h37_vars  <- .detect_am_labels_cm(h37_candidates)
+
+  # Fall back to standard drug slots (a-h) if no labels available
+  if (length(ml13_vars) == 0 && length(h37_vars) == 0) {
+    ml13_vars <- grep("^ml13[a-h]$", names(dhs_kr_zapped), value = TRUE)
+    h37_vars  <- grep("^h37[a-h]$", names(dhs_kr_zapped), value = TRUE)
+  }
 
   act_var_name <- survey_vars$act %||% "ml13e"
   act_used_h37 <- FALSE

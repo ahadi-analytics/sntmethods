@@ -37,13 +37,45 @@
     ))
   }
 
-  # Auto-detect available antimalarial variables.
+  # Auto-detect available antimalarial variables using label-based filtering.
+  # Only include variables whose labels contain actual drug names — excludes
+  # non-drug response codes ("Don't know", "Other", "No treatment") that would
+  # inflate the antimalarial composite.
   # Prefer ml13* series (drug-specific, newer surveys);
   # fall back to h37* series (older DHS surveys use h37a-h for drug-specific treatment).
-  # NOTE: ml1 is NOT a safe fallback — in some surveys (e.g. BFA 2021) ml1 = "Times took
-  #       Fansidar during pregnancy" (IPTp), not child fever treatment.
-  ml13_vars <- grep("^ml13[a-z]+$", names(dhs_kr), value = TRUE)
-  h37_vars <- grep("^h37[a-z]+$", names(dhs_kr), value = TRUE)
+  antimalarial_pattern <- paste0(
+    "antimalarial|fansidar|chloroquine|amodiaquine|quinine|",
+    "artemether|artesunate|dihydroartemis|artemisinin|coartem|",
+    "\\bsp\\b|\\bcta\\b|\\bact\\b|mefloquine|piperaquine|lumefantrine"
+  )
+
+  # Label-based detection from original dhs_kr (pre-zap)
+  .detect_am_labels <- function(candidates) {
+    matched <- character(0)
+    for (v in candidates) {
+      lbl <- attr(dhs_kr[[v]], "label")
+      if (is.null(lbl) || !is.character(lbl) ||
+          length(lbl) != 1) next
+      if (grepl(antimalarial_pattern, lbl, ignore.case = TRUE)) {
+        matched <- c(matched, v)
+      }
+    }
+    matched
+  }
+
+  ml13_candidates <- grep("^ml13[a-z]+$", names(dhs_kr), value = TRUE)
+  h37_candidates  <- grep("^h37[a-z]+$", names(dhs_kr), value = TRUE)
+
+  # Stage 1: label-based detection
+  ml13_vars <- .detect_am_labels(ml13_candidates)
+  h37_vars  <- .detect_am_labels(h37_candidates)
+
+  # Stage 2: if no labels matched, fall back to standard drug slots (a-h)
+  if (length(ml13_vars) == 0 && length(h37_vars) == 0) {
+    ml13_vars <- grep("^ml13[a-h]$", names(dhs_kr), value = TRUE)
+    h37_vars  <- grep("^h37[a-h]$", names(dhs_kr), value = TRUE)
+  }
+
   use_h37_fallback <- FALSE
 
   if (length(ml13_vars) > 0) {

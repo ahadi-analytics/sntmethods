@@ -785,7 +785,7 @@ act_dictionary <- function() {
     ),
     list(
       indicator      = "ACT_PUBLIC",
-      indicator_code = "act_public",
+      indicator_code = "act_pub",
       indicator_title = "Use of ACTs among public sector care seekers",
       denom_code     = "feb_u5_pub",
       filter_expr    = quote(csb_public == 1),

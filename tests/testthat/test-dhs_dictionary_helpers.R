@@ -100,7 +100,7 @@ test_that(".mbg_indicator_meta returns correct pop_type for all indicators", {
   u5_indicators <- c(
     "fever", "csb_any", "csb_public", "csb_private", "csb_none", "csb_trained",
     "malaria_dx", "antimalarial", "antimalarial_public",
-    "act", "act_public", "act_tested",
+    "act", "act_pub", "act_tested",
     "febrile_rdt_pos", "febrile_rdt_pos_act",
     "pfpr_rdt", "pfpr_mic", "pfpr_rdt_u5", "pfpr_mic_u5",
     "use_itn_chu5",

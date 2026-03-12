@@ -31,7 +31,7 @@ indicators:
       More restrictive denominator than act. This is a secondary/exploratory
       indicator; the primary act indicator uses all febrile children as denominator.
 
-  act_public:
+  act_pub:
     name: "Received ACT among febrile children who sought public care"
     numerator: "Febrile children who sought public care and received ACT"
     denominator: "Children under 5 with fever who sought public care (csb_public == 1)"
@@ -256,7 +256,7 @@ output_format:
       denominator_code: "Short code for the denominator"
     indicator_codes:
       - "act: ACT receipt among all febrile children"
-      - "act_public: ACT among public sector care seekers (no AM filter)"
+      - "act_pub: ACT among public sector care seekers (no AM filter)"
       - "act_pub_am: ACT among public sector + antimalarial"
       - "act_chw_am: ACT among CHW care seekers"
       - "act_am: ACT among antimalarial recipients who sought any care"

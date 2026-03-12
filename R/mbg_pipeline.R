@@ -637,10 +637,10 @@ run_mbg_pipeline <- function(
     pop_rast_wra    <- .load_optional_raster(pop_raster_wra,    "WRA population")
 
     # Single-line summary of loaded rasters
-    raster_labels <- c("total" = "pop_rast", "u5" = "pop_rast_u5",
+    raster_labels <- c("all_ages" = "pop_rast", "u5y" = "pop_rast_u5",
                        "1-2y" = "pop_rast_1_2",
-                       "5-10" = "pop_rast_5_10", "10-20" = "pop_rast_10_20",
-                       "20+" = "pop_rast_20plus", "WRA" = "pop_rast_wra")
+                       "5-10y" = "pop_rast_5_10", "10-20y" = "pop_rast_10_20",
+                       "20y+" = "pop_rast_20plus", "WRA" = "pop_rast_wra")
     loaded_rasters <- character()
     for (rl in names(raster_labels)) {
       if (!is.null(get(raster_labels[[rl]]))) loaded_rasters <- c(loaded_rasters, rl)
@@ -695,11 +695,29 @@ run_mbg_pipeline <- function(
     }
 
     # Extract interview month per cluster for survey timing metadata
-    gps_clean_for_month <- .prepare_gps_data(gps_data)
-    cluster_interview_months <- .extract_cluster_interview_month(
-      survey_data = survey_data,
-      gps_clean = gps_clean_for_month
-    )
+    # Suppress info messages unless in debug mode
+    .run_prep <- function() {
+      gps_clean_for_month <- .prepare_gps_data(gps_data)
+      cluster_interview_months <- .extract_cluster_interview_month(
+        survey_data = survey_data,
+        gps_clean = gps_clean_for_month
+      )
+      list(gps = gps_clean_for_month, months = cluster_interview_months)
+    }
+    prep_result <- if (isTRUE(debug)) {
+      .run_prep()
+    } else {
+      suppressMessages(
+        withCallingHandlers(
+          .run_prep(),
+          message = function(m) {
+            if (inherits(m, "cliMessage")) invokeRestart("muffleMessage")
+          }
+        )
+      )
+    }
+    gps_clean_for_month <- prep_result$gps
+    cluster_interview_months <- prep_result$months
 
     year_results <- list(
       cluster_data = list(),
@@ -717,17 +735,28 @@ run_mbg_pipeline <- function(
     derived_indicators <- c("eff_cm", names(default_pairs))
     primary_indicators <- setdiff(indicators, derived_indicators)
 
+    cat("\n")  # visual gap before progress bar
+
+    # Pre-compute expected sub-indicator total for progress bar
+    expected_total <- sum(vapply(primary_indicators, .expected_sub_count, integer(1)))
+    sub_count <- 0L
+    ind_category <- primary_indicators[1]  # initialise for format string
+
     ind_pb <- cli::cli_progress_bar(
-      total = length(primary_indicators),
+      total = expected_total,
       format = "{cli::pb_bar} Indicator {cli::pb_current}/{cli::pb_total} | {ind_category}"
     )
 
     for (ind_category in primary_indicators) {
-      cli::cli_progress_update(id = ind_pb)
 
       # Skip if already computed by a prior cascade (e.g. csb_any triggers
       # all csb_* indicators, so csb_public doesn't need a second run)
-      if (ind_category %in% processed_indicators) next
+      if (ind_category %in% processed_indicators) {
+        # Advance bar by expected count for this (already-done) category
+        sub_count <- sub_count + .expected_sub_count(ind_category)
+        cli::cli_progress_update(id = ind_pb, set = sub_count)
+        next
+      }
 
       tryCatch({
         # Suppress verbose calc function output unless in debug mode;
@@ -773,6 +802,11 @@ run_mbg_pipeline <- function(
             )
           )
         }
+
+        # Advance progress bar by actual sub-indicator count produced
+        n_produced <- max(length(ind_results$cluster_data), 1L)
+        sub_count <- sub_count + n_produced
+        cli::cli_progress_update(id = ind_pb, set = sub_count)
 
         # Check if indicator was skipped
         if (!is.null(ind_results$skipped)) {
@@ -1072,6 +1106,86 @@ run_mbg_pipeline <- function(
 }
 
 
+#' Expected Sub-indicator Count per Category
+#'
+#' Returns the number of sub-indicators produced when a category is processed.
+#' Used to pre-compute the progress bar total. Counts match the indicator
+#' vectors passed to each `calc_*_mbg()` in `.process_indicator_category()`.
+#'
+#' @param category Character. Indicator category or individual indicator name.
+#' @return Integer. Expected number of sub-indicators.
+#' @noRd
+.expected_sub_count <- function(category) {
+  switch(category,
+    # Category-level dispatch (processes all sub-indicators)
+    pfpr = 4L,
+    itn = 10L,
+    irs = 1L,
+    anc = 5L,
+    csb = 11L,
+    act = 35L,
+    anemia = 3L,
+    iptp = 4L,
+    epi = 5L,
+    u5mr = 1L,
+    smc = 1L,
+    fever = 1L,
+    antimalarial = 2L,
+    # Individual pfpr indicators fall through to full pfpr calc
+    pfpr_rdt = , pfpr_mic = , pfpr_rdt_u5 = , pfpr_mic_u5 = 4L,
+    # Individual ITN indicators process only themselves
+    enough_itn = , with_itn = , access_itn = , use_itn = ,
+    use_itn_chu5 = , use_itn_preg = , use_itn_if_access = ,
+    use_itn_5_10 = , use_itn_10_20 = , use_itn_20plus = 1L,
+    # Individual ANC → full ANC calc
+    anc_1plus = , anc_2plus = , anc_3plus = , anc_4plus = , anc_8plus = 5L,
+    # Individual CSB → full CSB calc
+    csb_any = , csb_public = , csb_pub_nochw = , csb_chw = ,
+    csb_private = , csb_priv_formal = , csb_pharmacy = ,
+    csb_priv_informal = , csb_priv_form_pha = ,
+    csb_trained = , csb_none = 11L,
+    # Individual ACT → full ACT calc
+    act_care_seek = , act_am = , act_any_tx_am = ,
+    act_trained_am = , act_pub_am = , act_pub_nochw_am = ,
+    act_chw_am = , act_priv_am = , act_priv_formal_am = ,
+    act_priv_pharm_am = , act_priv_informal_am = ,
+    act_priv_form_pha_am = , act_pub = , act_tested = ,
+    febrile_rdt_pos = , febrile_rdt_pos_act = ,
+    antimal = , antimal_any_tx = , antimal_trained = ,
+    antimal_pub = , antimal_pub_nochw = , antimal_chw = ,
+    antimal_priv = , antimal_formal = , antimal_pharm = ,
+    antimal_priv_informal = , antimal_form_pharm = ,
+    mal_dx_am = , mal_dx_pub_am = , mal_dx_pub_nochw_am = ,
+    mal_dx_chw_am = , mal_dx_priv_am = , mal_dx_priv_formal_am = ,
+    mal_dx_pharm_am = , mal_dx_priv_informal_am = ,
+    mal_dx_priv_form_pha_am = 35L,
+    # Individual anemia → full anemia calc
+    anemia_any = , anemia_moderate_plus = , anemia_severe = ,
+    anemia_mild_only = , anemia_moderate_only = , anemia_severe_only = ,
+    severe_anemia = 3L,
+    # Individual IPTp → full IPTp calc
+    iptp_1plus = , iptp_2plus = , iptp_3plus = , iptp_4plus = ,
+    iptp_1only = , iptp_2only = , iptp_3only = 4L,
+    # Individual EPI → full EPI calc
+    epi_bcg = , epi_dpt1 = , epi_dpt2 = , epi_dpt3 = ,
+    epi_polio0 = , epi_polio1 = , epi_polio2 = , epi_polio3 = ,
+    epi_measles1 = , epi_measles2 = ,
+    epi_vita1 = , epi_vita2 = , epi_malaria = ,
+    epi_penta1 = , epi_penta2 = , epi_penta3 = ,
+    epi_pneumo1 = , epi_pneumo2 = , epi_pneumo3 = ,
+    epi_rota1 = , epi_rota2 = , epi_rota3 = ,
+    epi_ipv = , epi_hepb0 = , epi_yellowfever = ,
+    epi_any = , epi_never_vaccinated = , epi_fully_vaccinated = 5L,
+    # Other individual indicators
+    irs_coverage = 1L,
+    smc_coverage = 1L,
+    antimalarial_public = 2L,
+    # Default fallback
+    1L
+  )
+}
+
+
 #' Process Single Indicator Category
 #'
 #' Internal function to process one indicator category.
@@ -1297,7 +1411,7 @@ run_mbg_pipeline <- function(
     act_chw_am = , act_priv_am = , act_priv_formal_am = ,
     act_priv_pharm_am = , act_priv_informal_am = ,
     act_priv_form_pha_am = ,
-    act_tested = , act_public = ,
+    act_tested = , act_pub = ,
     febrile_rdt_pos = , febrile_rdt_pos_act = ,
     antimal = , antimal_any_tx = , antimal_trained = ,
     antimal_pub = , antimal_pub_nochw = , antimal_chw = ,
@@ -1321,7 +1435,7 @@ run_mbg_pipeline <- function(
             "act_pub_nochw_am", "act_chw_am", "act_priv_am",
             "act_priv_formal_am", "act_priv_pharm_am",
             "act_priv_informal_am", "act_priv_form_pha_am",
-            "act_public", "act_tested",
+            "act_pub", "act_tested",
             "antimal", "antimal_any_tx",
             "antimal_trained", "antimal_pub",
             "antimal_pub_nochw", "antimal_chw",

@@ -314,7 +314,7 @@ test_that("calc_act_mbg with dhs_pr = NULL for febrile_rdt_pos skips that indica
 })
 
 
-# ---- act_public indicator ----
+# ---- act_pub indicator ----
 
 # Helper: mock KR data with h32 columns for CSB classification
 .mock_kr_act_with_csb <- function(n = 200, n_clusters = 20, seed = 42) {
@@ -336,17 +336,17 @@ test_that("calc_act_mbg with dhs_pr = NULL for febrile_rdt_pos skips that indica
   kr
 }
 
-test_that("calc_act_mbg computes act_public with h32 variables", {
+test_that("calc_act_mbg computes act_pub with h32 variables", {
   kr <- .mock_kr_act_with_csb()
   gps <- .mock_gps()
 
-  result <- calc_act_mbg(kr, gps, indicators = c("act", "act_public"))
+  result <- calc_act_mbg(kr, gps, indicators = c("act", "act_pub"))
 
   expect_type(result, "list")
   expect_true("act" %in% names(result))
-  expect_true("act_public" %in% names(result))
+  expect_true("act_pub" %in% names(result))
 
-  dt <- result[["act_public"]]
+  dt <- result[["act_pub"]]
   expect_s3_class(dt, "tbl_df")
   expect_true(all(c("cluster_id", "indicator", "samplesize", "x", "y") %in% names(dt)))
 
@@ -358,16 +358,16 @@ test_that("calc_act_mbg computes act_public with h32 variables", {
   expect_true(sum(dt$samplesize) <= sum(act_dt$samplesize))
 })
 
-test_that("calc_act_mbg skips act_public when no h32 variables", {
+test_that("calc_act_mbg skips act_pub when no h32 variables", {
   kr <- .mock_kr_act()  # No h32 columns
   gps <- .mock_gps()
 
   result <- suppressWarnings(
-    calc_act_mbg(kr, gps, indicators = c("act", "act_public"))
+    calc_act_mbg(kr, gps, indicators = c("act", "act_pub"))
   )
 
   expect_true("act" %in% names(result))
-  expect_false("act_public" %in% names(result))
+  expect_false("act_pub" %in% names(result))
 })
 
 

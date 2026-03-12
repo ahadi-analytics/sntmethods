@@ -39,7 +39,7 @@
 #' @param indicators Character vector of indicators to
 #'   calculate. See \code{.act_mbg_dictionary()} for the full
 #'   list of standardized indicator codes. Legacy names
-#'   \code{"act_public"} and \code{"act_among_am"} are also
+#'   \code{"act_pub"} and \code{"act_among_am"} are also
 #'   accepted. Special indicators:
 #'   \itemize{
 #'     \item \code{"act_tested"}: ACT among test-positive
@@ -120,9 +120,8 @@ calc_act_mbg <- function(
 
   # Resolve legacy aliases
   legacy_map <- list(
-    act_public = "act_public",
+    act_public = "act_pub",
     act_among_am = "act_any_tx_am",
-    act_pub = "act_pub_am",
     act_antimal = "act_am",
     act_any_tx = "act_any_tx_am",
     act_trained = "act_trained_am",
@@ -148,7 +147,7 @@ calc_act_mbg <- function(
     dict, `[[`, character(1), "name"
   )
   special_indicators <- c(
-    "act_public", "act_tested",
+    "act_pub", "act_tested",
     "febrile_rdt_pos", "febrile_rdt_pos_act"
   )
   valid_indicators <- unique(c(
@@ -214,7 +213,7 @@ calc_act_mbg <- function(
   needs_csb <- any(vapply(dict_specs, function(d) {
     !is.null(d$csb_filter)
   }, logical(1))) ||
-    "act_public" %in% indicators
+    "act_pub" %in% indicators
   needs_am <- any(vapply(dict_specs, function(d) {
     isTRUE(d$am_filter)
   }, logical(1))) ||
@@ -361,11 +360,11 @@ calc_act_mbg <- function(
     }
   }
 
-  # ---- Legacy act_public (no AM filter) ----
+  # ---- Legacy act_pub (no AM filter) ----
 
-  if ("act_public" %in% indicators &&
+  if ("act_pub" %in% indicators &&
       needs_csb &&
-      !"act_public" %in% names(results)) {
+      !"act_pub" %in% names(results)) {
     pub_data <- enriched[
       !is.na(enriched$csb_public) &
         enriched$csb_public == 1 &
@@ -380,10 +379,10 @@ calc_act_mbg <- function(
         individual_data = pub_data,
         indicator_col = ".binary",
         gps_clean = gps_clean,
-        result_name = "act_public"
+        result_name = "act_pub"
       )
       if (!is.null(dt)) {
-        results[["act_public"]] <- dt
+        results[["act_pub"]] <- dt
       }
     }
   }
@@ -737,13 +736,25 @@ calc_act_mbg <- function(
       dplyr::everything(), as.vector
     ))
 
-  ml13_vars <- grep(
-    "^ml13[a-z]+$",
-    names(dhs_kr_zapped), value = TRUE
+  # ---- Detect antimalarial variables using label-based filtering ----
+  # Must match DHS path (calc_act_dhs): only include variables whose labels
+  # contain actual drug names. Non-drug ml13 variables (e.g. "Don't know",
+  # "No treatment", response-quality codes) are excluded because their
+  # labels don't match the drug-name pattern. This prevents inflating the
+  # antimalarial composite.
+  antimalarial_pattern <- paste0(
+    "antimalarial|fansidar|chloroquine|amodiaquine|quinine|",
+    "artemether|artesunate|dihydroartemis|artemisinin|coartem|",
+    "\\bsp\\b|\\bcta\\b|\\bact\\b|mefloquine|piperaquine|lumefantrine"
   )
-  h37_vars_am <- grep(
+
+  ml13_candidates <- grep(
+    "^ml13[a-z]+$",
+    names(dhs_kr), value = TRUE
+  )
+  h37_candidates <- grep(
     "^h37[a-z]+$",
-    names(dhs_kr_zapped), value = TRUE
+    names(dhs_kr), value = TRUE
   )
 
   # Align with ACT variable series
@@ -754,37 +765,74 @@ calc_act_mbg <- function(
     (survey_vars$act %||% "ml13e")
   act_used_h37 <- any(grepl("^h37", act_vars_used))
 
-  if (act_used_h37 && length(h37_vars_am) > 0) {
-    drug_series <- h37_vars_am
+  # Label-based detection from original dhs_kr (pre-zap).
+  # Matches DHS primary path: include if label contains a drug name.
+  .detect_am_from_labels <- function(candidates) {
+    matched <- character(0)
+    for (v in candidates) {
+      lbl <- attr(dhs_kr[[v]], "label")
+      if (is.null(lbl) || !is.character(lbl) ||
+          length(lbl) != 1) next
+      if (grepl(antimalarial_pattern, lbl,
+                ignore.case = TRUE)) {
+        matched <- c(matched, v)
+      }
+    }
+    matched
+  }
+
+  drug_series <- character(0)
+
+  if (act_used_h37 && length(h37_candidates) > 0) {
+    drug_series <- .detect_am_from_labels(h37_candidates)
+    if (length(drug_series) == 0) {
+      # No labels — fall back to standard h37 slots
+      drug_series <- grep(
+        "^h37[a-h]$",
+        names(dhs_kr_zapped), value = TRUE
+      )
+    }
     cli::cli_alert_info(
       "Antimalarial composite using h37 series \\
       (aligned with ACT h37 fallback)"
     )
-  } else if (length(ml13_vars) > 0) {
-    ml13_has_data <- any(sapply(
-      ml13_vars,
-      function(v) {
-        any(dhs_kr_zapped[[v]] == 1, na.rm = TRUE)
-      }
-    ))
-    if (ml13_has_data) {
-      drug_series <- ml13_vars
-    } else if (
-      length(h37_vars_am) > 0 &&
-      any(sapply(h37_vars_am, function(v) {
-        any(dhs_kr_zapped[[v]] == 1, na.rm = TRUE)
-      }))
-    ) {
-      cli::cli_alert_info(
-        "ml13 antimalarial variables have no \\
-        positive values; using h37 series"
-      )
-      drug_series <- h37_vars_am
-    } else {
-      drug_series <- ml13_vars
-    }
   } else {
-    drug_series <- h37_vars_am
+    # Try ml13 labels first
+    drug_series <- .detect_am_from_labels(ml13_candidates)
+
+    # If no labels matched, try h37 labels
+    if (length(drug_series) == 0) {
+      drug_series <- .detect_am_from_labels(h37_candidates)
+    }
+
+    # Last resort: standard DHS drug slots (a-h)
+    if (length(drug_series) == 0) {
+      ml13_slots <- grep(
+        "^ml13[a-h]$",
+        names(dhs_kr_zapped), value = TRUE
+      )
+      h37_slots <- grep(
+        "^h37[a-h]$",
+        names(dhs_kr_zapped), value = TRUE
+      )
+
+      ml13_has_pos <- length(ml13_slots) > 0 &&
+        any(sapply(ml13_slots, function(v) {
+          any(dhs_kr_zapped[[v]] == 1, na.rm = TRUE)
+        }))
+      h37_has_pos <- length(h37_slots) > 0 &&
+        any(sapply(h37_slots, function(v) {
+          any(dhs_kr_zapped[[v]] == 1, na.rm = TRUE)
+        }))
+
+      if (ml13_has_pos) {
+        drug_series <- ml13_slots
+      } else if (h37_has_pos) {
+        drug_series <- h37_slots
+      } else {
+        drug_series <- c(ml13_slots, h37_slots)
+      }
+    }
   }
 
   if (length(drug_series) == 0) {
@@ -829,9 +877,12 @@ calc_act_mbg <- function(
     }
   )
 
+  n_am <- sum(enriched$received_antimalarial == 1,
+               na.rm = TRUE)
   cli::cli_alert_info(
-    "Antimalarial composite built from \\
-    {length(drug_series)} variables"
+    "Antimalarial composite ({length(drug_series)} vars: \\
+    {paste(drug_series, collapse = ', ')}): \\
+    {n_am}/{nrow(enriched)}"
   )
 
   enriched

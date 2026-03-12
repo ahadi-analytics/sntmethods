@@ -22,8 +22,8 @@ test_that("dhs_dictionary returns a tibble with correct columns", {
 test_that("dhs_dictionary has correct total row count", {
   dict <- dhs_dictionary()
 
-  # Sum of all individual dictionaries: 162
-  expect_equal(nrow(dict), 162L)
+  # Sum of all individual dictionaries: 163
+  expect_equal(nrow(dict), 163L)
 })
 
 
