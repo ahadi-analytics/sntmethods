@@ -275,12 +275,17 @@ run_mbg_pipeline <- function(
   }
 
   # Expand derived indicators to include their dependencies
-  if ("eff_cm" %in% indicators) {
+  eff_cm_indicators <- c("eff_cm", "eff_cm_any", "eff_cm_public")
+  if (any(eff_cm_indicators %in% indicators)) {
+    # Ensure "eff_cm" is present so derived raster computation runs
+    if (!"eff_cm" %in% indicators) {
+      indicators <- c(indicators, "eff_cm")
+    }
     deps <- c("csb", "act")
     new_deps <- setdiff(deps, indicators)
     if (length(new_deps) > 0) {
       cli::cli_alert_info(
-        "Adding {.val {new_deps}} (required by {.val eff_cm})"
+        "Adding {.val {new_deps}} (required by effective case management)"
       )
       indicators <- unique(c(indicators, new_deps))
     }
@@ -706,7 +711,8 @@ run_mbg_pipeline <- function(
     processed_indicators <- character()
 
     # Derived indicators are computed after primary processing
-    derived_indicators <- c("eff_cm")
+    # Include both the category key and individual output names
+    derived_indicators <- c("eff_cm", "eff_cm_any", "eff_cm_public")
     primary_indicators <- setdiff(indicators, derived_indicators)
 
     ind_pb <- cli::cli_progress_bar(
