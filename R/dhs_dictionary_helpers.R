@@ -365,15 +365,12 @@
 #' @noRd
 .mbg_eligibility_notes <- function(ind) {
   meta <- .mbg_indicator_meta(ind)
+  # Only provide notes when the age range excludes younger ages,
+  # explaining the biological/methodological reason for the restriction.
+  # Ranges starting from 0 or covering all ages don't need a note.
   notes_map <- list(
     "6-59 months"  = "Excludes <6 months (residual maternal antibodies)",
-    "12-23 months" = "Standard DHS vaccination assessment window",
-    "0-59 months"  = "All children under 5 years",
-    "women 15-49"  = "Women of reproductive age with recent live birth",
-    "all ages"     = "All de facto household members",
-    "5-10 years"   = "De facto children aged 5-9 years",
-    "10-20 years"  = "De facto population aged 10-19 years",
-    "20+ years"    = "De facto population aged 20 years and above"
+    "12-23 months" = "Standard DHS vaccination assessment window"
   )
   notes_map[[meta$age]] %||% NA_character_
 }
