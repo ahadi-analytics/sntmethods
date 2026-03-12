@@ -784,7 +784,8 @@ run_mbg_pipeline <- function(
         survey_year = current_year,
         survey_type = current_survey_type,
         save_rasters = save_rasters,
-        cache = cache
+        cache = cache,
+        pop_rast = pop_rast_u5 %||% pop_rast
       )
       derived <- do.call(
         .compute_derived_rasters, derived_args
@@ -1803,11 +1804,14 @@ run_mbg_pipeline <- function(
       mean_col <- paste0(indicator_name, "_mean")
       lower_col <- paste0(indicator_name, "_lower")
       upper_col <- paste0(indicator_name, "_upper")
-      multiplier <- if (grepl("^u5mr", indicator_name, ignore.case = TRUE)) {
-        1000
-      } else {
-        100
-      }
+      pop_col <- paste0(indicator_name, "_pop")
+      multiplier <- .mbg_indicator_multiplier(indicator_name)
+
+      # Extract population totals per admin unit
+      pop_values <- terra::extract(
+        pop_rast, primary_sf, fun = sum, na.rm = TRUE
+      )[[2]]
+      pop_values[is.na(pop_values) | pop_values <= 0] <- NA_real_
 
       adm_estimates <- primary_sf |>
         sf::st_drop_geometry() |>
@@ -1820,7 +1824,8 @@ run_mbg_pipeline <- function(
           )[[2]] * multiplier,
           !!upper_col := terra::extract(
             cached_rasters$upper, primary_sf, fun = mean, na.rm = TRUE
-          )[[2]] * multiplier
+          )[[2]] * multiplier,
+          !!pop_col := pop_values
         )
 
       return(list(
@@ -1957,10 +1962,15 @@ run_mbg_pipeline <- function(
   mean_col <- paste0(indicator_name, "_mean")
   lower_col <- paste0(indicator_name, "_lower")
   upper_col <- paste0(indicator_name, "_upper")
+  pop_col <- paste0(indicator_name, "_pop")
 
-  # U5MR uses "per 1,000" units (epidemiological standard)
-  # Other indicators use percentage units (0-100)
-  multiplier <- if (grepl("^u5mr", indicator_name, ignore.case = TRUE)) 1000 else 100
+  multiplier <- .mbg_indicator_multiplier(indicator_name)
+
+  # Extract population totals per admin unit
+  pop_values <- terra::extract(
+    pop_rast, primary_sf, fun = sum, na.rm = TRUE
+  )[[2]]
+  pop_values[is.na(pop_values) | pop_values <= 0] <- NA_real_
 
   adm_estimates <- primary_sf |>
     sf::st_drop_geometry() |>
@@ -1973,7 +1983,8 @@ run_mbg_pipeline <- function(
       )[[2]] * multiplier,
       !!upper_col := terra::extract(
         cell_preds$cell_pred_upper, primary_sf, fun = mean, na.rm = TRUE
-      )[[2]] * multiplier
+      )[[2]] * multiplier,
+      !!pop_col := pop_values
     )
 
   list(
@@ -2022,6 +2033,7 @@ run_mbg_pipeline <- function(
   survey_type,
   save_rasters = TRUE,
   cache = FALSE,
+  pop_rast = NULL,
   derived_pairs = list(
     eff_cm_any = list(
       csb = "csb_any", act = "act_antimal"
@@ -2072,6 +2084,8 @@ run_mbg_pipeline <- function(
         lower_col <- paste0(derived_name, "_lower")
         upper_col <- paste0(derived_name, "_upper")
 
+        pop_col <- paste0(derived_name, "_pop")
+
         adm_estimates <- primary_sf |>
           sf::st_drop_geometry() |>
           dplyr::mutate(
@@ -2085,6 +2099,15 @@ run_mbg_pipeline <- function(
               prod_upper, primary_sf, fun = mean, na.rm = TRUE
             )[[2]] * 100
           )
+
+        # Extract population totals per admin unit (if pop_rast available)
+        if (!is.null(pop_rast)) {
+          pop_values <- terra::extract(
+            pop_rast, primary_sf, fun = sum, na.rm = TRUE
+          )[[2]]
+          pop_values[is.na(pop_values) | pop_values <= 0] <- NA_real_
+          adm_estimates[[pop_col]] <- pop_values
+        }
 
         result$mbg_estimates[[derived_name]] <- adm_estimates
         result$raster_paths[[derived_name]] <- expected_paths
@@ -2151,6 +2174,7 @@ run_mbg_pipeline <- function(
       mean_col  <- paste0(derived_name, "_mean")
       lower_col <- paste0(derived_name, "_lower")
       upper_col <- paste0(derived_name, "_upper")
+      pop_col   <- paste0(derived_name, "_pop")
 
       adm_estimates <- primary_sf |>
         sf::st_drop_geometry() |>
@@ -2165,6 +2189,15 @@ run_mbg_pipeline <- function(
             prod_upper, primary_sf, fun = mean, na.rm = TRUE
           )[[2]] * 100
         )
+
+      # Extract population totals per admin unit (if pop_rast available)
+      if (!is.null(pop_rast)) {
+        pop_values <- terra::extract(
+          pop_rast, primary_sf, fun = sum, na.rm = TRUE
+        )[[2]]
+        pop_values[is.na(pop_values) | pop_values <= 0] <- NA_real_
+        adm_estimates[[pop_col]] <- pop_values
+      }
 
       result$mbg_estimates[[derived_name]] <- adm_estimates
       if (!is.null(derived_raster_paths)) {
@@ -2287,8 +2320,7 @@ run_mbg_pipeline <- function(
     joined_df <- sf::st_drop_geometry(joined)
 
     # U5MR uses "per 1,000" units (epidemiological standard)
-    # Other indicators use percentage units (0-100)
-    multiplier <- if (grepl("^u5mr", ind_name, ignore.case = TRUE)) 1000 else 100
+    multiplier <- .mbg_indicator_multiplier(ind_name)
 
     agg <- joined_df |>
       dplyr::filter(!is.na(.data[[admin_col]])) |>
@@ -2470,11 +2502,17 @@ run_mbg_pipeline <- function(
     mean_col <- paste0(ind_name, "_mean")
     lower_col <- paste0(ind_name, "_lower")
     upper_col <- paste0(ind_name, "_upper")
+    pop_col <- paste0(ind_name, "_pop")
     if (!mean_col %in% names(est)) next
+
+    # Columns to carry forward (pop_col only if present)
+    select_cols <- c(primary_col, mean_col, lower_col, upper_col)
+    has_pop <- pop_col %in% names(est)
+    if (has_pop) select_cols <- c(select_cols, pop_col)
 
     # Pivot from wide to long (metadata joined from dhs_dictionary() later)
     ind_df <- est |>
-      dplyr::select(dplyr::all_of(c(primary_col, mean_col, lower_col, upper_col))) |>
+      dplyr::select(dplyr::all_of(select_cols)) |>
       dplyr::rename(
         point = dplyr::all_of(mean_col),
         ci_l  = dplyr::all_of(lower_col),
@@ -2482,8 +2520,17 @@ run_mbg_pipeline <- function(
       ) |>
       dplyr::mutate(indicator_code = ind_name)
 
-    # Join cluster-level numerator/denominator
-    if (!is.null(cluster_counts)) {
+    # Population-based numerator/denominator (every district gets values)
+    if (has_pop) {
+      multiplier <- .mbg_indicator_multiplier(ind_name)
+      ind_df <- ind_df |>
+        dplyr::mutate(
+          denominator = as.integer(round(.data[[pop_col]])),
+          numerator   = as.integer(round(point / multiplier * .data[[pop_col]]))
+        ) |>
+        dplyr::select(-dplyr::all_of(pop_col))
+    } else if (!is.null(cluster_counts)) {
+      # Fallback: cluster-based counts (indicators without population column)
       ind_counts <- cluster_counts |>
         dplyr::filter(indicator_code == ind_name) |>
         dplyr::select(dplyr::all_of(primary_col), numerator, denominator)

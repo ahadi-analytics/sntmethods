@@ -283,6 +283,21 @@
 }
 
 
+#' Unit Multiplier for an MBG Indicator
+#'
+#' Returns the scaling factor to convert MBG model predictions (0-1 scale)
+#' to the indicator's natural units: 1000 for U5MR (per 1,000 live births),
+#' 100 for everything else (percentage).
+#'
+#' @param ind Character indicator code.
+#' @return Numeric scalar: 1000 or 100.
+#' @noRd
+.mbg_indicator_multiplier <- function(ind) {
+  meta <- .mbg_indicator_meta(ind)
+  if (identical(meta$base_unit, "per 1000 live births")) 1000 else 100
+}
+
+
 #' MBG Indicator Labels and Descriptions
 #'
 #' Returns human-readable indicator name, numerator description,
