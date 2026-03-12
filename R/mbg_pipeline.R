@@ -111,8 +111,10 @@ NULL
 #'     \item final_dataset: Named list with `adm0`, `adm1`, and `adm2` (or `adm3`)
 #'       tibbles in long format. Each tibble has standard columns: survey_id, iso3,
 #'       iso2, survey_type, survey_year, adm0, [adm1], [adm2], type, geo_source,
-#'       point, ci_l, ci_u, numerator, denominator, indicator, indicator_code,
-#'       numerator_description, denominator_description, denominator_code.
+#'       point, ci_l, ci_u, numerator, denominator,
+#'       survey_numerator, survey_denominator, n_survey_clusters,
+#'       indicator, indicator_code, numerator_description,
+#'       denominator_description.
 #'     \item mbg_estimates: MBG predictions at the specified aggregation level
 #'       (if MBG was run)
 #'     \item cluster_data: Raw cluster-level data
@@ -1558,11 +1560,13 @@ run_mbg_pipeline <- function(
     "ci_u",                   "Upper bound of 95% credible interval",
     "numerator",              "Estimated numerator (population-based from raster)",
     "denominator",            "Estimated denominator (total population from raster)",
+    "survey_numerator",       "Unweighted survey numerator (sum of indicator values across DHS clusters)",
+    "survey_denominator",     "Unweighted survey denominator (sum of sample sizes across DHS clusters)",
+    "n_survey_clusters",      "Number of DHS survey clusters in admin unit",
     "indicator",              "Indicator name (human-readable)",
     "indicator_code",         "Indicator code (machine-readable, matches dhs_dictionary())",
     "numerator_description",  "Description of numerator",
-    "denominator_description","Description of denominator",
-    "denominator_code",       "Denominator code"
+    "denominator_description","Description of denominator"
   )
 
   if (aggregation_level == "adm3") {
@@ -2365,9 +2369,10 @@ run_mbg_pipeline <- function(
 #' Converts wide-format MBG estimates and cluster data into a long-format
 #' list of tibbles matching the DHS output structure: one row per indicator
 #' per admin unit, with standard columns (survey_id, iso3, iso2, type,
-#' geo_source, point, ci_l, ci_u, numerator, denominator, indicator,
-#' indicator_code, numerator_description, denominator_description,
-#' denominator_code).
+#' geo_source, point, ci_l, ci_u, numerator, denominator,
+#' survey_numerator, survey_denominator, n_survey_clusters,
+#' indicator, indicator_code, numerator_description,
+#' denominator_description).
 #'
 #' @return Named list with `adm0`, `adm1`, and `adm2` (or `adm3`) tibbles.
 #' @noRd
@@ -2465,6 +2470,7 @@ run_mbg_pipeline <- function(
         dplyr::summarise(
           numerator = sum(indicator, na.rm = TRUE),
           denominator = sum(samplesize, na.rm = TRUE),
+          n_clusters = dplyr::n(),
           .groups = "drop"
         ) |>
         dplyr::mutate(indicator_code = ind_name)
@@ -2549,6 +2555,31 @@ run_mbg_pipeline <- function(
       ind_df$denominator <- NA_integer_
     }
 
+    # Join raw survey cluster counts (NA for districts without clusters)
+    if (!is.null(cluster_counts)) {
+      ind_counts <- cluster_counts |>
+        dplyr::filter(indicator_code == ind_name) |>
+        dplyr::select(
+          dplyr::all_of(primary_col),
+          survey_numerator = numerator,
+          survey_denominator = denominator,
+          n_survey_clusters = n_clusters
+        )
+      if (nrow(ind_counts) > 0) {
+        ind_df <- ind_df |>
+          dplyr::left_join(ind_counts, by = primary_col)
+      }
+    }
+    if (!"survey_numerator" %in% names(ind_df)) {
+      ind_df$survey_numerator <- NA_integer_
+    }
+    if (!"survey_denominator" %in% names(ind_df)) {
+      ind_df$survey_denominator <- NA_integer_
+    }
+    if (!"n_survey_clusters" %in% names(ind_df)) {
+      ind_df$n_survey_clusters <- NA_integer_
+    }
+
     indicator_rows[[ind_name]] <- ind_df
   }
 
@@ -2614,6 +2645,9 @@ run_mbg_pipeline <- function(
       ci_u        = .safe_wmean(ci_u, denominator),
       numerator   = sum(numerator, na.rm = TRUE),
       denominator = sum(denominator, na.rm = TRUE),
+      survey_numerator   = sum(survey_numerator, na.rm = TRUE),
+      survey_denominator = sum(survey_denominator, na.rm = TRUE),
+      n_survey_clusters  = sum(n_survey_clusters, na.rm = TRUE),
       median_survey_month = if (has_month) {
         as.integer(stats::median(median_survey_month, na.rm = TRUE))
       } else {
@@ -2633,6 +2667,9 @@ run_mbg_pipeline <- function(
       ci_u        = .safe_wmean(ci_u, denominator),
       numerator   = sum(numerator, na.rm = TRUE),
       denominator = sum(denominator, na.rm = TRUE),
+      survey_numerator   = sum(survey_numerator, na.rm = TRUE),
+      survey_denominator = sum(survey_denominator, na.rm = TRUE),
+      n_survey_clusters  = sum(n_survey_clusters, na.rm = TRUE),
       median_survey_month = if (has_month) {
         as.integer(stats::median(median_survey_month, na.rm = TRUE))
       } else {
@@ -2648,8 +2685,7 @@ run_mbg_pipeline <- function(
       indicator_code,
       indicator = indicator_title,
       numerator_description,
-      denominator_description,
-      denominator_code
+      denominator_description
     ) |>
     dplyr::distinct(indicator_code, .keep_all = TRUE)
 
@@ -2668,11 +2704,12 @@ run_mbg_pipeline <- function(
       "survey_id", "iso3", "iso2", "survey_type", "survey_year",
       "median_survey_month",
       "adm0", admin_cols,
+      "indicator", "indicator_code",
       "type", "geo_source",
       "point", "ci_l", "ci_u",
       "numerator", "denominator",
-      "indicator", "indicator_code",
-      "numerator_description", "denominator_description", "denominator_code"
+      "survey_numerator", "survey_denominator", "n_survey_clusters",
+      "numerator_description", "denominator_description"
     )
     extra <- setdiff(names(df), col_order)
     present <- intersect(c(col_order, extra), names(df))
@@ -2992,7 +3029,8 @@ run_mbg_pipeline <- function(
   # Columns that should be integers (counts, sample sizes, IDs)
   integer_patterns <- c(
     "^n_", "samplesize", "sample_size", "n_clusters",
-    "n_tested", "n_pos", "n_households", "n_births", "n_deaths",
+    "n_tested", "n_pos", "survey_numerator", "survey_denominator",
+    "n_households", "n_births", "n_deaths",
     "n_fever", "n_sought", "n_women", "n_recent", "n_iptp",
     "n_public", "n_private", "n_none", "n_trained", "n_individuals",
     "n_with_access", "positive", "pop", "cluster_id", "_id$",
