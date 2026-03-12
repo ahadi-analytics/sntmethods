@@ -12,11 +12,20 @@ Analytical methods for Sub-National Tailoring (SNT) of malaria control strategie
 
 ### 1. DHS survey analysis
 
-Calculate 100+ survey-weighted indicators from Demographic and Health Surveys (DHS/MIS) microdata. Covers malaria interventions, maternal and child health, and socioeconomic status. All estimates include confidence intervals, design effects, and admin-level stratification. Every indicator family includes a machine-readable data dictionary.
+Calculate 100+ survey-weighted indicators from Demographic and Health Surveys (DHS/MIS) microdata across 16 indicator domains. Covers malaria interventions, maternal and child health, and socioeconomic status. All estimates include confidence intervals, design effects, and admin-level stratification. Every indicator family includes a machine-readable data dictionary.
 
 ### 2. Spatial modeling (MBG)
 
-Prepare cluster-level data and run model-based geostatistics (MBG) to produce continuous raster surfaces and admin-level aggregated estimates. The `run_mbg_pipeline()` function orchestrates the full workflow: survey discovery, cluster data preparation, MBG model fitting, raster prediction, and admin-2/admin-3 aggregation for 14 indicator families in a single call.
+Prepare cluster-level data and run model-based geostatistics (MBG) to produce continuous raster surfaces and population-weighted admin-level estimates. The `run_mbg_pipeline()` function orchestrates the full workflow in a single call:
+
+- Auto-discovers surveys from a DHS parquet archive
+- Prepares cluster-level data for each indicator
+- Fits INLA/MBG models and generates prediction rasters
+- Aggregates to admin-2 (or admin-3) using population-weighted zonal statistics
+- Rolls up to admin-1 and admin-0 estimates
+- Outputs long-format tables with numerator/denominator counts, confidence intervals, and indicator metadata
+
+Supports 14 indicator families: `pfpr`, `itn`, `irs`, `csb`, `act`, `antimalarial`, `fever`, `anc`, `iptp`, `epi`, `u5mr`, `anemia`, `smc`, and `eff_cm` (effective case management).
 
 ### 3. Routine data analysis
 
@@ -34,9 +43,9 @@ Estimate malaria incidence from health facility data using the **N0-N5 cascade f
 | **Fever** | Fever prevalence in children under 5 | KR | `calc_fever_dhs()` |
 | **Care-seeking** | By sector (public, private, CHW, pharmacy, trained, none) | KR | `calc_csb_dhs()` |
 | **Malaria testing** | RDT/microscopy testing among febrile children | KR | `calc_malaria_dx_dhs()` |
-| **Antimalarials** | Any antimalarial treatment by source | KR | `calc_antimalarial_dhs()` |
-| **ACT treatment** | ACT receipt by source, ACT among antimalarials | KR | `calc_act_dhs()` |
-| **Case management** | Effective coverage (fever -> testing -> treatment cascade) | KR | `calc_case_management_dhs()` |
+| **Antimalarials** | Any antimalarial treatment among febrile U5 | KR | `calc_antimalarial_dhs()` |
+| **ACT treatment** | ACT receipt by source, ACT among antimalarials, ACT among care seekers | KR | `calc_act_dhs()` |
+| **Case management** | Effective coverage (fever -> care-seeking -> testing -> treatment cascade) | KR | `calc_case_management_dhs()` |
 | **ANC** | Antenatal care visits (1+/2+/3+/4+/8+) | IR | `calc_anc_dhs()` |
 | **IPTp** | Intermittent preventive treatment doses (1+/2+/3+/4+) | IR | `calc_iptp_dhs()` |
 | **EPI vaccines** | BCG, DPT, polio, measles, pentavalent, pneumococcal, rotavirus, IPV, HepB, yellow fever, malaria vaccine, fully vaccinated, zero-dose | KR | `calc_epi_dhs()` |
@@ -44,6 +53,8 @@ Estimate malaria incidence from health facility data using the **N0-N5 cascade f
 | **Anemia** | Any, moderate+, severe (children 6-59 months) | PR | `calc_severe_anemia_dhs()` |
 | **SMC** | Seasonal malaria chemoprevention coverage | KR | `calc_smc_dhs()` |
 | **Wealth** | Quintile distribution, Gini coefficient (Brown formula) | HR | `calc_wealth_dhs()` |
+
+Each survey indicator also has an MBG counterpart (`calc_*_mbg()` / `prep_*_mbg()`) for cluster-level spatial modeling.
 
 ### Routine health facility indicators
 
@@ -116,17 +127,18 @@ act   <- calc_act_dhs(dhs_kr = kr)
 cm    <- calc_case_management_dhs(dhs_kr = kr)
 ```
 
-Every `calc_*_dhs()` function returns a long-format tibble with columns for `indicator_code`, `estimate`, `ci_lower`, `ci_upper`, `n`, and grouping variables (`adm1`, `survey_year`, etc.).
+Every `calc_*_dhs()` function returns a long-format list of tibbles (`adm0`, `adm1`, etc.) with columns for `indicator`, `indicator_code`, `point`, `ci_l`, `ci_u`, `numerator`, `denominator`, and grouping variables (`adm1`, `survey_year`, etc.).
 
 ### Data dictionaries
 
 ```r
-# Machine-readable dictionaries for any indicator domain
+# Machine-readable dictionaries for any indicator domain (17 available)
 itn_dictionary()
 act_dictionary()
 pfpr_dictionary()
 epi_dictionary()
 csb_dictionary()
+dhs_dictionary()          # unified dictionary across all domains
 ```
 
 ### Malaria incidence from routine data
@@ -177,6 +189,7 @@ results <- run_mbg_pipeline(
   country_iso3 = "bdi",
   adm0_sf = adm0, adm1_sf = adm1, adm2_sf = adm2,
   pop_raster = list("2016" = "path/to/bdi_pop_2016.tif"),
+  pop_raster_u5 = list("2016" = "path/to/bdi_pop_u5_2016.tif"),
   path_dhs_parquet = "path/to/parquet",
   table_out_path = "output/tables",
   raster_out_path = "output/rasters",
@@ -184,7 +197,14 @@ results <- run_mbg_pipeline(
   survey_year = 2016,
   indicators = c("pfpr", "itn", "csb", "act", "eff_cm")
 )
+
+# Results are long-format tables at each admin level
+results$final_dataset$adm0
+results$final_dataset$adm1
+results$final_dataset$adm2
 ```
+
+Age-specific population rasters can be supplied for more accurate denominators: `pop_raster_u5` (child indicators), `pop_raster_wra` (ANC/IPTp), `pop_raster_1_2` (EPI 12-23 months), and age-band rasters for ITN stratification.
 
 ## Function naming conventions
 
@@ -192,18 +212,17 @@ results <- run_mbg_pipeline(
 |---------|---------|---------|
 | `calc_*_dhs()` | Survey-weighted DHS estimates (long format) | `calc_itn_dhs()` |
 | `calc_*_dhs_core()` | Survey-weighted estimates (wide format) | `calc_pfpr_dhs_core()` |
-| `calc_*_mbg()` | Cluster-level data for MBG spatial modeling | `calc_itn_mbg()` |
-| `prep_*_mbg()` | Single-indicator MBG data prep | `prep_itn_mbg()` |
+| `calc_*_mbg()` | Run MBG model for indicator family | `calc_itn_mbg()` |
+| `prep_*_mbg()` | Prepare cluster-level data for MBG | `prep_itn_mbg()` |
 | `*_dictionary()` | Data dictionary for indicator family | `itn_dictionary()` |
-| `aggregate_*_admin()` | Aggregate estimates to admin boundaries | `aggregate_pfpr_admin()` |
+| `aggregate_*_admin()` | Aggregate rasters to admin boundaries | `aggregate_pfpr_admin()` |
+| `run_mbg_pipeline()` | Full MBG pipeline (all indicators) | `run_mbg_pipeline()` |
 | `calc_incidence()` | Routine data incidence (N0-N5 cascade) | `calc_incidence()` |
 | `calc_tpr()` | Test positivity rate with fallbacks | `calc_tpr()` |
 
 ## Methodology
 
 Detailed methodology for each indicator is documented in YAML files at [`inst/methods/`](inst/methods/). These cover DHS variable mappings, inclusion criteria, calculation logic, and references to WHO/WMR standards.
-
-Available methodology docs:
 
 | File | Domain |
 |------|--------|
@@ -224,6 +243,15 @@ Available methodology docs:
 | `wealth_dhs.yml` | Wealth index |
 | `incidence.yml` | Incidence cascade (N0-N5) |
 | `tpr.yml` | Test positivity rate |
+| `reporting_rate.yml` | Reporting rate calculations |
+| `outlier_detection.yml` | Outlier detection methods |
+| `active_status.yml` | Facility activity classification |
+
+Additional documentation:
+
+- [`inst/docs/mbg_pipeline_guide.md`](inst/docs/mbg_pipeline_guide.md) -- Team reference for the MBG pipeline (setup, outputs, indicators)
+- [`inst/docs/wmr_output_specification.md`](inst/docs/wmr_output_specification.md) -- World Malaria Report output format specification
+- [`inst/countries/`](inst/countries/) -- Country-specific survey configuration (variable mappings, eligibility notes)
 
 ## Example scripts
 
@@ -235,6 +263,8 @@ Working examples are included in [`inst/scripts/`](inst/scripts/):
 | `example_tpr_incidence.R` | TPR and incidence calculation from routine data |
 | `mbg_pfpr2_10_dhs.R` | MBG spatial model for PfPR 2-10 |
 | `mbg_itn_access_dhs.R` | MBG spatial model for ITN access |
+| `process_mis_2021_tgo.R` | Processing a Togo MIS 2021 survey |
+| `diagnose_act_togo.R` | Diagnosing ACT variable detection issues |
 
 ## Related packages
 
