@@ -394,7 +394,8 @@ run_mbg_pipeline <- function(
     dhs_read(
       path = path_dhs_parquet,
       file_type = "GE",
-      country_code = country_iso2
+      country_code = country_iso2,
+      verbose = FALSE
     )
   }, error = function(e) {
     cli::cli_abort(c(
@@ -551,23 +552,17 @@ run_mbg_pipeline <- function(
 
   all_survey_results <- list()
 
-  cli::cli_progress_bar(
-    total = nrow(surveys_to_process),
-    format = "{cli::pb_bar} Survey {cli::pb_current}/{cli::pb_total} | {current_survey_type} {current_year}"
-  )
-
   for (i in seq_len(nrow(surveys_to_process))) {
     current_year <- surveys_to_process$DHSYEAR[i]
     current_survey_type <- surveys_to_process$survey_type[i]
     survey_key <- paste(tolower(current_survey_type), current_year, sep = "_")
 
-    cli::cli_progress_update()
+    cli::cli_h2("Survey {i}/{nrow(surveys_to_process)}: {current_survey_type} {current_year}")
 
     # ---- Load survey data for this survey using dhs_read() ----
 
-    cli::cli_alert_info("Loading survey data for {current_survey_type} {current_year}...")
-
     survey_data <- list()
+    load_errors <- character()
 
     for (ft in file_types_needed) {
       tryCatch({
@@ -576,15 +571,14 @@ run_mbg_pipeline <- function(
           file_type = ft,
           survey_type = current_survey_type,
           country_code = country_iso2,
-          survey_year = current_year
+          survey_year = current_year,
+          verbose = FALSE
         )
         if (!is.null(ft_data) && nrow(ft_data) > 0) {
           survey_data[[ft]] <- ft_data
-          cli::cli_alert_info(
-            "  {ft}: {format(nrow(ft_data), big.mark = ',')} records"
-          )
         }
       }, error = function(e) {
+        load_errors <<- c(load_errors, ft)
         cli::cli_alert_warning("Could not load {ft}: {e$message}")
       })
     }
@@ -595,18 +589,20 @@ run_mbg_pipeline <- function(
       next
     }
 
-    # Report what was loaded
-    loaded_types <- names(survey_data)
-    loaded_str <- paste(loaded_types, collapse = ", ")
+    # Single-line summary of loaded data
+    loaded_parts <- vapply(names(survey_data), function(ft) {
+      paste0(ft, " (", format(nrow(survey_data[[ft]]), big.mark = ","), ")")
+    }, character(1))
     cli::cli_alert_success(
-      "Loaded {length(loaded_types)} file types: {loaded_str}"
+      "Loaded {current_survey_type} {current_year}: {paste(loaded_parts, collapse = ', ')}"
     )
 
     # ---- Load population rasters ----
 
     # Load total population raster for this year
     pop_rast <- tryCatch({
-      .load_raster_for_year(pop_raster, current_year, "total population")
+      .load_raster_for_year(pop_raster, current_year, "total population",
+                            verbose = FALSE)
     }, error = function(e) {
       cli::cli_alert_warning(
         "Could not load total population raster: {e$message}"
@@ -618,7 +614,8 @@ run_mbg_pipeline <- function(
     .load_optional_raster <- function(raster_input, label) {
       if (is.null(raster_input)) return(NULL)
       tryCatch({
-        .load_raster_for_year(raster_input, current_year, label)
+        .load_raster_for_year(raster_input, current_year, label,
+                              verbose = FALSE)
       }, error = function(e) {
         cli::cli_alert_warning("Could not load {label} raster: {e$message}")
         NULL
@@ -630,6 +627,20 @@ run_mbg_pipeline <- function(
     pop_rast_10_20  <- .load_optional_raster(pop_raster_10_20,  "10-20 population")
     pop_rast_20plus <- .load_optional_raster(pop_raster_20plus, "20+ population")
     pop_rast_wra    <- .load_optional_raster(pop_raster_wra,    "WRA population")
+
+    # Single-line summary of loaded rasters
+    raster_labels <- c("total" = "pop_rast", "u5" = "pop_rast_u5",
+                       "5-10" = "pop_rast_5_10", "10-20" = "pop_rast_10_20",
+                       "20+" = "pop_rast_20plus", "WRA" = "pop_rast_wra")
+    loaded_rasters <- character()
+    for (rl in names(raster_labels)) {
+      if (!is.null(get(raster_labels[[rl]]))) loaded_rasters <- c(loaded_rasters, rl)
+    }
+    if (length(loaded_rasters) > 0) {
+      cli::cli_alert_success(
+        "Loaded {length(loaded_rasters)} population raster(s) ({current_year}): {paste(loaded_rasters, collapse = ', ')}"
+      )
+    }
 
     # Abort if run_mbg = TRUE but population raster is missing
     if (isTRUE(run_mbg) && is.null(pop_rast)) {
@@ -1625,9 +1636,13 @@ run_mbg_pipeline <- function(
       n_saved = 3
     )
     saved_files <- c(saved_files, write_result$path)
+  }
 
-    rel_path <- .relative_path(write_result$path)
-    cli::cli_alert_success("Saved cluster data: {.file {rel_path}}")
+  if (length(saved_files) > 0) {
+    rel_dir <- .relative_path(output_dir)
+    cli::cli_alert_success(
+      "Saved {length(saved_files)} cluster dataset(s) to {.file {rel_dir}}"
+    )
   }
 
   invisible(saved_files)
@@ -2480,15 +2495,27 @@ run_mbg_pipeline <- function(
   desc_cols <- c("indicator", "indicator_code", "numerator_description",
                  "denominator_description", "denominator_code")
 
+  # Weighted mean that falls back to simple mean when all weights are NA
+  .safe_wmean <- function(x, w) {
+    valid <- !is.na(x) & !is.na(w)
+    if (any(valid)) {
+      stats::weighted.mean(x[valid], w[valid])
+    } else if (any(!is.na(x))) {
+      mean(x, na.rm = TRUE)
+    } else {
+      NA_real_
+    }
+  }
+
   # adm1: population-weighted mean of primary-level estimates
   adm1_long <- primary_long |>
     dplyr::group_by(
       dplyr::across(dplyr::all_of(c(meta_cols, "adm0", "adm1", desc_cols)))
     ) |>
     dplyr::summarise(
-      point       = stats::weighted.mean(point, denominator, na.rm = TRUE),
-      ci_l        = stats::weighted.mean(ci_l, denominator, na.rm = TRUE),
-      ci_u        = stats::weighted.mean(ci_u, denominator, na.rm = TRUE),
+      point       = .safe_wmean(point, denominator),
+      ci_l        = .safe_wmean(ci_l, denominator),
+      ci_u        = .safe_wmean(ci_u, denominator),
       numerator   = sum(numerator, na.rm = TRUE),
       denominator = sum(denominator, na.rm = TRUE),
       .groups = "drop"
@@ -2500,9 +2527,9 @@ run_mbg_pipeline <- function(
       dplyr::across(dplyr::all_of(c(meta_cols, "adm0", desc_cols)))
     ) |>
     dplyr::summarise(
-      point       = stats::weighted.mean(point, denominator, na.rm = TRUE),
-      ci_l        = stats::weighted.mean(ci_l, denominator, na.rm = TRUE),
-      ci_u        = stats::weighted.mean(ci_u, denominator, na.rm = TRUE),
+      point       = .safe_wmean(point, denominator),
+      ci_l        = .safe_wmean(ci_l, denominator),
+      ci_u        = .safe_wmean(ci_u, denominator),
       numerator   = sum(numerator, na.rm = TRUE),
       denominator = sum(denominator, na.rm = TRUE),
       .groups = "drop"
@@ -2633,12 +2660,13 @@ run_mbg_pipeline <- function(
 #' @return A SpatRaster object.
 #'
 #' @noRd
-.load_raster_for_year <- function(raster_input, target_year, label = "raster") {
+.load_raster_for_year <- function(raster_input, target_year, label = "raster",
+                                  verbose = TRUE) {
   target_year_char <- as.character(target_year)
 
   # Case 1: Already a SpatRaster
  if (inherits(raster_input, "SpatRaster")) {
-    cli::cli_alert_success("Using pre-loaded {label} raster")
+    if (verbose) cli::cli_alert_success("Using pre-loaded {label} raster")
     return(raster_input)
   }
 
@@ -2663,9 +2691,11 @@ run_mbg_pipeline <- function(
 
     # Handle if the list value is already a SpatRaster
     if (inherits(raster_path, "SpatRaster")) {
-      cli::cli_alert_success(
-        "Using pre-loaded {label} raster for {selected_year}"
-      )
+      if (verbose) {
+        cli::cli_alert_success(
+          "Using pre-loaded {label} raster for {selected_year}"
+        )
+      }
       return(raster_path)
     }
 
@@ -2675,9 +2705,11 @@ run_mbg_pipeline <- function(
         "{label} raster file not found: {.path {raster_path}}"
       )
     }
-    cli::cli_alert_success(
-      "Loading {label} raster ({selected_year}): {.file {basename(raster_path)}}"
-    )
+    if (verbose) {
+      cli::cli_alert_success(
+        "Loading {label} raster ({selected_year}): {.file {basename(raster_path)}}"
+      )
+    }
     return(terra::rast(raster_path))
   }
 
@@ -2686,9 +2718,11 @@ run_mbg_pipeline <- function(
     if (!file.exists(raster_input)) {
       cli::cli_abort("{label} raster file not found: {.path {raster_input}}")
     }
-    cli::cli_alert_success(
-      "Loading {label} raster: {.file {basename(raster_input)}}"
-    )
+    if (verbose) {
+      cli::cli_alert_success(
+        "Loading {label} raster: {.file {basename(raster_input)}}"
+      )
+    }
     return(terra::rast(raster_input))
   }
 

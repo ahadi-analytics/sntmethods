@@ -509,6 +509,7 @@ ahadi_find_library_root <- function(
 #' @param country_code Optional two-letter DHS country code
 #' @param survey_year Optional numeric survey year
 #' @param survey_type Optional DHS survey type (e.g., "DHS", "MIS")
+#' @param verbose Logical; print progress messages? Default `TRUE`.
 #'
 #' @return A tibble of filtered DHS records
 #' @export
@@ -518,7 +519,8 @@ dhs_read <- function(
   file_type = NULL,
   country_code = NULL,
   survey_year = NULL,
-  survey_type = NULL
+  survey_type = NULL,
+  verbose = TRUE
 ) {
   # -------------------------------------------
   # Validate file_type (now mandatory)
@@ -559,9 +561,11 @@ dhs_read <- function(
     cli::cli_abort("Directory does not exist: {short_path}")
   }
 
-  cli::cli_h1("Loading DHS parquet dataset")
-  cli::cli_inform("File type: {file_type}")
-  cli::cli_inform("Path: {short_path}")
+  if (verbose) {
+    cli::cli_h1("Loading DHS parquet dataset")
+    cli::cli_inform("File type: {file_type}")
+    cli::cli_inform("Path: {short_path}")
+  }
 
   # -------------------------------------------
   # Direct read when filters identify a single survey
@@ -597,9 +601,11 @@ dhs_read <- function(
   }
 
   if (!is.null(parquet_file)) {
-    cli::cli_alert_info(
-      "Direct parquet read for single survey (preserving labels + all variables)"
-    )
+    if (verbose) {
+      cli::cli_alert_info(
+        "Direct parquet read for single survey (preserving labels + all variables)"
+      )
+    }
     out <- arrow::read_parquet(parquet_file)
 
     # Apply survey_type filter if needed (not a partition column)
@@ -613,11 +619,13 @@ dhs_read <- function(
     )
 
     n <- nrow(out)
-    cli::cli_inform("Rows loaded: {format(n, big.mark = ',')}")
-    if (n == 0) {
-      cli::cli_alert_warning("Filter returned zero rows")
-    } else {
-      cli::cli_alert_success("Data loaded successfully")
+    if (verbose) {
+      cli::cli_inform("Rows loaded: {format(n, big.mark = ',')}")
+      if (n == 0) {
+        cli::cli_alert_warning("Filter returned zero rows")
+      } else {
+        cli::cli_alert_success("Data loaded successfully")
+      }
     }
 
     return(out)
@@ -626,7 +634,7 @@ dhs_read <- function(
   # -------------------------------------------
   # Open dataset only for specific file_type
   # -------------------------------------------
-  cli::cli_inform("Opening Arrow dataset...")
+  if (verbose) cli::cli_inform("Opening Arrow dataset...")
 
   suppressWarnings(
     ds <- arrow::open_dataset(
@@ -716,17 +724,19 @@ dhs_read <- function(
   }
 
   # Report filters
-  if (length(applied_filters) == 0) {
-    cli::cli_alert_warning("No filters supplied. Returning whole dataset.")
-  } else {
-    cli::cli_inform("Applied filters:")
-    purrr::walk(applied_filters, ~ cli::cli_li(.x))
+  if (verbose) {
+    if (length(applied_filters) == 0) {
+      cli::cli_alert_warning("No filters supplied. Returning whole dataset.")
+    } else {
+      cli::cli_inform("Applied filters:")
+      purrr::walk(applied_filters, ~ cli::cli_li(.x))
+    }
   }
 
   # -------------------------------------------
   # Collect (loads only matching partitions)
   # -------------------------------------------
-  cli::cli_inform("Collecting data...")
+  if (verbose) cli::cli_inform("Collecting data...")
 
   suppressWarnings(
     out <- ds |>
@@ -735,12 +745,13 @@ dhs_read <- function(
   )
 
   n <- nrow(out)
-  cli::cli_inform("Rows loaded: {format(n, big.mark = ',')}")
-
-  if (n == 0) {
-    cli::cli_alert_warning("Filter returned zero rows")
-  } else {
-    cli::cli_alert_success("Data loaded successfully")
+  if (verbose) {
+    cli::cli_inform("Rows loaded: {format(n, big.mark = ',')}")
+    if (n == 0) {
+      cli::cli_alert_warning("Filter returned zero rows")
+    } else {
+      cli::cli_alert_success("Data loaded successfully")
+    }
   }
 
   return(out)
