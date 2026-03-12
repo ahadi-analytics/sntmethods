@@ -753,14 +753,18 @@ run_mbg_pipeline <- function(
     for (ind_category in primary_indicators) {
       # Render bar immediately to show current category
       pb_label <- ind_category
-      cli::cli_progress_update(id = ind_pb, set = sub_count, force = TRUE)
+      cli::cli_progress_update(
+        id = ind_pb, set = min(sub_count, expected_total), force = TRUE
+      )
 
       # Skip if already computed by a prior cascade (e.g. csb_any triggers
       # all csb_* indicators, so csb_public doesn't need a second run)
       if (ind_category %in% processed_indicators) {
         # Advance bar by expected count for this (already-done) category
         sub_count <- sub_count + .expected_sub_count(ind_category)
-        cli::cli_progress_update(id = ind_pb, set = sub_count, force = TRUE)
+        cli::cli_progress_update(
+          id = ind_pb, set = min(sub_count, expected_total), force = TRUE
+        )
         next
       }
 
@@ -801,7 +805,9 @@ run_mbg_pipeline <- function(
               cb_count <<- cb_count + 1L
               pb_label <<- ind_name
               # Use cat() to bypass suppressMessages wrapper
-              pct <- sub_count / expected_total
+              # Clamp to expected_total to prevent progress bar overflow
+              display_count <- min(sub_count, expected_total)
+              pct <- display_count / expected_total
               n_filled <- round(pct * 30)
               bar <- paste0(
                 strrep("\u25a0", n_filled),
@@ -809,7 +815,7 @@ run_mbg_pipeline <- function(
               )
               cat(sprintf(
                 "\r%s Indicator %d/%d | %s",
-                bar, sub_count, expected_total, ind_name
+                bar, display_count, expected_total, ind_name
               ))
             }
           )
@@ -833,7 +839,9 @@ run_mbg_pipeline <- function(
         if (cb_count == 0L) {
           n_produced <- max(length(ind_results$cluster_data), 1L)
           sub_count <- sub_count + n_produced
-          cli::cli_progress_update(id = ind_pb, set = sub_count, force = TRUE)
+          cli::cli_progress_update(
+            id = ind_pb, set = min(sub_count, expected_total), force = TRUE
+          )
         }
 
         # Check if indicator was skipped
@@ -1206,7 +1214,7 @@ run_mbg_pipeline <- function(
     # Individual IPTp -> full IPTp calc
     iptp_1plus = , iptp_2plus = , iptp_3plus = , iptp_4plus = ,
     iptp_1only = , iptp_2only = , iptp_3only = 4L,
-    # Individual EPI -> full EPI calc
+    # Individual EPI -> single vaccine calc
     epi_bcg = , epi_dpt1 = , epi_dpt2 = , epi_dpt3 = ,
     epi_polio0 = , epi_polio1 = , epi_polio2 = , epi_polio3 = ,
     epi_measles1 = , epi_measles2 = ,
@@ -1215,7 +1223,7 @@ run_mbg_pipeline <- function(
     epi_pneumo1 = , epi_pneumo2 = , epi_pneumo3 = ,
     epi_rota1 = , epi_rota2 = , epi_rota3 = ,
     epi_ipv = , epi_hepb0 = , epi_yellowfever = ,
-    epi_any = , epi_never_vaccinated = , epi_fully_vaccinated = 5L,
+    epi_any = , epi_never_vaccinated = , epi_fully_vaccinated = 1L,
     # Other individual indicators
     irs_coverage = 1L,
     smc_coverage = 1L,
@@ -1540,7 +1548,24 @@ run_mbg_pipeline <- function(
     epi_pneumo1 = , epi_pneumo2 = , epi_pneumo3 = ,
     epi_rota1 = , epi_rota2 = , epi_rota3 = ,
     epi_ipv = , epi_hepb0 = , epi_yellowfever = ,
-    epi_any = , epi_never_vaccinated = , epi_fully_vaccinated = ,
+    epi_any = , epi_never_vaccinated = , epi_fully_vaccinated = {
+      # Individual EPI indicator: compute only the requested vaccine
+      if (!"KR" %in% names(survey_data)) {
+        return(skip_indicator("Missing KR data (Children Recode)"))
+      }
+      epi_vaccine <- sub("^epi_", "", category)
+      tryCatch({
+        calc_epi_mbg(
+          dhs_kr = survey_data$KR,
+          gps_data = gps_data,
+          indicators = epi_vaccine
+        )
+      }, error = function(e) {
+        results$skipped <<- glue::glue("Calculation error: {e$message}")
+        list()
+      })
+    },
+
     epi = {
       if (!"KR" %in% names(survey_data)) {
         return(skip_indicator("Missing KR data (Children Recode)"))
