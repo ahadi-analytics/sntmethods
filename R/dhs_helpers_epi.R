@@ -48,6 +48,11 @@
 #' Shared data cleaning and indicator computation for EPI functions.
 #' Used by both calc_epi_dhs_core() and calc_epi_mbg().
 #'
+#' Applies recall bias correction: prefers `b19` (interview-date-corrected age)
+#' over `hw1` (raw age from health card). DHS-7+ surveys provide `b19` to
+#' address age heaping at 12 and 24 months, which distorts the 12-23 month
+#' eligibility window.
+#'
 #' @param dhs_kr DHS Children's Recode (KR) dataset.
 #' @param survey_vars Named list mapping DHS variable names.
 #' @param age_min_months Minimum age in months.
@@ -72,6 +77,21 @@
   }
   if (nrow(dhs_kr) == 0) {
     cli::cli_abort("`dhs_kr` is empty.")
+  }
+
+  # Recall bias correction: prefer b19 over hw1
+  # b19 = current age computed from interview CMC - birth CMC (DHS-7+)
+  # hw1 = age from health card (subject to heaping at 12/24 months)
+  age_var <- survey_vars$age
+  if (age_var == "hw1" && "b19" %in% names(dhs_kr)) {
+    b19_vals <- as.vector(haven::zap_labels(dhs_kr[["b19"]]))
+    if (any(!is.na(b19_vals))) {
+      age_var <- "b19"
+      survey_vars$age <- "b19"
+      cli::cli_alert_info(
+        "Using {.var b19} (recall-bias-corrected age) instead of {.var hw1}"
+      )
+    }
   }
 
   # Build vaccine mapping from survey_vars
