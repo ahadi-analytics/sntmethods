@@ -181,6 +181,12 @@
   data <- data |>
     dplyr::mutate(.row_id = dplyr::row_number())
 
+  # Ensure h32 columns are numeric (guards against residual haven labels
+  # or character values in older DHS surveys like BDI 2012)
+  for (col in h32_cols) {
+    data[[col]] <- suppressWarnings(as.numeric(as.character(data[[col]])))
+  }
+
   # Convert h32 to binary and reshape
   kr_long <- data |>
     dplyr::select(.row_id, dplyr::all_of(h32_cols)) |>
@@ -193,7 +199,7 @@
       csb_classification |> dplyr::select(variable, csb),
       by = "variable"
     ) |>
-    dplyr::filter(visited == 1)
+    dplyr::filter(!is.na(visited) & visited == 1)
 
   # Aggregate to base categories per child
   if (nrow(kr_long) > 0) {
