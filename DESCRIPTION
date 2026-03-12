@@ -62,8 +62,11 @@ Suggests:
     scales (>= 1.4.0),
     stlplus (>= 0.5.1),
     trend (>= 1.1.6)
+Additional_repositories:
+    https://inla.r-inla-download.org/R/stable
 Config/testthat/edition: 3
 Remotes:
-    ahadi-analytics/sntutils
+    ahadi-analytics/sntutils,
+    ihmeuw/mbg
 Depends:
     R (>= 4.2)
