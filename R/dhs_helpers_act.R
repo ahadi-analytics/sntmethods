@@ -1,7 +1,7 @@
 #' Detect ACT Variables from Haven Labels
 #'
 #' Scans ml13* and h37* variables in a DHS dataset for haven labels indicating
-#' ACT (Artemisinin-based Combination Therapy). ACT is a drug CLASS — multiple
+#' ACT (Artemisinin-based Combination Therapy). ACT is a drug CLASS -- multiple
 #' variables may contain different ACT formulations (e.g., artemether-lumefantrine
 #' in ml13f, artesunate-amodiaquine in ml13g). Returns ALL matching variables.
 #'
@@ -45,7 +45,7 @@
   }
 
   # Search ml13 series first (newer surveys). Only fall back to h37 (older
-  # surveys) if ml13 yields no matches. The two series are PARALLEL — they
+  # surveys) if ml13 yields no matches. The two series are PARALLEL -- they
   # represent the same drug slots in different DHS coding systems and must
   # never be mixed into a single composite.
   ml13_candidates <- grep("^ml13[a-z]", names(dhs_kr), value = TRUE)
@@ -338,7 +338,7 @@
     return(NULL)
   }
 
-  # Build join key: KR column names → PR column names
+  # Build join key: KR column names -> PR column names
   join_key <- stats::setNames(
     c("pr_cluster", "pr_hh", "pr_line"),
     c(kr_cluster_var, kr_hh_var, kr_line_var)

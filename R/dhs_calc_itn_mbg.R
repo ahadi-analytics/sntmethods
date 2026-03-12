@@ -6,7 +6,7 @@
 #'
 #' Uses a dictionary-driven approach matching the indicator codes from
 #' \code{\link{calc_itn_dhs}}. The dictionary mirrors the DHS
-#' \code{.itn_conditions()} — same outcome variables, same filters, same data
+#' \code{.itn_conditions()} -- same outcome variables, same filters, same data
 #' sources (HR vs PR).
 #'
 #' @details
@@ -21,7 +21,7 @@
 #'     \item \code{"with_itn"}: Households with at least one ITN (HR)
 #'     \item \code{"enough_itn"}: Households with enough ITNs for every 2
 #'       people (HR)
-#'     \item \code{"access_itn"}: Population with access to ITN — binary
+#'     \item \code{"access_itn"}: Population with access to ITN -- binary
 #'       indicator (PR)
 #'     \item \code{"use_itn"}: Population that used ITN last night (PR)
 #'     \item \code{"use_itn_chu5"}: Under-5 children that used ITN (PR)
@@ -222,7 +222,7 @@ calc_itn_mbg <- function(
 #' Each entry defines the indicator name, data source (HR or PR), outcome column,
 #' and optional filter.
 #'
-#' Mirrors the DHS \code{.itn_conditions()} — same outcome variables, same
+#' Mirrors the DHS \code{.itn_conditions()} -- same outcome variables, same
 #' filters, same data sources. The MBG dictionary uses simple column-based
 #' filtering instead of quoted expressions.
 #'

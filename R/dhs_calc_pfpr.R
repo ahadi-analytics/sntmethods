@@ -687,7 +687,7 @@ calc_pfpr_dhs <- function(
     )
     # Map to febrile subset if lengths differ
     if (nrow(pr) != nrow(dhs_pr)) {
-      # pr is a subset — need lookup approach
+      # pr is a subset -- need lookup approach
       resolved_all <- .resolve_region_labels(
         dhs_pr[[region_var]], region_var
       )

@@ -55,7 +55,7 @@
     }
   }
 
-  # No ITN variables found at all — graceful skip
+  # No ITN variables found at all -- graceful skip
   if (length(itn_vars) == 0 && length(treated_vars) == 0) {
     cli::cli_warn(c(
       "No ITN variables found in HR data.",

@@ -266,7 +266,7 @@
 #' Scans h32 variables for haven labels and classifies each into a CSB
 #' category (public, chw, private_formal, pharmacy, private_informal)
 #' based on label content. This is the same approach used for ACT detection
-#' in `.detect_act_vars()` — label-based, not slot-based.
+#' in `.detect_act_vars()` -- label-based, not slot-based.
 #'
 #' DHS variable slots change between survey versions (DHS-7 vs DHS-8), so
 #' hardcoded slot-to-category mappings break. Label detection works across
@@ -277,7 +277,7 @@
 #'   Used as fallback for variables whose labels don't match any pattern.
 #'   If NULL, uses `.default_csb_classification()`.
 #'
-#' @return Data frame with columns: variable, csb — one row per classified
+#' @return Data frame with columns: variable, csb -- one row per classified
 #'   h32 variable found in the data. Excludes meta variables (h32y, h32z)
 #'   and unclassified/NA-prefix variables.
 #' @noRd
@@ -297,7 +297,7 @@
     fallback_classification <- .default_csb_classification()
   }
 
-  # Label patterns — ordered from most specific to most general.
+  # Label patterns -- ordered from most specific to most general.
   # Same philosophy as .detect_act_vars(): scan haven labels, not slot letters.
   #
   # CHW / community health worker / fieldworker

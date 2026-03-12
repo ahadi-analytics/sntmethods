@@ -398,7 +398,7 @@ calc_act_dhs <- function(
         dx_resolved <- "ml1"
       } else {
         cli::cli_alert_warning(
-          "ml1 label is {.val {ml1_lbl}} — IPTp variable, not malaria test"
+          "ml1 label is {.val {ml1_lbl}} -- IPTp variable, not malaria test"
         )
       }
     } else {
@@ -406,7 +406,7 @@ calc_act_dhs <- function(
     }
   }
 
-  # Fallback: h47 → ml1 (with label validation)
+  # Fallback: h47 -> ml1 (with label validation)
   if (is.null(dx_resolved) && "h47" %in% names(kr_fever)) {
     dx_resolved <- "h47"
   }
@@ -644,7 +644,7 @@ calc_act_dhs <- function(
     parent_levels <- all_level_names[seq_len(i - 1)]
     parent_cols_in_data <- intersect(parent_levels, names(kr_fever))
     if (length(parent_cols_in_data) > 0 && grp %in% names(kr_fever)) {
-      # Build lookup: current level value → parent level values
+      # Build lookup: current level value -> parent level values
       parent_lookup <- kr_fever |>
         dplyr::select(dplyr::all_of(c(grp, parent_cols_in_data))) |>
         dplyr::mutate(dplyr::across(dplyr::everything(), ~toupper(as.character(.)))) |>
@@ -916,7 +916,7 @@ act_dictionary <- function() {
     ),
 
     # ====================================================================
-    # ANTIMALARIAL indicators — outcome: received_antimalarial
+    # ANTIMALARIAL indicators -- outcome: received_antimalarial
     # ====================================================================
     list(
       indicator      = "ANTIMALARIAL",
@@ -1054,7 +1054,7 @@ act_dictionary <- function() {
     ),
 
     # ====================================================================
-    # MALARIA_DX indicators — outcome: had_test (malaria diagnostic)
+    # MALARIA_DX indicators -- outcome: had_test (malaria diagnostic)
     # ====================================================================
     list(
       indicator      = "MALARIA_DX_ANTIMALARIAL",
@@ -1350,7 +1350,7 @@ act_dictionary <- function() {
   # Determine outcome variable (default: has_act for backwards compat)
   outcome_var <- condition$outcome_var %||% "has_act"
 
-  # Apply condition filter (NULL means no filter — use all data)
+  # Apply condition filter (NULL means no filter -- use all data)
   if (is.null(condition$filter_expr)) {
     filtered <- data
   } else {
@@ -1427,7 +1427,7 @@ act_dictionary <- function() {
   })
 
   # --- National estimate ---
-  # Weighted counts (matches format: numerator/denominator ≈ point)
+  # Weighted counts (matches format: numerator/denominator ~ point)
   n_denom_w <- round(sum(filtered$survey_weight, na.rm = TRUE))
   n_numer_w <- round(sum(
     filtered$survey_weight * (filtered$.dhs_outcome == 1), na.rm = TRUE
@@ -1599,7 +1599,7 @@ act_dictionary <- function() {
 
   # Expand admin_level to include all intermediate levels
 
-  # e.g., admin_level = "adm2" → include adm1, adm2 (all levels in shapefile up to adm2)
+  # e.g., admin_level = "adm2" -> include adm1, adm2 (all levels in shapefile up to adm2)
   if (!is.null(admin_level) && length(admin_level) == 1) {
     target_num <- as.integer(sub("^adm", "", admin_level))
     all_cols <- available_admins[

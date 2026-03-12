@@ -533,7 +533,7 @@ run_mbg_pipeline <- function(
     if (ind %in% names(category_file_types)) {
       file_types_needed <- c(file_types_needed, category_file_types[[ind]])
     } else {
-      # Individual indicator code — resolve via DHS indicator dictionary
+      # Individual indicator code -- resolve via DHS indicator dictionary
       meta <- .mbg_indicator_meta(ind)
       if (!is.na(meta$recode)) {
         # Parse recode field: "HR/PR" -> c("HR", "PR"), "KR+PR" -> c("KR", "PR")
@@ -1177,14 +1177,14 @@ run_mbg_pipeline <- function(
     enough_itn = , with_itn = , access_itn = , use_itn = ,
     use_itn_chu5 = , use_itn_preg = , use_itn_if_access = ,
     use_itn_5_10 = , use_itn_10_20 = , use_itn_20plus = 1L,
-    # Individual ANC → full ANC calc
+    # Individual ANC -> full ANC calc
     anc_1plus = , anc_2plus = , anc_3plus = , anc_4plus = , anc_8plus = 5L,
-    # Individual CSB → full CSB calc
+    # Individual CSB -> full CSB calc
     csb_any = , csb_public = , csb_pub_nochw = , csb_chw = ,
     csb_private = , csb_priv_formal = , csb_pharmacy = ,
     csb_priv_informal = , csb_priv_form_pha = ,
     csb_trained = , csb_none = 11L,
-    # Individual ACT → full ACT calc
+    # Individual ACT -> full ACT calc
     act_care_seek = , act_am = , act_any_tx_am = ,
     act_trained_am = , act_pub_am = , act_pub_nochw_am = ,
     act_chw_am = , act_priv_am = , act_priv_formal_am = ,
@@ -1199,14 +1199,14 @@ run_mbg_pipeline <- function(
     mal_dx_chw_am = , mal_dx_priv_am = , mal_dx_priv_formal_am = ,
     mal_dx_pharm_am = , mal_dx_priv_informal_am = ,
     mal_dx_priv_form_pha_am = 35L,
-    # Individual anemia → full anemia calc
+    # Individual anemia -> full anemia calc
     anemia_any = , anemia_moderate_plus = , anemia_severe = ,
     anemia_mild_only = , anemia_moderate_only = , anemia_severe_only = ,
     severe_anemia = 3L,
-    # Individual IPTp → full IPTp calc
+    # Individual IPTp -> full IPTp calc
     iptp_1plus = , iptp_2plus = , iptp_3plus = , iptp_4plus = ,
     iptp_1only = , iptp_2only = , iptp_3only = 4L,
-    # Individual EPI → full EPI calc
+    # Individual EPI -> full EPI calc
     epi_bcg = , epi_dpt1 = , epi_dpt2 = , epi_dpt3 = ,
     epi_polio0 = , epi_polio1 = , epi_polio2 = , epi_polio3 = ,
     epi_measles1 = , epi_measles2 = ,
@@ -1549,7 +1549,7 @@ run_mbg_pipeline <- function(
         calc_epi_mbg(
           dhs_kr = survey_data$KR,
           gps_data = gps_data,
-          indicators = c("bcg", "dpt2", "dpt3", "measles1", "measles2")
+          indicators = c("bcg", "dpt2", "dpt3", "polio2", "polio3", "measles1", "measles2")
         )
       }, error = function(e) {
         results$skipped <<- glue::glue("Calculation error: {e$message}")
@@ -1650,7 +1650,7 @@ run_mbg_pipeline <- function(
     # Pre-flight check: verify INLA is available before entering the loop
     if (!requireNamespace("INLA", quietly = TRUE)) {
       cli::cli_alert_warning(
-        "INLA not installed — skipping MBG model fitting for all indicators"
+        "INLA not installed -- skipping MBG model fitting for all indicators"
       )
       return(results)
     }
@@ -1887,7 +1887,7 @@ run_mbg_pipeline <- function(
     # Convert to tibble to avoid data.table namespace issues
     df <- tibble::as_tibble(dt)
 
-    # Combined tables already have final column names — save directly
+    # Combined tables already have final column names -- save directly
     if (!grepl("^pfpr_combined_", ind_name)) {
       labels <- .get_indicator_labels(ind_name)
 
@@ -2077,7 +2077,8 @@ run_mbg_pipeline <- function(
     id_raster <- terra::rast(id_raster_file)
   } else {
     if (isTRUE(debug)) cli::cli_alert_info("Building ID raster ({cache_suffix})...")
-    id_raster <- mbg::build_id_raster(
+    build_id_raster <- utils::getFromNamespace("build_id_raster", "mbg")
+    id_raster <- build_id_raster(
       polygons = primary_vect,
       template_raster = pop_rast
     )
@@ -2108,7 +2109,8 @@ run_mbg_pipeline <- function(
     aggregation_table <- arrow::read_parquet(agg_file)
   } else {
     if (isTRUE(debug)) cli::cli_alert_info("Building aggregation table ({cache_suffix})...")
-    aggregation_table <- mbg::build_aggregation_table(
+    build_aggregation_table <- utils::getFromNamespace("build_aggregation_table", "mbg")
+    aggregation_table <- build_aggregation_table(
       polygons = primary_vect,
       id_raster = id_raster,
       polygon_id_field = polygon_id_field,
@@ -2127,7 +2129,8 @@ run_mbg_pipeline <- function(
 
   # Run MBG
   if (isTRUE(debug)) cli::cli_alert_info("Running MBG model...")
-  model_runner <- mbg::MbgModelRunner$new(
+  MbgModelRunner <- utils::getFromNamespace("MbgModelRunner", "mbg")
+  model_runner <- MbgModelRunner$new(
     input_data = cluster_dt,
     id_raster = id_raster,
     covariate_rasters = covariates,
@@ -2635,7 +2638,7 @@ run_mbg_pipeline <- function(
     admin_df <- .find_col(admin_df, "adm3", c("ADM3_NAME", "ADMIN3", "commune", "Commune", "NAME_3", "subdistrict", "Subdistrict", "ward", "Ward"))
   }
 
-  # Build admin hierarchy lookup (primary_col → adm0, adm1, ...)
+  # Build admin hierarchy lookup (primary_col -> adm0, adm1, ...)
   admin_cols <- c("adm0", "adm1", "adm2")
   if (aggregation_level == "adm3") admin_cols <- c(admin_cols, "adm3")
   admin_cols <- intersect(admin_cols, names(admin_df))
@@ -3257,8 +3260,8 @@ run_mbg_pipeline <- function(
 #' Round MBG Output Data Frame
 #'
 #' Applies smart rounding to MBG indicator output:
-#' - Integer columns (counts, sample sizes) → whole numbers
-#' - Indicator columns (percentages, rates) → 2 decimal places
+#' - Integer columns (counts, sample sizes) -> whole numbers
+#' - Indicator columns (percentages, rates) -> 2 decimal places
 #'
 #' @param df Data frame to round.
 #'
@@ -3286,7 +3289,7 @@ run_mbg_pipeline <- function(
     "median_survey_month"
   )
 
-  # Indicator columns (percentages 0-100, or rates like u5mr per 1,000) → 2 decimal places
+  # Indicator columns (percentages 0-100, or rates like u5mr per 1,000) -> 2 decimal places
   proportion_patterns <- c(
     "^pfpr_", "^itn_", "^irs_", "^anc_", "^csb_", "^anemia",
     "^severe_anemia", "^iptp_", "^epi_", "^u5mr", "^smc_", "^act_", "^eff_cm",

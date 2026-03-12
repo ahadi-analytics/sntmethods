@@ -95,7 +95,7 @@ calc_antimalarial_dhs_core <- function(
   }
 
   # Check for antimalarial variables (ml13 preferred, h37 fallback for older surveys)
-  # Use standard drug slots (a-h) for presence check — actual label-based filtering
+  # Use standard drug slots (a-h) for presence check -- actual label-based filtering
   # happens downstream in .prepare_antimalarial_data()
   ml13_vars <- grep("^ml13[a-h]$", names(dhs_kr), value = TRUE)
   h37_vars  <- grep("^h37[a-h]$", names(dhs_kr), value = TRUE)

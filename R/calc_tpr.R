@@ -324,11 +324,11 @@ calc_tpr <- function(
     df <- df |>
     dplyr::mutate(adm0 = .data[[adm0_var]])
   } else if ("adm0" %in% names(data)) {
-    # Case 2: adm0_var not provided but adm0 exists → keep it as is
+    # Case 2: adm0_var not provided but adm0 exists -> keep it as is
     df <- df |>
     dplyr::mutate(adm0 = .data$adm0)
   } else {
-    # Case 3: neither provided nor existing → default constant
+    # Case 3: neither provided nor existing -> default constant
     df <- df |>
     dplyr::mutate(adm0 = "country")
   }

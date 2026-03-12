@@ -359,7 +359,7 @@ calc_act_mbg <- function(
     ]
     if (nrow(filtered) == 0) {
       cli::cli_alert_warning(
-        "No data for {.val {spec$name}} — skipping"
+        "No data for {.val {spec$name}} -- skipping"
       )
       next
     }
@@ -804,7 +804,7 @@ calc_act_mbg <- function(
   if (act_used_h37 && length(h37_candidates) > 0) {
     drug_series <- .detect_am_from_labels(h37_candidates)
     if (length(drug_series) == 0) {
-      # No labels — fall back to standard h37 slots
+      # No labels -- fall back to standard h37 slots
       drug_series <- grep(
         "^h37[a-h]$",
         names(dhs_kr_zapped), value = TRUE
@@ -855,7 +855,7 @@ calc_act_mbg <- function(
 
   if (length(drug_series) == 0) {
     cli::cli_alert_warning(
-      "No antimalarial variables found — \\
+      "No antimalarial variables found -- \\
       antimalarial indicators will be skipped"
     )
     return(enriched)

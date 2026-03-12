@@ -162,7 +162,7 @@ calc_case_management_dhs <- function(
   # ---- 4. Add antimalarial variable ----
 
   # Label-based antimalarial variable detection: only include variables whose
-  # labels contain actual drug names — excludes non-drug response codes
+  # labels contain actual drug names -- excludes non-drug response codes
   # ("Don't know", "Other", etc.) that would inflate the antimalarial composite.
   antimalarial_pattern <- paste0(
     "antimalarial|fansidar|chloroquine|amodiaquine|quinine|",

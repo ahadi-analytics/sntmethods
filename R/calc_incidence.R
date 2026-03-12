@@ -653,19 +653,19 @@ calc_incidence <- function(
   #
   # IMPORTANT: We do NOT calculate N1 at facility level before aggregation.
   #
-  # Previous approach (facility-level N1 → sum to admin):
-  #   - Calculated n1_cases_fac = conf + pres × tpr for each facility
+  # Previous approach (facility-level N1 -> sum to admin):
+  #   - Calculated n1_cases_fac = conf + pres x tpr for each facility
   #   - Summed n1_cases_fac to get admin-level n1_cases
   #   - ISSUE: Facilities with missing TPR were excluded (n1_cases_fac = NA)
   #   - Result: n1_cases < n0_cases (data loss from excluded facilities)
   #   - Example: BLITTA 2018-03 had 5/22 facilities with missing TPR
-  #             → 809 confirmed cases excluded from N1
-  #             → n0=3300, n1=2491 (impossible!)
+  #             -> 809 confirmed cases excluded from N1
+  #             -> n0=3300, n1=2491 (impossible!)
   #
   # Current approach (admin-level N1 after aggregation):
   #   - Aggregate conf, pres, test to admin level
   #   - Calculate admin-level TPR = sum(conf) / sum(test)
-  #   - Calculate n1_cases = sum(conf) + sum(pres) × admin_tpr
+  #   - Calculate n1_cases = sum(conf) + sum(pres) x admin_tpr
   #   - Result: All facilities contribute, n1 >= n0 (mathematically correct)
   #
   # Trade-off: We lose facility-specific TPR variation, but gain data completeness.

@@ -43,7 +43,7 @@
     dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
     dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
 
-  # Check whether mother/hv042 is present (optional — absent in some MIS surveys)
+  # Check whether mother/hv042 is present (optional -- absent in some MIS surveys)
   has_mother_col <- !is.null(survey_vars$mother) && survey_vars$mother %in% names(dhs_pr)
   if (!has_mother_col) {
     cli::cli_alert_warning(

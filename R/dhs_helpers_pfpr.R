@@ -28,7 +28,7 @@
     cli::cli_abort("`dhs_pr` is empty")
   }
 
-  # Check required columns (mother/hv042 is optional — absent in some MIS surveys)
+  # Check required columns (mother/hv042 is optional -- absent in some MIS surveys)
   has_mother_col <- !is.null(survey_vars$mother) && survey_vars$mother %in% names(dhs_pr)
   needed <- c(survey_vars$cluster, survey_vars$age, survey_vars$present)
   missing_cols <- setdiff(needed, names(dhs_pr))

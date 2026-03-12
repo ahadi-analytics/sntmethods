@@ -743,7 +743,7 @@ calc_itn_dhs <- function(
   n_clusters <- dplyr::n_distinct(filtered$cluster_id)
   use_strata <- dplyr::n_distinct(filtered$stratum_id) > 1
 
-  # If only 1 cluster total, can't estimate variance — return point only
+  # If only 1 cluster total, can't estimate variance -- return point only
   if (n_clusters < 2) {
     point_est <- sum(filtered$survey_weight * filtered$itn_outcome, na.rm = TRUE) /
       sum(filtered$survey_weight, na.rm = TRUE)

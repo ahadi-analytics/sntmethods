@@ -173,7 +173,7 @@ calc_antimalarial_mbg <- function(
     filtered <- filtered[!is.na(filtered[[spec$outcome]]), , drop = FALSE]
     if (nrow(filtered) == 0) {
       cli::cli_alert_warning(
-        "No data for {.val {spec$name}} — skipping"
+        "No data for {.val {spec$name}} -- skipping"
       )
       next
     }

@@ -768,7 +768,7 @@ dhs_dictionary <- function() {
         dplyr::select(-"parent_median")
     }
 
-    # Drop the parent column — caller only expects admin_col + median_survey_month
+    # Drop the parent column -- caller only expects admin_col + median_survey_month
     result <- result |>
       dplyr::select(dplyr::all_of(admin_col), "median_survey_month")
   }

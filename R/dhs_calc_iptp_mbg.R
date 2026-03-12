@@ -37,8 +37,8 @@
 #' with a birth in the analysis window and a valid SP response
 #' (`sp_doses <= 7`). The default `survey_vars$sp_doses = "m49a_1"` is a
 #' **binary** variable (0 = No, 1 = Yes). Applying `>= 2`, `>= 3`, or `>= 4`
-#' against a binary variable will always produce zero — users must remap
-#' `sp_doses` to `"ml1_1"` (the actual dose count, 0–7) to compute 2+, 3+,
+#' against a binary variable will always produce zero -- users must remap
+#' `sp_doses` to `"ml1_1"` (the actual dose count, 0-7) to compute 2+, 3+,
 #' and 4+ indicators correctly.
 #'
 #' @examples

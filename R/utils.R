@@ -585,7 +585,7 @@ dhs_read <- function(
       # Exact survey_id provided
       target_dir <- fs::path(year_dir, paste0("survey_id=", survey_id))
     } else if (fs::dir_exists(year_dir)) {
-      # No survey_id — auto-discover if there's exactly one survey partition
+      # No survey_id -- auto-discover if there's exactly one survey partition
       survey_dirs <- fs::dir_ls(year_dir, type = "directory")
       target_dir <- if (length(survey_dirs) == 1) survey_dirs[1] else NULL
     } else {

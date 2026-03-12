@@ -253,7 +253,7 @@ calc_csb_dhs_core <- function(
 
   # Add aliases needed by indicator conditions (.csb_conditions() outcome_var)
   # Granular columns (csb_public_nochw, csb_chw, etc.) are already created
-  # by .classify_csb_from_h32() — don't redefine them here
+  # by .classify_csb_from_h32() -- don't redefine them here
   kr_fever <- kr_fever |>
     dplyr::mutate(
       csb_any_treatment      = csb_any,
@@ -683,7 +683,7 @@ csb_dictionary <- function() {
   n_denom <- nrow(filtered)
   if (n_denom == 0) return(tibble::tibble())
 
-  # Weighted counts (matches format: numerator/denominator ≈ point)
+  # Weighted counts (matches format: numerator/denominator ~ point)
   n_denom_w <- round(sum(filtered$survey_weight, na.rm = TRUE))
   n_numer_w <- round(sum(
     filtered$survey_weight * (filtered$has_act == 1), na.rm = TRUE

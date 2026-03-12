@@ -117,7 +117,7 @@
   na_int <- NA_integer_
 
   meta <- list(
-    # Cascade — KR module, Malaria category
+    # Cascade -- KR module, Malaria category
     fever             = list(recode = "KR", category = "Malaria",       cascade = 0L, age = "0-59 months",  pop_type = "u5"),
     csb_public        = list(recode = "KR", category = "Malaria",       cascade = 1L, age = "0-59 months",  pop_type = "u5"),
     csb_private       = list(recode = "KR", category = "Malaria",       cascade = 1L, age = "0-59 months",  pop_type = "u5"),
@@ -172,12 +172,12 @@
     mal_dx_priv_form_pha_am = list(recode = "KR", category = "Malaria", cascade = 2L, age = "0-59 months",  pop_type = "u5"),
     febrile_rdt_pos   = list(recode = "KR+PR", category = "Malaria",    cascade = 2L, age = "0-59 months",  pop_type = "u5"),
     febrile_rdt_pos_act = list(recode = "KR+PR", category = "Malaria",  cascade = 4L, age = "0-59 months",  pop_type = "u5"),
-    # PfPR — PR module
+    # PfPR -- PR module
     pfpr_rdt          = list(recode = "PR", category = "Malaria",       cascade = na_int, age = "6-59 months",  pop_type = "u5"),
     pfpr_mic          = list(recode = "PR", category = "Malaria",       cascade = na_int, age = "6-59 months",  pop_type = "u5"),
     pfpr_rdt_u5       = list(recode = "PR", category = "Malaria",       cascade = na_int, age = "6-59 months",  pop_type = "u5"),
     pfpr_mic_u5       = list(recode = "PR", category = "Malaria",       cascade = na_int, age = "6-59 months",  pop_type = "u5"),
-    # ITN — HR/PR module (aligned with DHS indicator codes)
+    # ITN -- HR/PR module (aligned with DHS indicator codes)
     enough_itn        = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "all ages",     pop_type = "all"),
     with_itn          = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "all ages",     pop_type = "all"),
     access_itn        = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "all ages",     pop_type = "all"),
@@ -188,7 +188,7 @@
     use_itn_10_20     = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "10-20 years",  pop_type = "10_20"),
     use_itn_20plus    = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "20+ years",    pop_type = "20plus"),
     use_itn_if_access = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "all ages",     pop_type = "all"),
-    # Anemia — PR module
+    # Anemia -- PR module
     severe_anemia      = list(recode = "PR", category = "Nutrition",    cascade = na_int, age = "6-59 months",  pop_type = "u5"),
     anemia_any         = list(recode = "PR", category = "Nutrition",    cascade = na_int, age = "6-59 months",  pop_type = "u5"),
     anemia_moderate_plus = list(recode = "PR", category = "Nutrition",  cascade = na_int, age = "6-59 months",  pop_type = "u5"),
@@ -196,13 +196,13 @@
     anemia_mild_only   = list(recode = "PR", category = "Nutrition",    cascade = na_int, age = "6-59 months",  pop_type = "u5"),
     anemia_moderate_only = list(recode = "PR", category = "Nutrition",  cascade = na_int, age = "6-59 months",  pop_type = "u5"),
     anemia_severe_only = list(recode = "PR", category = "Nutrition",    cascade = na_int, age = "6-59 months",  pop_type = "u5"),
-    # ANC — IR module
+    # ANC -- IR module
     anc_1plus         = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49", pop_type = "wra"),
     anc_2plus         = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49", pop_type = "wra"),
     anc_3plus         = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49", pop_type = "wra"),
     anc_4plus         = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49", pop_type = "wra"),
     anc_8plus         = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49", pop_type = "wra"),
-    # IPTp — IR module
+    # IPTp -- IR module
     iptp_1plus        = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49", pop_type = "wra"),
     iptp_2plus        = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49", pop_type = "wra"),
     iptp_3plus        = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49", pop_type = "wra"),
@@ -210,7 +210,7 @@
     iptp_1only        = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49", pop_type = "wra"),
     iptp_2only        = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49", pop_type = "wra"),
     iptp_3only        = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49", pop_type = "wra"),
-    # EPI — KR module
+    # EPI -- KR module
     epi_bcg           = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
     epi_dpt1          = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
     epi_dpt2          = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
@@ -239,12 +239,12 @@
     epi_ipv           = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
     epi_hepb0         = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
     epi_yellowfever   = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
-    # U5MR — KR module (special unit)
+    # U5MR -- KR module (special unit)
     u5mr              = list(recode = "KR", category = "Mortality",     cascade = na_int, age = "0-59 months",  pop_type = "u5",
                              base_unit = "per 1000 live births"),
-    # IRS — HR module
+    # IRS -- HR module
     irs_coverage      = list(recode = "HR", category = "IRS",           cascade = na_int, age = "all ages",     pop_type = "all"),
-    # SMC — KR module
+    # SMC -- KR module
     smc_coverage      = list(recode = "KR", category = "SMC",           cascade = na_int, age = "0-59 months",  pop_type = "u5"),
     # Derived: Effective coverage of case management
     eff_cm_any        = list(recode = "KR", category = "Malaria",       cascade = na_int, age = "0-59 months",  pop_type = "u5"),
@@ -448,7 +448,7 @@
     "eff_cm"
   )
 
-  # Individual indicator codes — aligned with _conditions() indicator_code
+  # Individual indicator codes -- aligned with _conditions() indicator_code
   # values and _mbg_dictionary() name values across all calc functions
   individual_codes <- c(
     # PfPR (PR module)
@@ -466,7 +466,7 @@
     "csb_trained", "csb_none",
     # Antimalarial (KR module)
     "antimalarial", "antimalarial_public",
-    # ACT (KR module) — from .act_mbg_dictionary()
+    # ACT (KR module) -- from .act_mbg_dictionary()
     "act", "act_care_seek", "act_am", "act_any_tx_am",
     "act_trained_am", "act_pub_am", "act_pub_nochw_am", "act_chw_am",
     "act_priv_am", "act_priv_formal_am", "act_priv_pharm_am",

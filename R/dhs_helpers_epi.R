@@ -181,13 +181,13 @@
     kr[[col_name]] <- as.integer(!is.na(kr[[var_name]]) & kr[[var_name]] %in% c(1, 2, 3))
   }
 
-  # Special coding: "any" — h10 >= 1 means child received at least one vaccination
+  # Special coding: "any" -- h10 >= 1 means child received at least one vaccination
   if ("any" %in% names(available_vaccines)[available_vaccines]) {
     any_var <- vaccine_mapping[["any"]]
     kr$vax_any <- as.integer(!is.na(kr[[any_var]]) & kr[[any_var]] >= 1)
   }
 
-  # Derived indicator: "never_vaccinated" — inverse of "any" (h10 == 0)
+  # Derived indicator: "never_vaccinated" -- inverse of "any" (h10 == 0)
   if ("any" %in% names(available_vaccines)[available_vaccines]) {
     any_var <- vaccine_mapping[["any"]]
     kr$vax_never_vaccinated <- as.integer(!is.na(kr[[any_var]]) & kr[[any_var]] == 0)

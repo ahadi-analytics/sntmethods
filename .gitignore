@@ -11,8 +11,7 @@
 *.tar.gz
 *.zip
 
-# Documentation
-/man/
+# Documentation (keep /man/ tracked for R CMD check)
 /doc/
 /docs/
 vignettes/*.html

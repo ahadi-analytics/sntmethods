@@ -38,7 +38,7 @@
   }
 
   # Auto-detect available antimalarial variables using label-based filtering.
-  # Only include variables whose labels contain actual drug names — excludes
+  # Only include variables whose labels contain actual drug names -- excludes
   # non-drug response codes ("Don't know", "Other", "No treatment") that would
   # inflate the antimalarial composite.
   # Prefer ml13* series (drug-specific, newer surveys);
