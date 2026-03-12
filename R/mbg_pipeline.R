@@ -730,42 +730,55 @@ run_mbg_pipeline <- function(
       if (ind_category %in% processed_indicators) next
 
       tryCatch({
-        ind_results <- .process_indicator_category(
-          category = ind_category,
-          survey_data = survey_data,
-          gps_data = gps_data,
-          adm0_sf = adm0_aligned,
-          adm1_sf = adm1_aligned,
-          adm2_sf = adm2_aligned,
-          adm3_sf = adm3_aligned,
-          pop_rast = pop_rast,
-          pop_rast_u5 = pop_rast_u5,
-          pop_rast_1_2 = pop_rast_1_2,
-          pop_rast_5_10 = pop_rast_5_10,
-          pop_rast_10_20 = pop_rast_10_20,
-          pop_rast_20plus = pop_rast_20plus,
-          pop_rast_wra = pop_rast_wra,
-          output_dirs = output_dirs,
-          country_iso3 = country_iso3,
-          survey_year = current_year,
-          survey_type = current_survey_type,
-          aggregation_level = aggregation_level,
-          run_mbg = run_mbg,
-          save_rasters = save_rasters,
-          cache = cache,
-          verbose = verbose,
-          debug = debug
-        )
+        # Suppress verbose calc function output unless in debug mode;
+        # the progress bar already shows which indicator is running
+        .run_indicator <- function() {
+          .process_indicator_category(
+            category = ind_category,
+            survey_data = survey_data,
+            gps_data = gps_data,
+            adm0_sf = adm0_aligned,
+            adm1_sf = adm1_aligned,
+            adm2_sf = adm2_aligned,
+            adm3_sf = adm3_aligned,
+            pop_rast = pop_rast,
+            pop_rast_u5 = pop_rast_u5,
+            pop_rast_1_2 = pop_rast_1_2,
+            pop_rast_5_10 = pop_rast_5_10,
+            pop_rast_10_20 = pop_rast_10_20,
+            pop_rast_20plus = pop_rast_20plus,
+            pop_rast_wra = pop_rast_wra,
+            output_dirs = output_dirs,
+            country_iso3 = country_iso3,
+            survey_year = current_year,
+            survey_type = current_survey_type,
+            aggregation_level = aggregation_level,
+            run_mbg = run_mbg,
+            save_rasters = save_rasters,
+            cache = cache,
+            verbose = verbose,
+            debug = debug
+          )
+        }
+        ind_results <- if (isTRUE(debug)) {
+          .run_indicator()
+        } else {
+          suppressMessages(
+            withCallingHandlers(
+              .run_indicator(),
+              message = function(m) {
+                # Suppress cli messages (which use message())
+                if (inherits(m, "cliMessage")) invokeRestart("muffleMessage")
+              }
+            )
+          )
+        }
 
         # Check if indicator was skipped
         if (!is.null(ind_results$skipped)) {
           skipped_indicators[[ind_category]] <- ind_results$skipped
-          cli::cli_alert_warning(
-            "Skipped {.field {ind_category}}: {ind_results$skipped}"
-          )
         } else if (length(ind_results$cluster_data) > 0) {
           processed_indicators <- c(processed_indicators, names(ind_results$cluster_data))
-          cli::cli_alert_success("Processed {.field {ind_category}}")
         }
 
         # Store results for this indicator
@@ -803,9 +816,16 @@ run_mbg_pipeline <- function(
         cache = cache,
         pop_rast = pop_rast_u5 %||% pop_rast
       )
-      derived <- do.call(
-        .compute_derived_rasters, derived_args
-      )
+      derived <- if (isTRUE(debug)) {
+        do.call(.compute_derived_rasters, derived_args)
+      } else {
+        suppressMessages(withCallingHandlers(
+          do.call(.compute_derived_rasters, derived_args),
+          message = function(m) {
+            if (inherits(m, "cliMessage")) invokeRestart("muffleMessage")
+          }
+        ))
+      }
       for (name in names(derived$mbg_estimates)) {
         year_results$mbg_estimates[[name]] <- derived$mbg_estimates[[name]]
         processed_indicators <- c(processed_indicators, name)
