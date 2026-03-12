@@ -889,8 +889,8 @@ calc_act_mbg <- function(
   enriched$received_antimalarial <- apply(
     drug_matrix, 1,
     function(row) {
-      if (all(is.na(row))) return(NA_real_)
       if (any(row == 1, na.rm = TRUE)) return(1)
+      if (any(is.na(row))) return(NA_real_)
       return(0)
     }
   )

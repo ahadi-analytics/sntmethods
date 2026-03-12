@@ -179,8 +179,8 @@
     h37_matrix <- as.matrix(kr_fever[, h37_vars, drop = FALSE])
     h37_matrix[!h37_matrix %in% c(0, 1)] <- NA
     kr_fever$received_antimalarial <- apply(h37_matrix, 1, function(row) {
-      if (all(is.na(row))) return(NA_real_)
       if (any(row == 1, na.rm = TRUE)) return(1)
+      if (any(is.na(row))) return(NA_real_)
       return(0)
     })
     attr(kr_fever, "ml13_vars_found") <- h37_vars
@@ -189,8 +189,8 @@
     ml13_matrix <- as.matrix(kr_fever[, ml13_vars, drop = FALSE])
     ml13_matrix[!ml13_matrix %in% c(0, 1)] <- NA
     kr_fever$received_antimalarial <- apply(ml13_matrix, 1, function(row) {
-      if (all(is.na(row))) return(NA_real_)
       if (any(row == 1, na.rm = TRUE)) return(1)
+      if (any(is.na(row))) return(NA_real_)
       return(0)
     })
     attr(kr_fever, "ml13_vars_found") <- ml13_vars

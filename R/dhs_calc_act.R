@@ -333,8 +333,8 @@ calc_act_dhs <- function(
     }
     drug_matrix <- as.matrix(kr_fever[, am_cols, drop = FALSE])
     kr_fever$received_antimalarial <- apply(drug_matrix, 1, function(row) {
-      if (all(is.na(row))) return(NA_real_)
       if (any(row == 1, na.rm = TRUE)) return(1)
+      if (any(is.na(row))) return(NA_real_)
       return(0)
     })
     n_am <- sum(kr_fever$received_antimalarial == 1, na.rm = TRUE)

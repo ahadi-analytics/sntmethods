@@ -189,8 +189,8 @@
   act_matrix <- as.matrix(kr[, act_vars, drop = FALSE])
   act_matrix[!act_matrix %in% c(0, 1)] <- NA
   kr$received_act <- apply(act_matrix, 1, function(row) {
-    if (all(is.na(row))) return(NA_real_)
     if (any(row == 1, na.rm = TRUE)) return(1)
+    if (any(is.na(row))) return(NA_real_)
     return(0)
   })
 

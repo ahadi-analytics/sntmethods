@@ -254,8 +254,8 @@ calc_case_management_dhs <- function(
 
   drug_matrix <- as.matrix(kr_fever[, drug_series, drop = FALSE])
   kr_fever$received_antimalarial <- apply(drug_matrix, 1, function(row) {
-    if (all(is.na(row))) return(NA_real_)
     if (any(row == 1, na.rm = TRUE)) return(1)
+    if (any(is.na(row))) return(NA_real_)
     return(0)
   })
 
@@ -311,8 +311,8 @@ calc_case_management_dhs <- function(
   act_matrix <- matrix(act_matrix, nrow = length(febrile_idx), ncol = length(act_vars))
   act_matrix[!act_matrix %in% c(0, 1)] <- NA
   kr_fever$received_act <- apply(act_matrix, 1, function(row) {
-    if (all(is.na(row))) return(NA_real_)
     if (any(row == 1, na.rm = TRUE)) return(1)
+    if (any(is.na(row))) return(NA_real_)
     return(0)
   })
 
