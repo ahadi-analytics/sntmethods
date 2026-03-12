@@ -1511,6 +1511,15 @@ run_mbg_pipeline <- function(
         next
       }
 
+      # Skip indicators where total numerator is zero (structurally absent)
+      total_numerator <- if (!is.null(dt)) sum(dt$indicator, na.rm = TRUE) else 0
+      if (total_numerator == 0) {
+        cli::cli_alert_warning(
+          "Skipping MBG for {.val {ind_name}}: numerator is 0 across all clusters"
+        )
+        next
+      }
+
       if (isTRUE(debug)) {
         cli::cli_alert_info("Running MBG for {ind_name} ({n_clusters} clusters, pop={mbg_pop_type})...")
       }
