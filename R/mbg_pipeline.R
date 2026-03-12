@@ -708,6 +708,10 @@ run_mbg_pipeline <- function(
     for (ind_category in primary_indicators) {
       cli::cli_progress_update(id = ind_pb)
 
+      # Skip if already computed by a prior cascade (e.g. csb_any triggers
+      # all csb_* indicators, so csb_public doesn't need a second run)
+      if (ind_category %in% processed_indicators) next
+
       tryCatch({
         ind_results <- .process_indicator_category(
           category = ind_category,
@@ -807,10 +811,17 @@ run_mbg_pipeline <- function(
     # ---- Summary for this survey ----
     cli::cli_h3("Summary for {current_survey_type} {current_year}")
 
+    processed_indicators <- unique(processed_indicators)
+
     if (length(processed_indicators) > 0) {
       cli::cli_alert_success(
-        "Processed {length(processed_indicators)} indicator(s): {paste(processed_indicators, collapse = ', ')}"
+        "Processed {length(processed_indicators)} indicator(s)"
       )
+      if (isTRUE(debug)) {
+        cli::cli_alert_info(
+          "Indicators: {paste(processed_indicators, collapse = ', ')}"
+        )
+      }
     }
 
     if (length(skipped_indicators) > 0) {
@@ -976,7 +987,13 @@ run_mbg_pipeline <- function(
   cli::cli_h2("Pipeline Summary")
 
   n_surveys <- nrow(surveys_to_process)
-  cli::cli_alert_success("Processed {n_surveys} survey(s)")
+  all_processed <- unique(unlist(lapply(
+    all_survey_results, function(x) x$processed_indicators
+  )))
+  n_indicators <- length(all_processed)
+  cli::cli_alert_success(
+    "Processed {n_indicators} indicator(s) across {n_surveys} survey(s)"
+  )
 
 
   # Summarize skipped indicators across all surveys
@@ -1091,9 +1108,7 @@ run_mbg_pipeline <- function(
   # Call appropriate MBG prep function based on category
   cluster_data <- switch(category,
     pfpr_rdt = , pfpr_mic = ,
-    pfpr_rdt_u5 = , pfpr_rdt_5_10 = , pfpr_rdt_u10 = , pfpr_rdt_2_10 = ,
-    pfpr_mic_u5 = , pfpr_mic_5_10 = , pfpr_mic_u10 = , pfpr_mic_2_10 = ,
-    pfpr_either_u5 = , pfpr_either_5_10 = , pfpr_either_u10 = , pfpr_either_2_10 = ,
+    pfpr_rdt_u5 = , pfpr_mic_u5 = ,
     pfpr = {
       if (!"PR" %in% names(survey_data)) {
         return(skip_indicator("Missing PR data (Person Recode)"))
@@ -1104,9 +1119,7 @@ run_mbg_pipeline <- function(
           gps_data = gps_data,
           indicators = c(
             "pfpr_rdt", "pfpr_mic",
-            "pfpr_rdt_u5", "pfpr_mic_u5", "pfpr_either_u5",
-            "pfpr_rdt_5_10", "pfpr_mic_5_10", "pfpr_either_5_10",
-            "pfpr_rdt_u10", "pfpr_mic_u10", "pfpr_either_u10"
+            "pfpr_rdt_u5", "pfpr_mic_u5"
           )
         )
       }, error = function(e) {
