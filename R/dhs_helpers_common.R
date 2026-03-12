@@ -670,11 +670,16 @@ dhs_dictionary <- function() {
 #' Aggregate Interview Month to Administrative Level
 #'
 #' Spatially joins cluster-level interview months to admin polygons and
-#' computes the median month per administrative unit.
+#' computes the median month per administrative unit. Admin units with no
+#' clusters are filled with the median of sibling units within the same
+#' parent (e.g., missing adm2 filled from other adm2s in the same adm1).
 #'
 #' @param cluster_months Tibble from `.extract_cluster_interview_month()`.
 #' @param admin_sf sf object with administrative boundaries.
 #' @param admin_col Column name for admin identifier (e.g., "adm2").
+#' @param parent_col Column name for parent admin level (e.g., "adm1").
+#'   Used to fill missing values. If NULL or not present in admin_sf,
+#'   no gap-filling is performed.
 #'
 #' @return A tibble with columns: `admin_col` and `median_survey_month`.
 #'   Returns NULL if no valid data.
@@ -683,9 +688,18 @@ dhs_dictionary <- function() {
 .aggregate_interview_month_to_admin <- function(
   cluster_months,
   admin_sf,
-  admin_col = "adm2"
+  admin_col = "adm2",
+  parent_col = "adm1"
 ) {
   if (is.null(cluster_months) || nrow(cluster_months) == 0) return(NULL)
+
+  # Determine which columns to carry from admin_sf for gap-filling
+  has_parent <- !is.null(parent_col) && parent_col %in% names(admin_sf)
+  select_cols <- if (has_parent) {
+    c(admin_col, parent_col)
+  } else {
+    admin_col
+  }
 
   cluster_sf <- cluster_months |>
     sf::st_as_sf(coords = c("x", "y"), crs = 4326, remove = FALSE)
@@ -697,7 +711,7 @@ dhs_dictionary <- function() {
 
   joined <- sf::st_join(
     cluster_sf,
-    admin_sf |> dplyr::select(dplyr::all_of(admin_col)),
+    admin_sf |> dplyr::select(dplyr::all_of(select_cols)),
     join = sf::st_within,
     left = TRUE
   )
@@ -706,6 +720,9 @@ dhs_dictionary <- function() {
   if (any(unmatched)) {
     nearest_idx <- sf::st_nearest_feature(joined[unmatched, ], admin_sf)
     joined[[admin_col]][unmatched] <- admin_sf[[admin_col]][nearest_idx]
+    if (has_parent) {
+      joined[[parent_col]][unmatched] <- admin_sf[[parent_col]][nearest_idx]
+    }
   }
 
   result <- sf::st_drop_geometry(joined) |>
@@ -717,6 +734,44 @@ dhs_dictionary <- function() {
       ),
       .groups = "drop"
     )
+
+  # Fill missing admin units using parent-level median
+  if (has_parent) {
+    # Get full list of admin units with their parent
+    all_admins <- sf::st_drop_geometry(admin_sf) |>
+      dplyr::select(dplyr::all_of(select_cols)) |>
+      dplyr::distinct()
+
+    result <- all_admins |>
+      dplyr::left_join(result, by = admin_col)
+
+    missing <- is.na(result$median_survey_month)
+    if (any(missing)) {
+      # Compute parent-level median from sibling units that have data
+      parent_medians <- result |>
+        dplyr::filter(!is.na(.data$median_survey_month)) |>
+        dplyr::group_by(dplyr::across(dplyr::all_of(parent_col))) |>
+        dplyr::summarise(
+          parent_median = as.integer(
+            round(stats::median(.data$median_survey_month, na.rm = TRUE))
+          ),
+          .groups = "drop"
+        )
+
+      result <- result |>
+        dplyr::left_join(parent_medians, by = parent_col) |>
+        dplyr::mutate(
+          median_survey_month = dplyr::coalesce(
+            .data$median_survey_month, .data$parent_median
+          )
+        ) |>
+        dplyr::select(-"parent_median")
+    }
+
+    # Drop the parent column — caller only expects admin_col + median_survey_month
+    result <- result |>
+      dplyr::select(dplyr::all_of(admin_col), "median_survey_month")
+  }
 
   result
 }

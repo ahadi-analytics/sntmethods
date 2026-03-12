@@ -2514,10 +2514,19 @@ run_mbg_pipeline <- function(
 
   month_lookup <- NULL
   if (!is.null(cluster_interview_months) && nrow(cluster_interview_months) > 0) {
+    # Determine parent column for gap-filling missing median months
+    parent_col <- if (primary_col == "adm3") {
+      "adm2"
+    } else if (primary_col == "adm2") {
+      "adm1"
+    } else {
+      NULL
+    }
     month_lookup <- .aggregate_interview_month_to_admin(
       cluster_months = cluster_interview_months,
       admin_sf = base_sf,
-      admin_col = primary_col
+      admin_col = primary_col,
+      parent_col = parent_col
     )
   }
 

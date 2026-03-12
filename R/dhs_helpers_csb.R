@@ -45,13 +45,18 @@
     ))
   }
 
-  # Default classification
-  if (is.null(csb_classification)) {
-    csb_classification <- .default_csb_classification()
-  }
-
-  # Auto-detect h32 variables
+  # Auto-detect h32 variables (before label zapping)
   available_h32 <- grep("^h32[a-z0-9]+$", names(dhs_kr), value = TRUE)
+
+  # Default classification: detect from haven labels first, then fall back
+  # to hardcoded mapping. Label detection correctly classifies CHW and
+  # pharmacy slots across DHS-7 and DHS-8 survey versions.
+  if (is.null(csb_classification)) {
+    csb_classification <- .detect_csb_from_labels(dhs_kr)
+    if (nrow(csb_classification) == 0) {
+      csb_classification <- .default_csb_classification()
+    }
+  }
   if (length(available_h32) == 0) {
     cli::cli_abort("No h32 treatment-seeking variables found in data.")
   }

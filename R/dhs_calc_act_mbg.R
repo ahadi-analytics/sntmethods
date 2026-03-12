@@ -215,8 +215,12 @@ calc_act_mbg <- function(
 
   enriched <- kr_fever
   if (needs_csb) {
+    # Detect CSB classification from haven labels on raw data (before zapping)
+    # so CHW/pharmacy slots are correctly identified across DHS versions
+    csb_class <- .detect_csb_from_labels(dhs_kr)
+    if (nrow(csb_class) == 0) csb_class <- NULL
     enriched <- tryCatch(
-      .classify_csb_from_h32(enriched),
+      .classify_csb_from_h32(enriched, csb_classification = csb_class),
       error = function(e) {
         cli::cli_alert_warning(
           "CSB classification failed: \\

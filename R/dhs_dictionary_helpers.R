@@ -370,7 +370,10 @@
     "12-23 months" = "Standard DHS vaccination assessment window",
     "0-59 months"  = "All children under 5 years",
     "women 15-49"  = "Women of reproductive age with recent live birth",
-    "all ages"     = "All de facto household members"
+    "all ages"     = "All de facto household members",
+    "5-10 years"   = "De facto children aged 5-9 years",
+    "10-20 years"  = "De facto population aged 10-19 years",
+    "20+ years"    = "De facto population aged 20 years and above"
   )
   notes_map[[meta$age]] %||% NA_character_
 }

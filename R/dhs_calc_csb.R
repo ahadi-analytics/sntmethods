@@ -211,6 +211,9 @@ calc_csb_dhs_core <- function(
   } else if (is.null(csb_classification)) {
     # Auto-detect from haven labels (same approach as ACT detection)
     csb_classification <- .detect_csb_from_labels(dhs_kr)
+    if (nrow(csb_classification) == 0) {
+      csb_classification <- .default_csb_classification()
+    }
   }
 
   # Validate csb_classification
@@ -291,16 +294,12 @@ calc_csb_dhs_core <- function(
   admin_hierarchy <- list()
 
   if (!is.null(region_var)) {
-    region_values <- tryCatch({
-      lbls <- as.character(haven::as_factor(dhs_kr[[region_var]]))
-      raw_vals <- as.vector(haven::zap_labels(dhs_kr[[region_var]]))
-      febrile_raw <- kr_fever[[region_var]]
-      lookup <- stats::setNames(lbls, raw_vals)
-      unname(lookup[as.character(febrile_raw)])
-    }, error = function(e) {
-      as.character(kr_fever[[region_var]])
-    })
-    kr_fever$region <- toupper(region_values)
+    # Resolve labels from raw data (pre-zap) then map onto kr_fever
+    resolved_all <- .resolve_region_labels(dhs_kr[[region_var]], region_var)
+    raw_all <- as.character(as.vector(haven::zap_labels(dhs_kr[[region_var]])))
+    lookup <- stats::setNames(resolved_all, raw_all)
+    febrile_raw <- as.character(kr_fever[[region_var]])
+    kr_fever$region <- unname(lookup[febrile_raw])
     admin_hierarchy <- list(list(group_var = "region", level_name = "adm1"))
     geo_src <- "survey"
 
