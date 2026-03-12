@@ -744,17 +744,21 @@ run_mbg_pipeline <- function(
 
     ind_pb <- cli::cli_progress_bar(
       total = expected_total,
-      format = "{cli::pb_bar} Indicator {cli::pb_current}/{cli::pb_total} | {ind_category}"
+      format = "{cli::pb_bar} Indicator {cli::pb_current}/{cli::pb_total} | {ind_category}",
+      force = TRUE
     )
+    cli::cli_progress_update(id = ind_pb, set = 0, force = TRUE)
 
     for (ind_category in primary_indicators) {
+      # Render bar immediately to show current category
+      cli::cli_progress_update(id = ind_pb, set = sub_count, force = TRUE)
 
       # Skip if already computed by a prior cascade (e.g. csb_any triggers
       # all csb_* indicators, so csb_public doesn't need a second run)
       if (ind_category %in% processed_indicators) {
         # Advance bar by expected count for this (already-done) category
         sub_count <- sub_count + .expected_sub_count(ind_category)
-        cli::cli_progress_update(id = ind_pb, set = sub_count)
+        cli::cli_progress_update(id = ind_pb, set = sub_count, force = TRUE)
         next
       }
 
@@ -806,7 +810,7 @@ run_mbg_pipeline <- function(
         # Advance progress bar by actual sub-indicator count produced
         n_produced <- max(length(ind_results$cluster_data), 1L)
         sub_count <- sub_count + n_produced
-        cli::cli_progress_update(id = ind_pb, set = sub_count)
+        cli::cli_progress_update(id = ind_pb, set = sub_count, force = TRUE)
 
         # Check if indicator was skipped
         if (!is.null(ind_results$skipped)) {
