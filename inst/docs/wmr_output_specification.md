@@ -56,7 +56,7 @@ Each tibble has **one row per indicator per location**.
 | `counts` | int | Unweighted numerator (N with outcome) | `209` |
 | `denominator` | int | Unweighted denominator (N in subgroup) | `753` |
 | `indicator` | chr | SCREAMING_SNAKE name | `"ACT_ANTIMALARIAL"` |
-| `indicator_code` | chr | Short snake_case code | `"act_antimal"` |
+| `indicator_code` | chr | Short snake_case code | `"act_am"` |
 | `indicator_title` | chr | Human-readable title | `"Use of ACTs among antimalarial recipients"` |
 | `numerator_description` | chr | What the numerator measures | `"Received ACT treatment"` |
 | `denominator_description` | chr | What the denominator measures | `"Febrile U5 who received any antimalarial"` |

@@ -68,7 +68,7 @@ test_that("calc_act_dhs returns named list with adm0 tab from h37e fallback", {
   expect_null(result$adm1)
 
   # ACT_ANTIMALARIAL should have non-zero estimate
-  act_am <- adm0[adm0$indicator_code == "act_antimal", ]
+  act_am <- adm0[adm0$indicator_code == "act_am", ]
   expect_true(nrow(act_am) == 1)
   expect_equal(act_am$indicator, "Use of ACTs among antimalarial recipients")
   expect_true(act_am$point > 0,
@@ -116,7 +116,7 @@ test_that("calc_act_dhs works with plain ml13e data", {
   expect_s3_class(adm0, "tbl_df")
 
   # Should have ACT_ANTIMALARIAL at minimum
-  act_am <- adm0[adm0$indicator_code == "act_antimal", ]
+  act_am <- adm0[adm0$indicator_code == "act_am", ]
   expect_true(nrow(act_am) == 1)
   expect_true(act_am$point > 0)
   expect_true(act_am$numerator > 0)
@@ -159,11 +159,11 @@ test_that("calc_act_dhs with region_var returns adm0 + adm1 tabs", {
   adm1 <- result$adm1
 
   # adm0: 1 row per indicator (national)
-  act_am_nat <- adm0[adm0$indicator_code == "act_antimal", ]
+  act_am_nat <- adm0[adm0$indicator_code == "act_am", ]
   expect_true(nrow(act_am_nat) == 1)
 
   # adm1: 2 rows per indicator (North + South)
-  act_am_sub <- adm1[adm1$indicator_code == "act_antimal", ]
+  act_am_sub <- adm1[adm1$indicator_code == "act_am", ]
   expect_true(nrow(act_am_sub) == 2)
 
   # adm1 column should exist and be UPPERCASE
@@ -228,7 +228,7 @@ test_that("calc_act_dhs detects ACT from haven labels when ml13e is not ACT", {
 
   result <- calc_act_dhs(kr_data)
 
-  act_am <- result$adm0[result$adm0$indicator_code == "act_antimal", ]
+  act_am <- result$adm0[result$adm0$indicator_code == "act_am", ]
   expect_true(act_am$point > 0.1,
     label = "Should reflect label-detected ACT variable, not ml13e")
 })
@@ -300,7 +300,7 @@ test_that("calc_act_dhs uses composite ACT when multiple ml13 vars have ACT labe
 
   result <- calc_act_dhs(kr_data)
 
-  act_am <- result$adm0[result$adm0$indicator_code == "act_antimal", ]
+  act_am <- result$adm0[result$adm0$indicator_code == "act_am", ]
   expect_true(act_am$point > 0.3,
     label = "Composite ACT should capture all ACT formulations")
 })
@@ -347,7 +347,7 @@ test_that("calc_act_dhs accepts act as character vector in survey_vars", {
     )
   )
 
-  act_am <- result$adm0[result$adm0$indicator_code == "act_antimal", ]
+  act_am <- result$adm0[result$adm0$indicator_code == "act_am", ]
   expect_true(act_am$point > 0.3,
     label = "Vector act should combine both variables")
 })
@@ -396,7 +396,7 @@ test_that("calc_act_dhs excludes artemisinin monotherapies from composite ACT", 
 
   result <- calc_act_dhs(kr_data)
 
-  act_am <- result$adm0[result$adm0$indicator_code == "act_antimal", ]
+  act_am <- result$adm0[result$adm0$indicator_code == "act_am", ]
   expect_true(act_am$point < 0.3,
     label = "Artesunate rectal (monotherapy) should be excluded from ACT")
 })
@@ -413,8 +413,8 @@ test_that("act_dictionary returns all 34 indicators", {
       "denominator_code") %in% names(dict)
   ))
   # ACT indicators
-  expect_true("act_antimal" %in% dict$indicator_code)
-  expect_true("act_pub" %in% dict$indicator_code)
+  expect_true("act_am" %in% dict$indicator_code)
+  expect_true("act_pub_am" %in% dict$indicator_code)
   # ANTIMALARIAL indicators
   expect_true("antimal" %in% dict$indicator_code)
   expect_true("antimal_pub" %in% dict$indicator_code)
@@ -422,7 +422,7 @@ test_that("act_dictionary returns all 34 indicators", {
   expect_true("mal_dx_am" %in% dict$indicator_code)
   expect_true("mal_dx_pub_am" %in% dict$indicator_code)
   # ACT_PRIVATE_ANTIMALARIAL
-  expect_true("act_priv" %in% dict$indicator_code)
+  expect_true("act_priv_am" %in% dict$indicator_code)
 })
 
 
@@ -456,7 +456,7 @@ test_that("calc_act_dhs indicators parameter filters correctly", {
   adm0 <- result$adm0
   # Should only have ACT_ANTIMALARIAL
   expect_equal(unique(adm0$indicator), "Use of ACTs among antimalarial recipients")
-  expect_equal(unique(adm0$indicator_code), "act_antimal")
+  expect_equal(unique(adm0$indicator_code), "act_am")
   expect_equal(nrow(adm0), 1)  # national only
 })
 
@@ -682,6 +682,6 @@ test_that("calc_act_dhs computes ACT_PRIVATE_ANTIMALARIAL", {
   )
 
   adm0 <- result$adm0
-  act_priv <- adm0[adm0$indicator_code == "act_priv", ]
-  expect_true(nrow(act_priv) >= 1)
+  act_priv_am <- adm0[adm0$indicator_code == "act_priv_am", ]
+  expect_true(nrow(act_priv_am) >= 1)
 })

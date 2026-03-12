@@ -1292,11 +1292,11 @@ run_mbg_pipeline <- function(
       })
     },
 
-    act_care_seek = , act_antimal = , act_any_tx = ,
-    act_trained = , act_pub = , act_pub_nochw = ,
-    act_chw = , act_priv = , act_priv_formal = ,
-    act_priv_pharm = , act_priv_informal = ,
-    act_priv_form_pha = ,
+    act_care_seek = , act_am = , act_any_tx_am = ,
+    act_trained_am = , act_pub_am = , act_pub_nochw_am = ,
+    act_chw_am = , act_priv_am = , act_priv_formal_am = ,
+    act_priv_pharm_am = , act_priv_informal_am = ,
+    act_priv_form_pha_am = ,
     act_tested = , act_public = ,
     febrile_rdt_pos = , febrile_rdt_pos_act = ,
     antimal = , antimal_any_tx = , antimal_trained = ,
@@ -1316,11 +1316,11 @@ run_mbg_pipeline <- function(
           dhs_kr = survey_data$KR,
           gps_data = gps_data,
           indicators = c(
-            "act", "act_care_seek", "act_antimal",
-            "act_any_tx", "act_trained", "act_pub",
-            "act_pub_nochw", "act_chw", "act_priv",
-            "act_priv_formal", "act_priv_pharm",
-            "act_priv_informal", "act_priv_form_pha",
+            "act", "act_care_seek", "act_am",
+            "act_any_tx_am", "act_trained_am", "act_pub_am",
+            "act_pub_nochw_am", "act_chw_am", "act_priv_am",
+            "act_priv_formal_am", "act_priv_pharm_am",
+            "act_priv_informal_am", "act_priv_form_pha_am",
             "act_public", "act_tested",
             "antimal", "antimal_any_tx",
             "antimal_trained", "antimal_pub",
@@ -1630,7 +1630,7 @@ run_mbg_pipeline <- function(
     "indicator_code",         "Indicator code (machine-readable, matches dhs_dictionary())",
     "numerator_description",  "Description of numerator",
     "denominator_description","Description of denominator",
-    "eligibility_notes",      "Biological/methodological reason for age restriction"
+    "notes",      "Biological/methodological reason for age restriction"
   )
 
   if (aggregation_level == "adm3") {
@@ -2106,10 +2106,10 @@ run_mbg_pipeline <- function(
   pop_rast = NULL,
   derived_pairs = list(
     eff_cm_any = list(
-      csb = "csb_any", act = "act_antimal"
+      csb = "csb_any", act = "act_am"
     ),
     eff_cm_public = list(
-      csb = "csb_public", act = "act_pub"
+      csb = "csb_public", act = "act_pub_am"
     )
   )
 ) {
@@ -2781,7 +2781,7 @@ run_mbg_pipeline <- function(
 
   elig_lookup <- tibble::tibble(
     indicator_code    = all_ind_codes,
-    eligibility_notes = vapply(all_ind_codes, .mbg_eligibility_notes, character(1))
+    notes = vapply(all_ind_codes, .mbg_eligibility_notes, character(1))
   )
 
   .join_elig <- function(df) {
@@ -2805,7 +2805,7 @@ run_mbg_pipeline <- function(
       "numerator", "denominator",
       "survey_numerator", "survey_denominator", "n_survey_clusters",
       "numerator_description", "denominator_description",
-      "eligibility_notes"
+      "notes"
     )
     extra <- setdiff(names(df), col_order)
     present <- intersect(c(col_order, extra), names(df))

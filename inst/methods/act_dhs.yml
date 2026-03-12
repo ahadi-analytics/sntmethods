@@ -256,8 +256,9 @@ output_format:
       denominator_code: "Short code for the denominator"
     indicator_codes:
       - "act: ACT receipt among all febrile children"
-      - "act_public: ACT among public sector care seekers"
-      - "act_chw: ACT among CHW care seekers"
+      - "act_public: ACT among public sector care seekers (no AM filter)"
+      - "act_pub_am: ACT among public sector + antimalarial"
+      - "act_chw_am: ACT among CHW care seekers"
       - "act_am: ACT among antimalarial recipients who sought any care"
       - "act_am_public: ACT among antimalarial recipients from public sector"
       - "febrile_rdt_pos: RDT positivity among febrile children (requires dhs_pr)"

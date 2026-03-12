@@ -78,7 +78,7 @@
 #'       (condition-filtered subgroup size)
 #'     \item `indicator`: Indicator name in Title Case
 #'       (e.g., "Act Antimalarial")
-#'     \item `indicator_code`: Short indicator code (e.g., "act_antimal")
+#'     \item `indicator_code`: Short indicator code (e.g., "act_am")
 #'     \item `numerator_description`: Description of numerator
 #'     \item `denominator_description`: Description of denominator
 #'     \item `denominator_code`: Short code for the denominator subpopulation
@@ -735,7 +735,7 @@ act_dictionary <- function() {
     ),
     list(
       indicator      = "ACT_ANTIMALARIAL",
-      indicator_code = "act_antimal",
+      indicator_code = "act_am",
       indicator_title = "Use of ACTs among antimalarial recipients",
       denom_code     = "feb_u5_am",
       filter_expr    = quote(received_antimalarial == 1),
@@ -744,7 +744,7 @@ act_dictionary <- function() {
     ),
     list(
       indicator      = "ACT_ANY_TREATMENT",
-      indicator_code = "act_any_tx",
+      indicator_code = "act_any_tx_am",
       indicator_title = paste0(
         "Use of ACTs among care seekers ",
         "treated with antimalarial"),
@@ -760,7 +760,7 @@ act_dictionary <- function() {
     ),
     list(
       indicator      = "ACT_TRAINED_ANTIMALARIAL",
-      indicator_code = "act_trained",
+      indicator_code = "act_trained_am",
       indicator_title = "Use of ACTs among trained provider + antimalarial",
       denom_code     = "feb_u5_trained_am",
       filter_expr    = quote(
@@ -773,7 +773,7 @@ act_dictionary <- function() {
     ),
     list(
       indicator      = "ACT_PUBLIC_ANTIMALARIAL",
-      indicator_code = "act_pub",
+      indicator_code = "act_pub_am",
       indicator_title = "Use of ACTs among public sector + antimalarial",
       denom_code     = "feb_u5_pub_am",
       filter_expr    = quote(csb_public == 1 & received_antimalarial == 1),
@@ -784,8 +784,19 @@ act_dictionary <- function() {
         "received antimalarial")
     ),
     list(
+      indicator      = "ACT_PUBLIC",
+      indicator_code = "act_public",
+      indicator_title = "Use of ACTs among public sector care seekers",
+      denom_code     = "feb_u5_pub",
+      filter_expr    = quote(csb_public == 1),
+      num_desc       = num,
+      denom_desc     = paste0(
+        "Under 5 with fever who sought public ",
+        "sector care (incl. CHW)")
+    ),
+    list(
       indicator      = "ACT_PUBLIC_NOCHW_ANTIMALARIAL",
-      indicator_code = "act_pub_nochw",
+      indicator_code = "act_pub_nochw_am",
       indicator_title = paste0(
         "Use of ACTs among public sector ",
         "excl. CHW + antimalarial"),
@@ -801,7 +812,7 @@ act_dictionary <- function() {
     ),
     list(
       indicator      = "ACT_PUBLIC_CHW_ANTIMALARIAL",
-      indicator_code = "act_chw",
+      indicator_code = "act_chw_am",
       indicator_title = "Use of ACTs among CHW + antimalarial",
       denom_code     = "feb_u5_chw_am",
       filter_expr    = quote(csb_chw == 1 & received_antimalarial == 1),
@@ -812,7 +823,7 @@ act_dictionary <- function() {
     ),
     list(
       indicator      = "ACT_PRIVATE_FORMAL_ANTIMALARIAL",
-      indicator_code = "act_priv_formal",
+      indicator_code = "act_priv_formal_am",
       indicator_title = "Use of ACTs among private formal + antimalarial",
       denom_code     = "feb_u5_priv_formal_am",
       filter_expr    = quote(
@@ -826,7 +837,7 @@ act_dictionary <- function() {
     ),
     list(
       indicator      = "ACT_PRIVATE_PHARMACY_ANTIMALARIAL",
-      indicator_code = "act_priv_pharm",
+      indicator_code = "act_priv_pharm_am",
       indicator_title = "Use of ACTs among pharmacy + antimalarial",
       denom_code     = "feb_u5_priv_pharm_am",
       filter_expr    = quote(csb_pharmacy == 1 & received_antimalarial == 1),
@@ -837,7 +848,7 @@ act_dictionary <- function() {
     ),
     list(
       indicator      = "ACT_PRIVATE_INFORMAL_ANTIMALARIAL",
-      indicator_code = "act_priv_informal",
+      indicator_code = "act_priv_informal_am",
       indicator_title = "Use of ACTs among private informal + antimalarial",
       denom_code     = "feb_u5_priv_informal_am",
       filter_expr    = quote(
@@ -851,7 +862,7 @@ act_dictionary <- function() {
     ),
     list(
       indicator      = "ACT_PRIVATE_FORMAL_PHA_ANTIMALARIAL",
-      indicator_code = "act_priv_form_pha",
+      indicator_code = "act_priv_form_pha_am",
       indicator_title = paste0(
         "Use of ACTs among private formal ",
         "or pharmacy + antimalarial"),
@@ -868,7 +879,7 @@ act_dictionary <- function() {
     # ACT_PRIVATE_ANTIMALARIAL (private sector + antimalarial)
     list(
       indicator      = "ACT_PRIVATE_ANTIMALARIAL",
-      indicator_code = "act_priv",
+      indicator_code = "act_priv_am",
       indicator_title = "Use of ACTs among private sector + antimalarial",
       denom_code     = "feb_u5_priv_am",
       filter_expr    = quote(

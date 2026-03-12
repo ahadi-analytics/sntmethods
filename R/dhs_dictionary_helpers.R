@@ -137,17 +137,18 @@
     act_public        = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
     act_tested        = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
     act_care_seek     = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
-    act_antimal       = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
-    act_any_tx        = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
-    act_trained       = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
-    act_pub           = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
-    act_pub_nochw     = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
-    act_chw           = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
-    act_priv          = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
-    act_priv_formal   = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
-    act_priv_pharm    = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
-    act_priv_informal = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
-    act_priv_form_pha = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    act_am       = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    act_any_tx_am        = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    act_trained_am       = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    act_pub_am        = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    act_public        = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    act_pub_nochw_am     = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    act_chw_am           = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    act_priv_am          = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    act_priv_formal_am   = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    act_priv_pharm_am    = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    act_priv_informal_am = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
+    act_priv_form_pha_am = list(recode = "KR",    category = "Malaria",    cascade = 4L, age = "0-59 months",  pop_type = "u5"),
     # Antimalarial sub-indicators (from .act_mbg_dictionary)
     antimal           = list(recode = "KR",    category = "Malaria",    cascade = 3L, age = "0-59 months",  pop_type = "u5"),
     antimal_any_tx    = list(recode = "KR",    category = "Malaria",    cascade = 3L, age = "0-59 months",  pop_type = "u5"),
@@ -364,6 +365,11 @@
 #' @return Character scalar with eligibility note, or \code{NA_character_}.
 #' @noRd
 .mbg_eligibility_notes <- function(ind) {
+  # Derived indicators get a methodology note
+  if (grepl("^eff_cm_", ind)) {
+    return("Derived indicator: product of CSB and ACT surfaces")
+  }
+
   meta <- .mbg_indicator_meta(ind)
   # Only provide notes when the age range excludes younger ages,
   # explaining the biological/methodological reason for the restriction.
@@ -462,10 +468,10 @@
     # Antimalarial (KR module)
     "antimalarial", "antimalarial_public",
     # ACT (KR module) — from .act_mbg_dictionary()
-    "act", "act_care_seek", "act_antimal", "act_any_tx",
-    "act_trained", "act_pub", "act_pub_nochw", "act_chw",
-    "act_priv", "act_priv_formal", "act_priv_pharm",
-    "act_priv_informal", "act_priv_form_pha",
+    "act", "act_care_seek", "act_am", "act_any_tx_am",
+    "act_trained_am", "act_pub_am", "act_pub_nochw_am", "act_chw_am",
+    "act_priv_am", "act_priv_formal_am", "act_priv_pharm_am",
+    "act_priv_informal_am", "act_priv_form_pha_am",
     "act_public", "act_tested",
     "febrile_rdt_pos", "febrile_rdt_pos_act",
     # Antimalarial sub-indicators from ACT dictionary

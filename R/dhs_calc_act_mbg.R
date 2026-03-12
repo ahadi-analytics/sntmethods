@@ -78,7 +78,7 @@
 #' act_mbg <- calc_act_mbg(
 #'   dhs_kr = kr_data,
 #'   gps_data = gps_data,
-#'   indicators = c("act_pub", "act_trained", "antimal_chw",
+#'   indicators = c("act_pub_am", "act_trained_am", "antimal_chw",
 #'                   "mal_dx_am", "mal_dx_pub_am")
 #' )
 #' }
@@ -121,7 +121,18 @@ calc_act_mbg <- function(
   # Resolve legacy aliases
   legacy_map <- list(
     act_public = "act_public",
-    act_among_am = "act_any_tx"
+    act_among_am = "act_any_tx_am",
+    act_pub = "act_pub_am",
+    act_antimal = "act_am",
+    act_any_tx = "act_any_tx_am",
+    act_trained = "act_trained_am",
+    act_pub_nochw = "act_pub_nochw_am",
+    act_chw = "act_chw_am",
+    act_priv = "act_priv_am",
+    act_priv_formal = "act_priv_formal_am",
+    act_priv_pharm = "act_priv_pharm_am",
+    act_priv_informal = "act_priv_informal_am",
+    act_priv_form_pha = "act_priv_form_pha_am"
   )
   indicators <- vapply(indicators, function(ind) {
     if (ind %in% names(legacy_map)) {
@@ -506,67 +517,67 @@ calc_act_mbg <- function(
       am_filter = FALSE
     ),
     list(
-      name = "act_antimal",
+      name = "act_am",
       outcome = "received_act",
       csb_filter = NULL,
       am_filter = TRUE
     ),
     list(
-      name = "act_any_tx",
+      name = "act_any_tx_am",
       outcome = "received_act",
       csb_filter = "csb_any",
       am_filter = TRUE
     ),
     list(
-      name = "act_trained",
+      name = "act_trained_am",
       outcome = "received_act",
       csb_filter = "csb_trained",
       am_filter = TRUE
     ),
     list(
-      name = "act_pub",
+      name = "act_pub_am",
       outcome = "received_act",
       csb_filter = "csb_public",
       am_filter = TRUE
     ),
     list(
-      name = "act_pub_nochw",
+      name = "act_pub_nochw_am",
       outcome = "received_act",
       csb_filter = "csb_public_nochw",
       am_filter = TRUE
     ),
     list(
-      name = "act_chw",
+      name = "act_chw_am",
       outcome = "received_act",
       csb_filter = "csb_chw",
       am_filter = TRUE
     ),
     list(
-      name = "act_priv",
+      name = "act_priv_am",
       outcome = "received_act",
       csb_filter = "csb_private",
       am_filter = TRUE
     ),
     list(
-      name = "act_priv_formal",
+      name = "act_priv_formal_am",
       outcome = "received_act",
       csb_filter = "csb_private_formal_ind",
       am_filter = TRUE
     ),
     list(
-      name = "act_priv_pharm",
+      name = "act_priv_pharm_am",
       outcome = "received_act",
       csb_filter = "csb_pharmacy",
       am_filter = TRUE
     ),
     list(
-      name = "act_priv_informal",
+      name = "act_priv_informal_am",
       outcome = "received_act",
       csb_filter = "csb_private_informal",
       am_filter = TRUE
     ),
     list(
-      name = "act_priv_form_pha",
+      name = "act_priv_form_pha_am",
       outcome = "received_act",
       csb_filter = "csb_private_formal_pha",
       am_filter = TRUE

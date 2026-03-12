@@ -395,8 +395,8 @@ test_that("act_mbg_dictionary returns all expected indicators", {
   expect_equal(length(dict), 33)
   expect_true("act" %in% names)
   expect_true("act_care_seek" %in% names)
-  expect_true("act_pub_nochw" %in% names)
-  expect_true("act_priv_form_pha" %in% names)
+  expect_true("act_pub_nochw_am" %in% names)
+  expect_true("act_priv_form_pha_am" %in% names)
   expect_true("antimal" %in% names)
   expect_true("antimal_chw" %in% names)
   expect_true("antimal_form_pharm" %in% names)
@@ -427,8 +427,8 @@ test_that("calc_act_mbg computes  ACT indicators with CSB data", {
   result <- suppressWarnings(calc_act_mbg(
     kr, gps,
     indicators = c(
-      "act_care_seek", "act_pub",
-      "act_pub_nochw", "antimal"
+      "act_care_seek", "act_pub_am",
+      "act_pub_nochw_am", "antimal"
     )
   ))
 
@@ -454,13 +454,13 @@ test_that("calc_act_mbg accepts legacy act_among_am alias", {
   kr$ml13b <- sample(c(0, 1, NA), n, replace = TRUE,
                      prob = c(0.6, 0.1, 0.3))
 
-  # act_among_am should map to act_any_tx
+  # act_among_am should map to act_any_tx_am
   result <- suppressWarnings(calc_act_mbg(
     kr, gps, indicators = "act_among_am"
   ))
-  # Should produce act_any_tx (the aliased name)
+  # Should produce act_any_tx_am (the aliased name)
   expect_true(
-    "act_any_tx" %in% names(result) ||
+    "act_any_tx_am" %in% names(result) ||
       length(result) == 0
   )
 })
