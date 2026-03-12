@@ -1482,6 +1482,7 @@ run_mbg_pipeline <- function(
           survey_year = survey_year,
           survey_type = survey_type,
           aggregation_level = aggregation_level,
+          pop_type = ind_pop_type,
           save_rasters = save_rasters,
           cache = cache,
           debug = debug
@@ -1664,6 +1665,7 @@ run_mbg_pipeline <- function(
   survey_year,
   survey_type = "DHS",
   aggregation_level = "adm2",
+  pop_type = "all",
   save_rasters,
   cache,
   debug = FALSE
@@ -1710,12 +1712,12 @@ run_mbg_pipeline <- function(
     primary_sf <- adm3_sf
     polygon_id_field <- "adm3"
     agg_levels <- list(adm3 = c("adm3", "adm2", "adm1", "adm0"))
-    cache_suffix <- "adm3"
+    cache_suffix <- paste0("adm3_", pop_type)
   } else {
     primary_sf <- adm2_sf
     polygon_id_field <- "adm2"
     agg_levels <- list(adm2 = c("adm2", "adm1", "adm0"))
-    cache_suffix <- "adm2"
+    cache_suffix <- paste0("adm2_", pop_type)
   }
 
   # Debug: Show input summary
