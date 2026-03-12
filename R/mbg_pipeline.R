@@ -745,7 +745,8 @@ run_mbg_pipeline <- function(
     pb_label <- ""
     ind_pb <- cli::cli_progress_bar(
       total = expected_total,
-      format = "{cli::pb_bar} Indicator {cli::pb_current}/{cli::pb_total} | {pb_label}"
+      format = "{cli::pb_bar} Indicator {cli::pb_current}/{cli::pb_total} | {pb_label}",
+      clear = TRUE
     )
     cli::cli_progress_update(id = ind_pb, set = 0, force = TRUE)
 
@@ -864,9 +865,8 @@ run_mbg_pipeline <- function(
       })
     }
 
-    # Clear the cat()-based progress line and finalize cli bar
-    cat("\r", strrep(" ", 70), "\r", sep = "")
-    cli::cli_progress_update(id = ind_pb, set = sub_count, force = TRUE)
+    # Clear progress line and close bar
+    cat("\r", strrep(" ", 80), "\r", sep = "")
     cli::cli_progress_done(id = ind_pb)
 
     # ---- Compute derived indicators (eff_cm = CSB x ACT) ----
