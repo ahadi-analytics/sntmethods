@@ -744,8 +744,7 @@ run_mbg_pipeline <- function(
 
     ind_pb <- cli::cli_progress_bar(
       total = expected_total,
-      format = "{cli::pb_bar} Indicator {cli::pb_current}/{cli::pb_total} | {ind_category}",
-      force = TRUE
+      format = "{cli::pb_bar} Indicator {cli::pb_current}/{cli::pb_total} | {ind_category}"
     )
     cli::cli_progress_update(id = ind_pb, set = 0, force = TRUE)
 
