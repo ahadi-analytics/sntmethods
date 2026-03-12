@@ -272,6 +272,16 @@ calc_smc_dhs <- function(
       outcome_var     = "received_smc",
       num_desc        = "Children who received SMC",
       denom_desc      = "SMC-eligible children"
+    ),
+    list(
+      indicator       = "SMC",
+      indicator_code  = "smc_coverage",
+      indicator_title = "SMC coverage among eligible children",
+      denom_code      = "smc_eligible",
+      filter_expr     = NULL,
+      outcome_var     = "received_smc",
+      num_desc        = "Children who received SMC",
+      denom_desc      = "SMC-eligible children"
     )
   )
 }

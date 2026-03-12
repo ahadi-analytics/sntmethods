@@ -270,6 +270,16 @@ calc_irs_dhs <- function(
       outcome_var     = "sprayed",
       num_desc        = "Households sprayed in last 12 months",
       denom_desc      = "All households"
+    ),
+    list(
+      indicator       = "IRS",
+      indicator_code  = "irs_coverage",
+      indicator_title = "IRS coverage among households",
+      denom_code      = "all_hh",
+      filter_expr     = NULL,
+      outcome_var     = "sprayed",
+      num_desc        = "Households sprayed in last 12 months",
+      denom_desc      = "All households"
     )
   )
 }
