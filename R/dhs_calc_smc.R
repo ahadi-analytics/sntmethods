@@ -262,26 +262,28 @@ calc_smc_dhs <- function(
 #' @return List of named lists, each with indicator specification.
 #' @noRd
 .smc_conditions <- function() {
+
+  denom <- "Children 0-59 months with valid SMC response (hml43 or ml13g non-missing)"
   list(
     list(
       indicator       = "SMC",
       indicator_code  = "smc",
-      indicator_title = "SMC coverage among eligible children",
+      indicator_title = "Proportion of children under 5 who received seasonal malaria chemoprevention",
       denom_code      = "smc_eligible",
       filter_expr     = NULL,
       outcome_var     = "received_smc",
-      num_desc        = "Children who received SMC",
-      denom_desc      = "SMC-eligible children"
+      num_desc        = "Children 0-59 months who received SMC during the malaria season (hml43 == 1 or ml13g == 1)",
+      denom_desc      = denom
     ),
     list(
       indicator       = "SMC",
       indicator_code  = "smc_coverage",
-      indicator_title = "SMC coverage among eligible children",
+      indicator_title = "Proportion of children under 5 who received seasonal malaria chemoprevention",
       denom_code      = "smc_eligible",
       filter_expr     = NULL,
       outcome_var     = "received_smc",
-      num_desc        = "Children who received SMC",
-      denom_desc      = "SMC-eligible children"
+      num_desc        = "Children 0-59 months who received SMC during the malaria season (hml43 == 1 or ml13g == 1)",
+      denom_desc      = denom
     )
   )
 }
@@ -293,7 +295,10 @@ calc_smc_dhs <- function(
 
 #' SMC Indicator Dictionary
 #'
-#' Returns the dictionary of SMC indicators with metadata.
+#' Returns the dictionary of SMC indicators with metadata. SMC coverage
+#' measures the proportion of children under 5 who received seasonal malaria
+#' chemoprevention during the malaria season, derived from DHS Children's
+#' Recode (KR) variables hml43 (primary) or ml13g (fallback).
 #'
 #' @return Tibble with columns: indicator, indicator_code, indicator_title,
 #'   numerator_description, denominator_description, denominator_code.

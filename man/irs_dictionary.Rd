@@ -11,7 +11,10 @@ Tibble with columns: indicator, indicator_code, indicator_title,
 numerator_description, denominator_description, denominator_code.
 }
 \description{
-Returns the dictionary of IRS indicators with metadata.
+Returns the dictionary of IRS indicators with metadata. IRS coverage
+measures the proportion of households sprayed with residual insecticide
+in the 12 months preceding the survey, derived from the DHS Household
+Recode (HR) variable hv253.
 }
 \examples{
 irs_dictionary()

@@ -260,26 +260,27 @@ calc_irs_dhs <- function(
 #' @return List of named lists, each with indicator specification.
 #' @noRd
 .irs_conditions <- function() {
+  denom <- "All surveyed households with valid IRS response (hv253 non-missing)"
   list(
     list(
       indicator       = "IRS",
       indicator_code  = "irs",
-      indicator_title = "IRS coverage among households",
+      indicator_title = "Proportion of households sprayed with residual insecticide in last 12 months",
       denom_code      = "all_hh",
       filter_expr     = NULL,
       outcome_var     = "sprayed",
-      num_desc        = "Households sprayed in last 12 months",
-      denom_desc      = "All households"
+      num_desc        = "Households sprayed with residual insecticide in the 12 months preceding the survey (hv253 == 1)",
+      denom_desc      = denom
     ),
     list(
       indicator       = "IRS",
       indicator_code  = "irs_coverage",
-      indicator_title = "IRS coverage among households",
+      indicator_title = "Proportion of households sprayed with residual insecticide in last 12 months",
       denom_code      = "all_hh",
       filter_expr     = NULL,
       outcome_var     = "sprayed",
-      num_desc        = "Households sprayed in last 12 months",
-      denom_desc      = "All households"
+      num_desc        = "Households sprayed with residual insecticide in the 12 months preceding the survey (hv253 == 1)",
+      denom_desc      = denom
     )
   )
 }
@@ -291,7 +292,10 @@ calc_irs_dhs <- function(
 
 #' IRS Indicator Dictionary
 #'
-#' Returns the dictionary of IRS indicators with metadata.
+#' Returns the dictionary of IRS indicators with metadata. IRS coverage
+#' measures the proportion of households sprayed with residual insecticide
+#' in the 12 months preceding the survey, derived from the DHS Household
+#' Recode (HR) variable hv253.
 #'
 #' @return Tibble with columns: indicator, indicator_code, indicator_title,
 #'   numerator_description, denominator_description, denominator_code.
