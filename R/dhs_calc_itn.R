@@ -1006,12 +1006,12 @@ itn_dictionary <- function() {
     .expand_subgroups(
       base_indicator  = "ENOUGH_ITN",
       base_code       = "enough_itn",
-      base_title      = "Enough ITN for every 2 people",
+      base_title      = "Households with sufficient ITNs (1 per 2 people)",
       data_level      = "household",
       outcome_var     = "hh_sufficient_nets",
       base_filter     = NULL,
-      num_desc        = "Enough ITN for every 2 people in the household",
-      base_denom_desc = "Households",
+      num_desc        = "Households with at least one ITN for every two people",
+      base_denom_desc = "De facto households surveyed",
       base_denom_code = "hh"
     ),
 
@@ -1019,12 +1019,12 @@ itn_dictionary <- function() {
     .expand_subgroups(
       base_indicator  = "WITH_ITN",
       base_code       = "with_itn",
-      base_title      = "At least one ITN at household",
+      base_title      = "Households with at least one ITN",
       data_level      = "household",
       outcome_var     = "has_itn",
       base_filter     = NULL,
-      num_desc        = "At least one ITN at household",
-      base_denom_desc = "Households",
+      num_desc        = "Households owning at least one ITN",
+      base_denom_desc = "De facto households surveyed",
       base_denom_code = "hh"
     ),
 
@@ -1032,12 +1032,12 @@ itn_dictionary <- function() {
     .expand_subgroups(
       base_indicator  = "ACCESS_ITN",
       base_code       = "access_itn",
-      base_title      = "Access to ITN",
+      base_title      = "Population with access to an ITN",
       data_level      = "person",
       outcome_var     = "itn_access_ratio",
       base_filter     = NULL,
-      num_desc        = "Access to ITN",
-      base_denom_desc = "Population",
+      num_desc        = "De facto population with access to an ITN within their household",
+      base_denom_desc = "De facto household population",
       base_denom_code = "pop",
       est_method      = "mean"
     ),
@@ -1046,12 +1046,12 @@ itn_dictionary <- function() {
     .expand_subgroups(
       base_indicator  = "USE_ITN_CHU5",
       base_code       = "use_itn_chu5",
-      base_title      = "Under 5 use ITN",
+      base_title      = "Children under 5 who slept under an ITN",
       data_level      = "person",
       outcome_var     = "itn_used",
       base_filter     = quote(is_under5 == 1),
-      num_desc        = "Under 5 use ITN",
-      base_denom_desc = "Under 5",
+      num_desc        = "Children under 5 who slept under an ITN the previous night",
+      base_denom_desc = "De facto children under 5",
       base_denom_code = "pop_u5"
     ),
 
@@ -1059,12 +1059,12 @@ itn_dictionary <- function() {
     .expand_subgroups(
       base_indicator  = "USE_ITN_PREGNANT",
       base_code       = "use_itn_preg",
-      base_title      = "Pregnant use ITN",
+      base_title      = "Pregnant women who slept under an ITN",
       data_level      = "person",
       outcome_var     = "itn_used",
       base_filter     = quote(is_pregnant_woman == 1),
-      num_desc        = "Pregnant use ITN",
-      base_denom_desc = "Pregnant women",
+      num_desc        = "Pregnant women who slept under an ITN the previous night",
+      base_denom_desc = "De facto pregnant women",
       base_denom_code = "pop_preg"
     ),
 
@@ -1072,12 +1072,12 @@ itn_dictionary <- function() {
     .expand_subgroups(
       base_indicator  = "USE_ITN",
       base_code       = "use_itn",
-      base_title      = "Use ITN",
+      base_title      = "Population that slept under an ITN",
       data_level      = "person",
       outcome_var     = "itn_used",
       base_filter     = NULL,
-      num_desc        = "Use ITN",
-      base_denom_desc = "Population",
+      num_desc        = "De facto population that slept under an ITN the previous night",
+      base_denom_desc = "De facto household population",
       base_denom_code = "pop"
     ),
 
@@ -1085,13 +1085,13 @@ itn_dictionary <- function() {
     list(list(
       indicator       = "USE_ITN_IF_ACCESS",
       indicator_code  = "use_itn_if_access",
-      indicator_title = "Use ITN given access",
+      indicator_title = "ITN use among population with access",
       data_level      = "person",
       outcome_var     = "itn_used",
       filter_expr     = quote(itn_access_ratio > 0),
       est_method      = "ciprop",
-      num_desc        = "Use ITN among those with access",
-      denom_desc      = "Population with access to ITN",
+      num_desc        = "Population with ITN access who slept under an ITN the previous night",
+      denom_desc      = "De facto population with access to an ITN",
       denom_code      = "pop_access"
     )),
 
@@ -1099,13 +1099,13 @@ itn_dictionary <- function() {
     list(list(
       indicator       = "USE_ITN_5_10",
       indicator_code  = "use_itn_5_10",
-      indicator_title = "Use ITN (5-9 years)",
+      indicator_title = "Children 5-9 who slept under an ITN",
       data_level      = "person",
       outcome_var     = "itn_used",
       filter_expr     = quote(age >= 5 & age < 10),
       est_method      = "ciprop",
-      num_desc        = "Use ITN (5-9 years)",
-      denom_desc      = "Population aged 5-9 years",
+      num_desc        = "Children aged 5-9 who slept under an ITN the previous night",
+      denom_desc      = "De facto children aged 5-9 years",
       denom_code      = "pop_5_10"
     )),
 
@@ -1113,13 +1113,13 @@ itn_dictionary <- function() {
     list(list(
       indicator       = "USE_ITN_10_20",
       indicator_code  = "use_itn_10_20",
-      indicator_title = "Use ITN (10-19 years)",
+      indicator_title = "Population 10-19 who slept under an ITN",
       data_level      = "person",
       outcome_var     = "itn_used",
       filter_expr     = quote(age >= 10 & age < 20),
       est_method      = "ciprop",
-      num_desc        = "Use ITN (10-19 years)",
-      denom_desc      = "Population aged 10-19 years",
+      num_desc        = "Population aged 10-19 who slept under an ITN the previous night",
+      denom_desc      = "De facto population aged 10-19 years",
       denom_code      = "pop_10_20"
     )),
 
@@ -1127,13 +1127,13 @@ itn_dictionary <- function() {
     list(list(
       indicator       = "USE_ITN_20PLUS",
       indicator_code  = "use_itn_20plus",
-      indicator_title = "Use ITN (20+ years)",
+      indicator_title = "Adults 20+ who slept under an ITN",
       data_level      = "person",
       outcome_var     = "itn_used",
       filter_expr     = quote(age >= 20),
       est_method      = "ciprop",
-      num_desc        = "Use ITN (20+ years)",
-      denom_desc      = "Population aged 20+ years",
+      num_desc        = "Adults aged 20+ who slept under an ITN the previous night",
+      denom_desc      = "De facto population aged 20+ years",
       denom_code      = "pop_20plus"
     ))
   )

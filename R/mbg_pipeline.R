@@ -2601,6 +2601,8 @@ run_mbg_pipeline <- function(
     }
   }
 
+  has_month <- "median_survey_month" %in% names(primary_long)
+
   # adm1: population-weighted mean of primary-level estimates
   adm1_long <- primary_long |>
     dplyr::group_by(
@@ -2612,6 +2614,11 @@ run_mbg_pipeline <- function(
       ci_u        = .safe_wmean(ci_u, denominator),
       numerator   = sum(numerator, na.rm = TRUE),
       denominator = sum(denominator, na.rm = TRUE),
+      median_survey_month = if (has_month) {
+        as.integer(stats::median(median_survey_month, na.rm = TRUE))
+      } else {
+        NA_integer_
+      },
       .groups = "drop"
     )
 
@@ -2626,6 +2633,11 @@ run_mbg_pipeline <- function(
       ci_u        = .safe_wmean(ci_u, denominator),
       numerator   = sum(numerator, na.rm = TRUE),
       denominator = sum(denominator, na.rm = TRUE),
+      median_survey_month = if (has_month) {
+        as.integer(stats::median(median_survey_month, na.rm = TRUE))
+      } else {
+        NA_integer_
+      },
       .groups = "drop"
     )
 
