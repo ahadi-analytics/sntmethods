@@ -12,9 +12,9 @@
 #'
 #' The function uses three internal helpers:
 #' \itemize{
-#'   \item [.prepare_act_data()] for ACT variable detection
+#'   \item `.prepare_act_data()` for ACT variable detection
 #'     and febrile U5 filtering
-#'   \item [.classify_csb_from_h32()] for care-seeking behaviour classification
+#'   \item `.classify_csb_from_h32()` for care-seeking behaviour classification
 #'   \item Antimalarial composite built from ml13/h37 drug series
 #' }
 #'

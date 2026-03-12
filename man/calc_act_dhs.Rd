@@ -112,9 +112,9 @@ receipt. See \code{\link[=act_dictionary]{act_dictionary()}} for the full indica
 
 The function uses three internal helpers:
 \itemize{
-\item \code{\link[=.prepare_act_data]{.prepare_act_data()}} for ACT variable detection
+\item \code{.prepare_act_data()} for ACT variable detection
 and febrile U5 filtering
-\item \code{\link[=.classify_csb_from_h32]{.classify_csb_from_h32()}} for care-seeking behaviour classification
+\item \code{.classify_csb_from_h32()} for care-seeking behaviour classification
 \item Antimalarial composite built from ml13/h37 drug series
 }
 }

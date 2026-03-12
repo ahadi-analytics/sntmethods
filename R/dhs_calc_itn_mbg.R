@@ -72,7 +72,7 @@
 #' }
 #'
 #' @seealso [calc_itn_dhs()] for survey-weighted estimates,
-#'   [.itn_mbg_dictionary()] for indicator definitions
+#'   `.itn_mbg_dictionary()` for indicator definitions
 #' @export
 calc_itn_mbg <- function(
   dhs_hr,

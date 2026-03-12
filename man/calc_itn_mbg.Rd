@@ -98,5 +98,5 @@ itn_mbg <- calc_itn_mbg(
 }
 \seealso{
 \code{\link[=calc_itn_dhs]{calc_itn_dhs()}} for survey-weighted estimates,
-\code{\link[=.itn_mbg_dictionary]{.itn_mbg_dictionary()}} for indicator definitions
+\code{.itn_mbg_dictionary()} for indicator definitions
 }
