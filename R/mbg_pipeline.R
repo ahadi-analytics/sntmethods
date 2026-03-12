@@ -418,6 +418,9 @@ run_mbg_pipeline <- function(
     apply(available_surveys, 1, function(r) paste0(r["survey_type"], " ", r["DHSYEAR"])),
     collapse = ", "
   )
+  cli::cli_alert_success(
+    "Found GPS data for {nrow(available_surveys)} survey(s): {avail_str}"
+  )
 
   # Filter by survey_year if specified
   if (!is.null(survey_year)) {
@@ -454,7 +457,7 @@ run_mbg_pipeline <- function(
     excluded <- surveys_to_process |>
       dplyr::filter(DHSYEAR < min_year)
 
-    if (nrow(excluded) > 0 && isTRUE(debug)) {
+    if (nrow(excluded) > 0) {
       excl_str <- paste(
         apply(excluded, 1, function(r) paste0(r["survey_type"], " ", r["DHSYEAR"])),
         collapse = ", "
@@ -481,11 +484,8 @@ run_mbg_pipeline <- function(
     apply(surveys_to_process, 1, function(r) paste0(r["survey_type"], " ", r["DHSYEAR"])),
     collapse = ", "
   )
-  n_avail <- nrow(dplyr::distinct(
-    gps_check, dplyr::across(dplyr::any_of(c("DHSYEAR", "survey_type")))
-  ))
-  cli::cli_alert_success(
-    "Processing {nrow(surveys_to_process)}/{n_avail} survey(s) with GPS data: {process_str}"
+  cli::cli_alert_info(
+    "Processing {nrow(surveys_to_process)} survey(s): {process_str}"
   )
 
   # Determine which DHS file types we need based on requested indicators.
@@ -1558,13 +1558,11 @@ run_mbg_pipeline <- function(
     "ci_u",                   "Upper bound of 95% credible interval",
     "numerator",              "Estimated numerator (population-based from raster)",
     "denominator",            "Estimated denominator (total population from raster)",
-    "survey_numerator",             "Raw survey numerator (sum of positive cases across DHS clusters)",
-    "survey_denominator",               "Raw survey denominator (sum of sample sizes across DHS clusters)",
-    "n_clusters",             "Number of DHS survey clusters in admin unit",
     "indicator",              "Indicator name (human-readable)",
     "indicator_code",         "Indicator code (machine-readable, matches dhs_dictionary())",
     "numerator_description",  "Description of numerator",
-    "denominator_description","Description of denominator"
+    "denominator_description","Description of denominator",
+    "denominator_code",       "Denominator code"
   )
 
   if (aggregation_level == "adm3") {
@@ -2223,7 +2221,7 @@ run_mbg_pipeline <- function(
 #' Aggregate Cluster Data to Administrative Level
 #'
 #' Spatially joins cluster-level data to admin boundaries and aggregates
-#' statistics (survey_denominator, survey_numerator, n_clusters, raw proportion) per admin unit.
+#' statistics (n_tested, n_positive, n_clusters, raw proportion) per admin unit.
 #'
 #' @param cluster_data Named list of data.tables from calc_*_mbg functions.
 #'   Each data.table should have columns: cluster_id, indicator, samplesize, x, y.
@@ -2233,10 +2231,10 @@ run_mbg_pipeline <- function(
 #'   to the nearest administrative unit. Default: TRUE.
 #'
 #' @return A tibble with one row per admin unit and columns for each indicator:
-#'   - survey_denominator_{indicator}: Total sample size
+#'   - n_tested_{indicator}: Total sample size
 #'   - n_pos_{indicator}: Total positive count
 #'   - n_clusters_{indicator}: Number of clusters
-#'   - {indicator}_raw: Raw proportion (n_pos / survey_denominator)
+#'   - {indicator}_raw: Raw proportion (n_pos / n_tested)
 #'
 #' @noRd
 .aggregate_cluster_to_admin <- function(
@@ -2329,15 +2327,15 @@ run_mbg_pipeline <- function(
       dplyr::filter(!is.na(.data[[admin_col]])) |>
       dplyr::group_by(dplyr::across(dplyr::all_of(admin_col))) |>
       dplyr::summarise(
-        survey_denominator = sum(samplesize, na.rm = TRUE),
+        n_tested = sum(samplesize, na.rm = TRUE),
         n_pos = sum(indicator, na.rm = TRUE),
         n_clusters = dplyr::n(),
         .groups = "drop"
       ) |>
       dplyr::mutate(
         raw_prop = dplyr::if_else(
-          survey_denominator > 0,
-          round(n_pos / survey_denominator * multiplier, 2),
+          n_tested > 0,
+          round(n_pos / n_tested * multiplier, 2),
           NA_real_
         )
       )
@@ -2347,7 +2345,7 @@ run_mbg_pipeline <- function(
 
     agg <- agg |>
       dplyr::rename(
-        !!paste0("survey_denominator_", full_name) := survey_denominator,
+        !!paste0("n_tested_", full_name) := n_tested,
         !!paste0("n_pos_", full_name) := n_pos,
         !!paste0("n_clusters_", full_name) := n_clusters,
         !!paste0(full_name, "_raw") := raw_prop
@@ -2467,7 +2465,6 @@ run_mbg_pipeline <- function(
         dplyr::summarise(
           numerator = sum(indicator, na.rm = TRUE),
           denominator = sum(samplesize, na.rm = TRUE),
-          n_clusters = dplyr::n(),
           .groups = "drop"
         ) |>
         dplyr::mutate(indicator_code = ind_name)
@@ -2552,21 +2549,6 @@ run_mbg_pipeline <- function(
       ind_df$denominator <- NA_integer_
     }
 
-    # Join raw survey cluster counts (NA for districts without clusters)
-    if (!is.null(cluster_counts)) {
-      ind_counts <- cluster_counts |>
-        dplyr::filter(indicator_code == ind_name) |>
-        dplyr::select(dplyr::all_of(primary_col),
-          survey_numerator = numerator, survey_denominator = denominator, n_clusters)
-      if (nrow(ind_counts) > 0) {
-        ind_df <- ind_df |>
-          dplyr::left_join(ind_counts, by = primary_col)
-      }
-    }
-    if (!"survey_numerator" %in% names(ind_df)) ind_df$survey_numerator <- NA_integer_
-    if (!"survey_denominator" %in% names(ind_df)) ind_df$survey_denominator <- NA_integer_
-    if (!"n_clusters" %in% names(ind_df)) ind_df$n_clusters <- NA_integer_
-
     indicator_rows[[ind_name]] <- ind_df
   }
 
@@ -2632,9 +2614,6 @@ run_mbg_pipeline <- function(
       ci_u        = .safe_wmean(ci_u, denominator),
       numerator   = sum(numerator, na.rm = TRUE),
       denominator = sum(denominator, na.rm = TRUE),
-      survey_numerator  = sum(survey_numerator, na.rm = TRUE),
-      survey_denominator    = sum(survey_denominator, na.rm = TRUE),
-      n_clusters  = sum(n_clusters, na.rm = TRUE),
       median_survey_month = if (has_month) {
         as.integer(stats::median(median_survey_month, na.rm = TRUE))
       } else {
@@ -2654,9 +2633,6 @@ run_mbg_pipeline <- function(
       ci_u        = .safe_wmean(ci_u, denominator),
       numerator   = sum(numerator, na.rm = TRUE),
       denominator = sum(denominator, na.rm = TRUE),
-      survey_numerator  = sum(survey_numerator, na.rm = TRUE),
-      survey_denominator    = sum(survey_denominator, na.rm = TRUE),
-      n_clusters  = sum(n_clusters, na.rm = TRUE),
       median_survey_month = if (has_month) {
         as.integer(stats::median(median_survey_month, na.rm = TRUE))
       } else {
@@ -2672,7 +2648,8 @@ run_mbg_pipeline <- function(
       indicator_code,
       indicator = indicator_title,
       numerator_description,
-      denominator_description
+      denominator_description,
+      denominator_code
     ) |>
     dplyr::distinct(indicator_code, .keep_all = TRUE)
 
@@ -2694,9 +2671,8 @@ run_mbg_pipeline <- function(
       "type", "geo_source",
       "point", "ci_l", "ci_u",
       "numerator", "denominator",
-      "survey_numerator", "survey_denominator", "n_clusters",
       "indicator", "indicator_code",
-      "numerator_description", "denominator_description"
+      "numerator_description", "denominator_description", "denominator_code"
     )
     extra <- setdiff(names(df), col_order)
     present <- intersect(c(col_order, extra), names(df))
@@ -3016,7 +2992,7 @@ run_mbg_pipeline <- function(
   # Columns that should be integers (counts, sample sizes, IDs)
   integer_patterns <- c(
     "^n_", "samplesize", "sample_size", "n_clusters",
-    "survey_denominator", "n_pos", "n_households", "n_births", "n_deaths",
+    "n_tested", "n_pos", "n_households", "n_births", "n_deaths",
     "n_fever", "n_sought", "n_women", "n_recent", "n_iptp",
     "n_public", "n_private", "n_none", "n_trained", "n_individuals",
     "n_with_access", "positive", "pop", "cluster_id", "_id$",
