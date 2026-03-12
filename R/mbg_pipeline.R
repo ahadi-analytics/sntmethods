@@ -880,7 +880,7 @@ run_mbg_pipeline <- function(
     if (!is.null(primary_df) && nrow(primary_df) > 0) {
       base_dict <- sntutils::build_dictionary(data = primary_df)
       write_obj[["data_dict"]] <- .enrich_dhs_dictionary(
-        base_dict, .mbg_output_column_labels()
+        base_dict, .mbg_output_column_labels(aggregation_level)
       )
     }
 
@@ -953,7 +953,7 @@ run_mbg_pipeline <- function(
       if (!is.null(primary_df) && nrow(primary_df) > 0) {
         base_dict <- sntutils::build_dictionary(data = primary_df)
         write_obj[["data_dict"]] <- .enrich_dhs_dictionary(
-          base_dict, .mbg_output_column_labels()
+          base_dict, .mbg_output_column_labels(aggregation_level)
         )
       }
 
@@ -1547,8 +1547,8 @@ run_mbg_pipeline <- function(
 #'
 #' @return A tibble with columns `variable` and `label_en`.
 #' @noRd
-.mbg_output_column_labels <- function() {
-  tibble::tribble(
+.mbg_output_column_labels <- function(aggregation_level = "adm2") {
+  labels <- tibble::tribble(
     ~variable,                ~label_en,
     "survey_id",              "Survey identifier (e.g. TG2013DHS)",
     "iso3",                   "ISO 3166-1 alpha-3 country code",
@@ -1559,20 +1559,29 @@ run_mbg_pipeline <- function(
     "adm0",                   "Administrative level 0 (country)",
     "adm1",                   "Administrative level 1 (province/region)",
     "adm2",                   "Administrative level 2 (district/health zone)",
-    "adm3",                   "Administrative level 3 (commune/sub-district)",
     "type",                   "Estimation type (mbg = model-based geostatistics)",
     "geo_source",             "Geographic data source (gps = GPS cluster coordinates)",
     "point",                  "Point estimate (posterior mean, percentage or per-1000)",
     "ci_l",                   "Lower bound of 95% credible interval",
     "ci_u",                   "Upper bound of 95% credible interval",
-    "numerator",              "Observed numerator (sum across clusters in admin unit)",
-    "denominator",            "Observed denominator (sum across clusters in admin unit)",
+    "numerator",              "Estimated numerator (population-based from raster)",
+    "denominator",            "Estimated denominator (total population from raster)",
     "indicator",              "Indicator name (human-readable)",
     "indicator_code",         "Indicator code (machine-readable, matches dhs_dictionary())",
     "numerator_description",  "Description of numerator",
     "denominator_description","Description of denominator",
     "denominator_code",       "Denominator code"
   )
+
+  if (aggregation_level == "adm3") {
+    adm3_row <- tibble::tibble(
+      variable = "adm3",
+      label_en = "Administrative level 3 (commune/sub-district)"
+    )
+    labels <- dplyr::bind_rows(labels, adm3_row)
+  }
+
+  labels
 }
 
 
