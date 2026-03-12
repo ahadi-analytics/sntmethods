@@ -706,13 +706,13 @@ run_mbg_pipeline <- function(
     derived_indicators <- c("eff_cm")
     primary_indicators <- setdiff(indicators, derived_indicators)
 
-    cli::cli_progress_bar(
+    ind_pb <- cli::cli_progress_bar(
       total = length(primary_indicators),
       format = "{cli::pb_bar} Indicator {cli::pb_current}/{cli::pb_total} | {ind_category}"
     )
 
     for (ind_category in primary_indicators) {
-      cli::cli_progress_update()
+      cli::cli_progress_update(id = ind_pb)
 
       tryCatch({
         ind_results <- .process_indicator_category(
@@ -877,7 +877,10 @@ run_mbg_pipeline <- function(
     primary_key <- if (aggregation_level == "adm3") "adm3" else "adm2"
     primary_df <- year_dataset[[primary_key]]
     if (!is.null(primary_df) && nrow(primary_df) > 0) {
-      write_obj[["data_dict"]] <- sntutils::build_dictionary(data = primary_df)
+      base_dict <- sntutils::build_dictionary(data = primary_df)
+      write_obj[["data_dict"]] <- .enrich_dhs_dictionary(
+        base_dict, .mbg_output_column_labels()
+      )
     }
 
     sntutils::write_snt_data(
@@ -947,7 +950,10 @@ run_mbg_pipeline <- function(
       primary_key <- if (aggregation_level == "adm3") "adm3" else "adm2"
       primary_df <- results$final_dataset[[primary_key]]
       if (!is.null(primary_df) && nrow(primary_df) > 0) {
-        write_obj[["data_dict"]] <- sntutils::build_dictionary(data = primary_df)
+        base_dict <- sntutils::build_dictionary(data = primary_df)
+        write_obj[["data_dict"]] <- .enrich_dhs_dictionary(
+          base_dict, .mbg_output_column_labels()
+        )
       }
 
       sntutils::write_snt_data(
@@ -1448,13 +1454,25 @@ run_mbg_pipeline <- function(
 
     mbg_indicators <- names(cluster_data)
     mbg_indicators <- mbg_indicators[!grepl("^pfpr_combined_", mbg_indicators)]
-    cli::cli_progress_bar(
+    mbg_pb <- cli::cli_progress_bar(
       total = length(mbg_indicators),
       format = "{cli::pb_bar} MBG {cli::pb_current}/{cli::pb_total} | {ind_name}"
     )
+    on.exit(cli::cli_progress_done(id = mbg_pb), add = TRUE)
 
     for (ind_name in mbg_indicators) {
-      cli::cli_progress_update()
+      cli::cli_progress_update(id = mbg_pb)
+
+      # Resolve per-indicator pop type (may differ from category-level default)
+      mbg_pop_type <- .mbg_indicator_pop_type(ind_name)
+      mbg_pop_rast <- switch(mbg_pop_type,
+        u5      = pop_rast_u5      %||% pop_rast,
+        `5_10`  = pop_rast_5_10    %||% pop_rast,
+        `10_20` = pop_rast_10_20   %||% pop_rast,
+        `20plus`= pop_rast_20plus  %||% pop_rast,
+        wra     = pop_rast_wra     %||% pop_rast,
+        pop_rast
+      )
 
       # Skip indicators with too few clusters for MBG
       dt <- cluster_data[[ind_name]]
@@ -1467,7 +1485,7 @@ run_mbg_pipeline <- function(
       }
 
       if (isTRUE(debug)) {
-        cli::cli_alert_info("Running MBG for {ind_name} ({n_clusters} clusters)...")
+        cli::cli_alert_info("Running MBG for {ind_name} ({n_clusters} clusters, pop={mbg_pop_type})...")
       }
 
       mbg_result <- tryCatch({
@@ -1475,14 +1493,14 @@ run_mbg_pipeline <- function(
           cluster_dt = cluster_data[[ind_name]],
           adm2_sf = adm2_sf,
           adm3_sf = adm3_sf,
-          pop_rast = pop_for_indicator,
+          pop_rast = mbg_pop_rast,
           indicator_name = ind_name,
           output_dirs = output_dirs,
           country_iso3 = country_iso3,
           survey_year = survey_year,
           survey_type = survey_type,
           aggregation_level = aggregation_level,
-          pop_type = ind_pop_type,
+          pop_type = mbg_pop_type,
           save_rasters = save_rasters,
           cache = cache,
           debug = debug
@@ -1517,6 +1535,43 @@ run_mbg_pipeline <- function(
     return(FALSE)
   }
   TRUE
+}
+
+
+#' Column labels for MBG pipeline output
+#'
+#' Returns a tibble of variable-level labels used by
+#' `.enrich_dhs_dictionary()` to override generic auto-labels
+#' in the data dictionary tab.
+#'
+#' @return A tibble with columns `variable` and `label_en`.
+#' @noRd
+.mbg_output_column_labels <- function() {
+  tibble::tribble(
+    ~variable,                ~label_en,
+    "survey_id",              "Survey identifier (e.g. TG2013DHS)",
+    "iso3",                   "ISO 3166-1 alpha-3 country code",
+    "iso2",                   "ISO 3166-1 alpha-2 country code",
+    "survey_type",            "Survey type (DHS, MIS, AIS, etc.)",
+    "survey_year",            "Survey year",
+    "median_survey_month",    "Median interview month across clusters in this admin unit",
+    "adm0",                   "Administrative level 0 (country)",
+    "adm1",                   "Administrative level 1 (province/region)",
+    "adm2",                   "Administrative level 2 (district/health zone)",
+    "adm3",                   "Administrative level 3 (commune/sub-district)",
+    "type",                   "Estimation type (mbg = model-based geostatistics)",
+    "geo_source",             "Geographic data source (gps = GPS cluster coordinates)",
+    "point",                  "Point estimate (posterior mean, percentage or per-1000)",
+    "ci_l",                   "Lower bound of 95% credible interval",
+    "ci_u",                   "Upper bound of 95% credible interval",
+    "numerator",              "Observed numerator (sum across clusters in admin unit)",
+    "denominator",            "Observed denominator (sum across clusters in admin unit)",
+    "indicator",              "Indicator name (human-readable)",
+    "indicator_code",         "Indicator code (machine-readable, matches dhs_dictionary())",
+    "numerator_description",  "Description of numerator",
+    "denominator_description","Description of denominator",
+    "denominator_code",       "Denominator code"
+  )
 }
 
 
@@ -1712,12 +1767,12 @@ run_mbg_pipeline <- function(
     primary_sf <- adm3_sf
     polygon_id_field <- "adm3"
     agg_levels <- list(adm3 = c("adm3", "adm2", "adm1", "adm0"))
-    cache_suffix <- paste0("adm3_", pop_type)
+    cache_suffix <- paste0("adm3_", pop_type, "_", survey_year)
   } else {
     primary_sf <- adm2_sf
     polygon_id_field <- "adm2"
     agg_levels <- list(adm2 = c("adm2", "adm1", "adm0"))
-    cache_suffix <- paste0("adm2_", pop_type)
+    cache_suffix <- paste0("adm2_", pop_type, "_", survey_year)
   }
 
   # Debug: Show input summary
@@ -2417,11 +2472,7 @@ run_mbg_pipeline <- function(
     upper_col <- paste0(ind_name, "_upper")
     if (!mean_col %in% names(est)) next
 
-    # Get indicator metadata
-    meta <- .mbg_indicator_meta(ind_name)
-    ind_desc <- .mbg_indicator_label(ind_name)
-
-    # Pivot from wide to long
+    # Pivot from wide to long (metadata joined from dhs_dictionary() later)
     ind_df <- est |>
       dplyr::select(dplyr::all_of(c(primary_col, mean_col, lower_col, upper_col))) |>
       dplyr::rename(
@@ -2429,13 +2480,7 @@ run_mbg_pipeline <- function(
         ci_l  = dplyr::all_of(lower_col),
         ci_u  = dplyr::all_of(upper_col)
       ) |>
-      dplyr::mutate(
-        indicator                = ind_desc$indicator,
-        indicator_code           = ind_name,
-        numerator_description    = ind_desc$numerator_description,
-        denominator_description  = ind_desc$denominator_description,
-        denominator_code         = ind_desc$denominator_code
-      )
+      dplyr::mutate(indicator_code = ind_name)
 
     # Join cluster-level numerator/denominator
     if (!is.null(cluster_counts)) {
@@ -2494,8 +2539,7 @@ run_mbg_pipeline <- function(
 
   meta_cols <- c("survey_id", "iso3", "iso2", "survey_type", "survey_year",
                  "type", "geo_source")
-  desc_cols <- c("indicator", "indicator_code", "numerator_description",
-                 "denominator_description", "denominator_code")
+  desc_cols <- c("indicator_code")
 
   # Weighted mean that falls back to simple mean when all weights are NA
   .safe_wmean <- function(x, w) {
@@ -2537,11 +2581,32 @@ run_mbg_pipeline <- function(
       .groups = "drop"
     )
 
+  # ---- Join indicator metadata from dhs_dictionary() ----
+
+  dict <- dhs_dictionary() |>
+    dplyr::select(
+      indicator_code,
+      indicator = indicator_title,
+      numerator_description,
+      denominator_description,
+      denominator_code
+    ) |>
+    dplyr::distinct(indicator_code, .keep_all = TRUE)
+
+  .join_dict <- function(df) {
+    dplyr::left_join(df, dict, by = "indicator_code")
+  }
+
+  primary_long <- .join_dict(primary_long)
+  adm1_long    <- .join_dict(adm1_long)
+  adm0_long    <- .join_dict(adm0_long)
+
   # ---- Standardise column order (matching DHS output) ----
 
   .order_cols <- function(df, admin_cols) {
     col_order <- c(
       "survey_id", "iso3", "iso2", "survey_type", "survey_year",
+      "median_survey_month",
       "adm0", admin_cols,
       "type", "geo_source",
       "point", "ci_l", "ci_u",
@@ -2549,7 +2614,6 @@ run_mbg_pipeline <- function(
       "indicator", "indicator_code",
       "numerator_description", "denominator_description", "denominator_code"
     )
-    # Keep median_survey_month at the end if present
     extra <- setdiff(names(df), col_order)
     present <- intersect(c(col_order, extra), names(df))
     df |> dplyr::select(dplyr::all_of(present))
