@@ -742,14 +742,16 @@ run_mbg_pipeline <- function(
     sub_count <- 0L
     ind_category <- primary_indicators[1]  # initialise for format string
 
+    pb_label <- ""
     ind_pb <- cli::cli_progress_bar(
       total = expected_total,
-      format = "{cli::pb_bar} Indicator {cli::pb_current}/{cli::pb_total} | {ind_category}"
+      format = "{cli::pb_bar} Indicator {cli::pb_current}/{cli::pb_total} | {pb_label}"
     )
     cli::cli_progress_update(id = ind_pb, set = 0, force = TRUE)
 
     for (ind_category in primary_indicators) {
       # Render bar immediately to show current category
+      pb_label <- ind_category
       cli::cli_progress_update(id = ind_pb, set = sub_count, force = TRUE)
 
       # Skip if already computed by a prior cascade (e.g. csb_any triggers
@@ -760,6 +762,9 @@ run_mbg_pipeline <- function(
         cli::cli_progress_update(id = ind_pb, set = sub_count, force = TRUE)
         next
       }
+
+      # Track how many sub-indicators the callback advances
+      cb_count <- 0L
 
       tryCatch({
         # Suppress verbose calc function output unless in debug mode;
@@ -789,7 +794,23 @@ run_mbg_pipeline <- function(
             save_rasters = save_rasters,
             cache = cache,
             verbose = verbose,
-            debug = debug
+            debug = debug,
+            progress_callback = function(ind_name) {
+              sub_count <<- sub_count + 1L
+              cb_count <<- cb_count + 1L
+              pb_label <<- ind_name
+              # Use cat() to bypass suppressMessages wrapper
+              pct <- sub_count / expected_total
+              n_filled <- round(pct * 30)
+              bar <- paste0(
+                strrep("\u25a0", n_filled),
+                strrep(" ", 30 - n_filled)
+              )
+              cat(sprintf(
+                "\r%s Indicator %d/%d | %s",
+                bar, sub_count, expected_total, ind_name
+              ))
+            }
           )
         }
         ind_results <- if (isTRUE(debug)) {
@@ -806,10 +827,13 @@ run_mbg_pipeline <- function(
           )
         }
 
-        # Advance progress bar by actual sub-indicator count produced
-        n_produced <- max(length(ind_results$cluster_data), 1L)
-        sub_count <- sub_count + n_produced
-        cli::cli_progress_update(id = ind_pb, set = sub_count, force = TRUE)
+        # If callback didn't fire (MBG disabled or category skipped/empty),
+        # advance bar by produced count so it doesn't stall
+        if (cb_count == 0L) {
+          n_produced <- max(length(ind_results$cluster_data), 1L)
+          sub_count <- sub_count + n_produced
+          cli::cli_progress_update(id = ind_pb, set = sub_count, force = TRUE)
+        }
 
         # Check if indicator was skipped
         if (!is.null(ind_results$skipped)) {
@@ -840,8 +864,10 @@ run_mbg_pipeline <- function(
       })
     }
 
+    # Clear the cat()-based progress line and finalize cli bar
+    cat("\r", strrep(" ", 70), "\r", sep = "")
+    cli::cli_progress_update(id = ind_pb, set = sub_count, force = TRUE)
     cli::cli_progress_done(id = ind_pb)
-    cat("\n")  # line break after progress bar
 
     # ---- Compute derived indicators (eff_cm = CSB x ACT) ----
     if (isTRUE(run_mbg) && length(year_results$raster_paths) > 0) {
@@ -1229,7 +1255,8 @@ run_mbg_pipeline <- function(
   save_rasters,
   cache,
   verbose,
-  debug = FALSE
+  debug = FALSE,
+  progress_callback = NULL
 ) {
   # Select population raster based on indicator's target population
   ind_pop_type <- .mbg_indicator_pop_type(category)
@@ -1630,14 +1657,8 @@ run_mbg_pipeline <- function(
 
     mbg_indicators <- names(cluster_data)
     mbg_indicators <- mbg_indicators[!grepl("^pfpr_combined_", mbg_indicators)]
-    mbg_pb <- cli::cli_progress_bar(
-      total = length(mbg_indicators),
-      format = "{cli::pb_bar} MBG {cli::pb_current}/{cli::pb_total} | {ind_name}"
-    )
-    on.exit(cli::cli_progress_done(id = mbg_pb), add = TRUE)
 
     for (ind_name in mbg_indicators) {
-      cli::cli_progress_update(id = mbg_pb)
 
       # Resolve per-indicator pop type (may differ from category-level default)
       mbg_pop_type <- .mbg_indicator_pop_type(ind_name)
@@ -1658,6 +1679,7 @@ run_mbg_pipeline <- function(
         cli::cli_alert_warning(
           "Skipping MBG for {.val {ind_name}}: only {n_clusters} cluster(s) (need >= 5)"
         )
+        if (is.function(progress_callback)) progress_callback(ind_name)
         next
       }
 
@@ -1667,6 +1689,7 @@ run_mbg_pipeline <- function(
         cli::cli_alert_warning(
           "Skipping MBG for {.val {ind_name}}: numerator is 0 across all clusters"
         )
+        if (is.function(progress_callback)) progress_callback(ind_name)
         next
       }
 
@@ -1702,6 +1725,8 @@ run_mbg_pipeline <- function(
           results$raster_paths[[ind_name]] <- mbg_result$raster_path
         }
       }
+
+      if (is.function(progress_callback)) progress_callback(ind_name)
     }
   }
 
