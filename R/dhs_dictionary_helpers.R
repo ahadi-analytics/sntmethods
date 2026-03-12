@@ -124,6 +124,12 @@
     csb_none          = list(recode = "KR", category = "Malaria",       cascade = 1L, age = "0-59 months",  pop_type = "u5"),
     csb_any           = list(recode = "KR", category = "Malaria",       cascade = 1L, age = "0-59 months",  pop_type = "u5"),
     csb_trained       = list(recode = "KR", category = "Malaria",       cascade = 1L, age = "0-59 months",  pop_type = "u5"),
+    csb_chw           = list(recode = "KR", category = "Malaria",       cascade = 1L, age = "0-59 months",  pop_type = "u5"),
+    csb_pharmacy      = list(recode = "KR", category = "Malaria",       cascade = 1L, age = "0-59 months",  pop_type = "u5"),
+    csb_priv_formal   = list(recode = "KR", category = "Malaria",       cascade = 1L, age = "0-59 months",  pop_type = "u5"),
+    csb_priv_informal = list(recode = "KR", category = "Malaria",       cascade = 1L, age = "0-59 months",  pop_type = "u5"),
+    csb_priv_form_pha = list(recode = "KR", category = "Malaria",       cascade = 1L, age = "0-59 months",  pop_type = "u5"),
+    csb_pub_nochw     = list(recode = "KR", category = "Malaria",       cascade = 1L, age = "0-59 months",  pop_type = "u5"),
     malaria_dx        = list(recode = "KR", category = "Malaria",       cascade = 2L, age = "0-59 months",  pop_type = "u5"),
     antimalarial      = list(recode = "KR", category = "Malaria",       cascade = 3L, age = "0-59 months",  pop_type = "u5"),
     antimalarial_public = list(recode = "KR", category = "Malaria",     cascade = 3L, age = "0-59 months",  pop_type = "u5"),
@@ -171,8 +177,6 @@
     pfpr_mic          = list(recode = "PR", category = "Malaria",       cascade = na_int, age = "6-59 months",  pop_type = "u5"),
     pfpr_rdt_u5       = list(recode = "PR", category = "Malaria",       cascade = na_int, age = "6-59 months",  pop_type = "u5"),
     pfpr_mic_u5       = list(recode = "PR", category = "Malaria",       cascade = na_int, age = "6-59 months",  pop_type = "u5"),
-    pfpr_either_u5    = list(recode = "PR", category = "Malaria",       cascade = na_int, age = "6-59 months",  pop_type = "u5"),
-    pfpr_combined_u5  = list(recode = "PR", category = "Malaria",       cascade = na_int, age = "6-59 months",  pop_type = "u5"),
     # ITN — HR/PR module (aligned with DHS indicator codes)
     enough_itn        = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "all ages",     pop_type = "all"),
     with_itn          = list(recode = "HR/PR", category = "ITN",        cascade = na_int, age = "all ages",     pop_type = "all"),
@@ -194,6 +198,7 @@
     anemia_severe_only = list(recode = "PR", category = "Nutrition",    cascade = na_int, age = "6-59 months",  pop_type = "u5"),
     # ANC — IR module
     anc_1plus         = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49", pop_type = "wra"),
+    anc_2plus         = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49", pop_type = "wra"),
     anc_3plus         = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49", pop_type = "wra"),
     anc_4plus         = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49", pop_type = "wra"),
     anc_8plus         = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49", pop_type = "wra"),
@@ -206,31 +211,34 @@
     iptp_2only        = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49", pop_type = "wra"),
     iptp_3only        = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49", pop_type = "wra"),
     # EPI — KR module
-    epi_bcg           = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "u5"),
-    epi_dpt1          = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "u5"),
-    epi_dpt2          = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "u5"),
-    epi_dpt3          = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "u5"),
-    epi_polio1        = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "u5"),
-    epi_polio2        = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "u5"),
-    epi_polio3        = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "u5"),
-    epi_measles1      = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "u5"),
-    epi_measles2      = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "u5"),
-    epi_vita1         = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "u5"),
-    epi_vita2         = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "u5"),
-    epi_malaria       = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "u5"),
-    epi_fully_vaccinated = list(recode = "KR", category = "Immunization", cascade = na_int, age = "12-23 months", pop_type = "u5"),
-    epi_penta1        = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "u5"),
-    epi_penta2        = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "u5"),
-    epi_penta3        = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "u5"),
-    epi_pneumo1       = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "u5"),
-    epi_pneumo2       = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "u5"),
-    epi_pneumo3       = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "u5"),
-    epi_rota1         = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "u5"),
-    epi_rota2         = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "u5"),
-    epi_rota3         = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "u5"),
-    epi_ipv           = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "u5"),
-    epi_hepb0         = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "u5"),
-    epi_yellowfever   = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "u5"),
+    epi_bcg           = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_dpt1          = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_dpt2          = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_dpt3          = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_polio1        = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_polio2        = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_polio3        = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_measles1      = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_measles2      = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_vita1         = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_vita2         = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_malaria       = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_polio0        = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_any           = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_never_vaccinated = list(recode = "KR", category = "Immunization", cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_fully_vaccinated = list(recode = "KR", category = "Immunization", cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_penta1        = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_penta2        = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_penta3        = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_pneumo1       = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_pneumo2       = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_pneumo3       = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_rota1         = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_rota2         = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_rota3         = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_ipv           = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_hepb0         = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
+    epi_yellowfever   = list(recode = "KR", category = "Immunization",  cascade = na_int, age = "12-23 months", pop_type = "1_2"),
     # U5MR — KR module (special unit)
     u5mr              = list(recode = "KR", category = "Mortality",     cascade = na_int, age = "0-59 months",  pop_type = "u5",
                              base_unit = "per 1000 live births"),
@@ -272,7 +280,7 @@
   category_pop <- c(
     pfpr = "u5", itn = "all", irs = "all", anc = "wra",
     csb = "u5", act = "u5", anemia = "u5", iptp = "wra",
-    epi = "u5", u5mr = "u5", smc = "u5", fever = "u5",
+    epi = "1_2", u5mr = "u5", smc = "u5", fever = "u5",
     antimalarial = "u5", eff_cm = "u5"
   )
 
@@ -343,6 +351,28 @@
     denominator_description  = denom_info$desc,
     denominator_code         = denom_info$code
   )
+}
+
+
+#' Eligibility Notes for an MBG Indicator
+#'
+#' Returns a brief explanation of the age restriction for an indicator,
+#' describing the biological or methodological reason for the eligibility
+#' criteria (e.g., maternal antibody protection for PfPR).
+#'
+#' @param ind Character indicator code.
+#' @return Character scalar with eligibility note, or \code{NA_character_}.
+#' @noRd
+.mbg_eligibility_notes <- function(ind) {
+  meta <- .mbg_indicator_meta(ind)
+  notes_map <- list(
+    "6-59 months"  = "Excludes <6 months (residual maternal antibodies)",
+    "12-23 months" = "Standard DHS vaccination assessment window",
+    "0-59 months"  = "All children under 5 years",
+    "women 15-49"  = "Women of reproductive age with recent live birth",
+    "all ages"     = "All de facto household members"
+  )
+  notes_map[[meta$age]] %||% NA_character_
 }
 
 
@@ -418,10 +448,7 @@
   individual_codes <- c(
     # PfPR (PR module)
     "pfpr_rdt", "pfpr_mic",
-    "pfpr_rdt_u5", "pfpr_rdt_5_10", "pfpr_rdt_u10", "pfpr_rdt_2_10",
-    "pfpr_mic_u5", "pfpr_mic_5_10", "pfpr_mic_u10", "pfpr_mic_2_10",
-    "pfpr_either_u5", "pfpr_either_5_10", "pfpr_either_u10", "pfpr_either_2_10",
-    "pfpr_combined_u5",
+    "pfpr_rdt_u5", "pfpr_mic_u5",
     # ITN (HR/PR module)
     "enough_itn", "with_itn", "access_itn", "use_itn",
     "use_itn_chu5", "use_itn_preg", "use_itn_if_access",

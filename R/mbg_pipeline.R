@@ -40,8 +40,11 @@ NULL
 #'   }
 #' @param pop_raster_u5 Under-5 population raster(s) (optional). Same format as
 #'   `pop_raster`. Used for indicators targeting children 0-59 months (PfPR,
-#'   fever, CSB, ACT, antimalarial, anemia, EPI, U5MR, SMC, ITN use U5).
+#'   fever, CSB, ACT, antimalarial, anemia, U5MR, SMC, ITN use U5).
 #'   If NULL, falls back to `pop_raster`.
+#' @param pop_raster_1_2 Population raster for children 12-23 months (optional).
+#'   Same format as `pop_raster`. Used for EPI (immunization) indicators.
+#'   Falls back to `pop_raster_u5`, then `pop_raster` if NULL.
 #' @param pop_raster_5_10 Population raster for ages 5-10 (optional). Same
 #'   format as `pop_raster`. Used for `use_itn_5_10`. Falls back to
 #'   `pop_raster` if NULL.
@@ -153,6 +156,7 @@ run_mbg_pipeline <- function(
   raster_out_path,
   intermediate_out_path,
   pop_raster_u5 = NULL,
+  pop_raster_1_2 = NULL,
   pop_raster_5_10 = NULL,
   pop_raster_10_20 = NULL,
   pop_raster_20plus = NULL,
@@ -310,6 +314,9 @@ run_mbg_pipeline <- function(
     .validate_raster_paths(pop_raster, country_iso3, "pop_raster")
     if (!is.null(pop_raster_u5)) {
       .validate_raster_paths(pop_raster_u5, country_iso3, "pop_raster_u5")
+    }
+    if (!is.null(pop_raster_1_2)) {
+      .validate_raster_paths(pop_raster_1_2, country_iso3, "pop_raster_1_2")
     }
     if (!is.null(pop_raster_5_10)) {
       .validate_raster_paths(pop_raster_5_10, country_iso3, "pop_raster_5_10")
@@ -617,6 +624,7 @@ run_mbg_pipeline <- function(
     }
 
     pop_rast_u5     <- .load_optional_raster(pop_raster_u5,     "u5 population")
+    pop_rast_1_2    <- .load_optional_raster(pop_raster_1_2,    "1-2y population")
     pop_rast_5_10   <- .load_optional_raster(pop_raster_5_10,   "5-10 population")
     pop_rast_10_20  <- .load_optional_raster(pop_raster_10_20,  "10-20 population")
     pop_rast_20plus <- .load_optional_raster(pop_raster_20plus, "20+ population")
@@ -624,6 +632,7 @@ run_mbg_pipeline <- function(
 
     # Single-line summary of loaded rasters
     raster_labels <- c("total" = "pop_rast", "u5" = "pop_rast_u5",
+                       "1-2y" = "pop_rast_1_2",
                        "5-10" = "pop_rast_5_10", "10-20" = "pop_rast_10_20",
                        "20+" = "pop_rast_20plus", "WRA" = "pop_rast_wra")
     loaded_rasters <- character()
@@ -723,6 +732,7 @@ run_mbg_pipeline <- function(
           adm3_sf = adm3_aligned,
           pop_rast = pop_rast,
           pop_rast_u5 = pop_rast_u5,
+          pop_rast_1_2 = pop_rast_1_2,
           pop_rast_5_10 = pop_rast_5_10,
           pop_rast_10_20 = pop_rast_10_20,
           pop_rast_20plus = pop_rast_20plus,
@@ -1049,6 +1059,7 @@ run_mbg_pipeline <- function(
   adm3_sf = NULL,
   pop_rast,
   pop_rast_u5 = NULL,
+  pop_rast_1_2 = NULL,
   pop_rast_5_10 = NULL,
   pop_rast_10_20 = NULL,
   pop_rast_20plus = NULL,
@@ -1069,6 +1080,7 @@ run_mbg_pipeline <- function(
 
   pop_for_indicator <- switch(ind_pop_type,
     u5     = pop_rast_u5     %||% pop_rast,
+    `1_2`  = pop_rast_1_2    %||% pop_rast_u5 %||% pop_rast,
     `5_10` = pop_rast_5_10   %||% pop_rast,
     `10_20`= pop_rast_10_20  %||% pop_rast,
     `20plus` = pop_rast_20plus %||% pop_rast,
@@ -1475,6 +1487,7 @@ run_mbg_pipeline <- function(
       mbg_pop_type <- .mbg_indicator_pop_type(ind_name)
       mbg_pop_rast <- switch(mbg_pop_type,
         u5      = pop_rast_u5      %||% pop_rast,
+        `1_2`   = pop_rast_1_2     %||% pop_rast_u5 %||% pop_rast,
         `5_10`  = pop_rast_5_10    %||% pop_rast,
         `10_20` = pop_rast_10_20   %||% pop_rast,
         `20plus`= pop_rast_20plus  %||% pop_rast,
@@ -1579,7 +1592,8 @@ run_mbg_pipeline <- function(
     "indicator",              "Indicator name (human-readable)",
     "indicator_code",         "Indicator code (machine-readable, matches dhs_dictionary())",
     "numerator_description",  "Description of numerator",
-    "denominator_description","Description of denominator"
+    "denominator_description","Description of denominator",
+    "eligibility_notes",      "Biological/methodological reason for age restriction"
   )
 
   if (aggregation_level == "adm3") {
@@ -2710,6 +2724,27 @@ run_mbg_pipeline <- function(
   adm1_long    <- .join_dict(adm1_long)
   adm0_long    <- .join_dict(adm0_long)
 
+  # ---- Join eligibility notes from indicator meta ----
+
+  all_ind_codes <- unique(c(
+    primary_long$indicator_code,
+    adm1_long$indicator_code,
+    adm0_long$indicator_code
+  ))
+
+  elig_lookup <- tibble::tibble(
+    indicator_code    = all_ind_codes,
+    eligibility_notes = vapply(all_ind_codes, .mbg_eligibility_notes, character(1))
+  )
+
+  .join_elig <- function(df) {
+    dplyr::left_join(df, elig_lookup, by = "indicator_code")
+  }
+
+  primary_long <- .join_elig(primary_long)
+  adm1_long    <- .join_elig(adm1_long)
+  adm0_long    <- .join_elig(adm0_long)
+
   # ---- Standardise column order (matching DHS output) ----
 
   .order_cols <- function(df, admin_cols) {
@@ -2722,7 +2757,8 @@ run_mbg_pipeline <- function(
       "point", "ci_l", "ci_u",
       "numerator", "denominator",
       "survey_numerator", "survey_denominator", "n_survey_clusters",
-      "numerator_description", "denominator_description"
+      "numerator_description", "denominator_description",
+      "eligibility_notes"
     )
     extra <- setdiff(names(df), col_order)
     present <- intersect(c(col_order, extra), names(df))

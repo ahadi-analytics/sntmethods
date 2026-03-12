@@ -103,15 +103,19 @@ test_that(".mbg_indicator_meta returns correct pop_type for all indicators", {
     "act", "act_public", "act_tested",
     "febrile_rdt_pos", "febrile_rdt_pos_act",
     "pfpr_rdt", "pfpr_mic", "pfpr_rdt_u5", "pfpr_mic_u5",
-    "pfpr_either_u5", "pfpr_combined_u5",
     "use_itn_chu5",
     "severe_anemia", "anemia_any", "anemia_moderate_plus",
-    "epi_bcg", "epi_dpt3", "epi_measles1",
     "u5mr", "smc_coverage",
     "eff_cm_any", "eff_cm_public"
   )
   for (ind in u5_indicators) {
     expect_equal(.mbg_indicator_meta(ind)$pop_type, "u5", info = ind)
+  }
+
+  # EPI indicators (12-23 months)
+  epi_indicators <- c("epi_bcg", "epi_dpt3", "epi_measles1")
+  for (ind in epi_indicators) {
+    expect_equal(.mbg_indicator_meta(ind)$pop_type, "1_2", info = ind)
   }
 
   # WRA indicators
@@ -151,7 +155,7 @@ test_that(".mbg_indicator_pop_type returns correct type for individual indicator
   expect_equal(.mbg_indicator_pop_type("pfpr_rdt_u5"), "u5")
   expect_equal(.mbg_indicator_pop_type("fever"), "u5")
   expect_equal(.mbg_indicator_pop_type("act"), "u5")
-  expect_equal(.mbg_indicator_pop_type("epi_bcg"), "u5")
+  expect_equal(.mbg_indicator_pop_type("epi_bcg"), "1_2")
   expect_equal(.mbg_indicator_pop_type("smc_coverage"), "u5")
   expect_equal(.mbg_indicator_pop_type("use_itn_chu5"), "u5")
 
@@ -177,7 +181,7 @@ test_that(".mbg_indicator_pop_type returns correct type for category dispatch ke
   expect_equal(.mbg_indicator_pop_type("act"), "u5")
   expect_equal(.mbg_indicator_pop_type("anemia"), "u5")
   expect_equal(.mbg_indicator_pop_type("iptp"), "wra")
-  expect_equal(.mbg_indicator_pop_type("epi"), "u5")
+  expect_equal(.mbg_indicator_pop_type("epi"), "1_2")
   expect_equal(.mbg_indicator_pop_type("u5mr"), "u5")
   expect_equal(.mbg_indicator_pop_type("smc"), "u5")
   expect_equal(.mbg_indicator_pop_type("fever"), "u5")

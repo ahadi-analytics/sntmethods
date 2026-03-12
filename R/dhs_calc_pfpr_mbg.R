@@ -23,12 +23,8 @@
 #' @param dhs_pr DHS Person Records dataset (data.frame or tibble).
 #' @param gps_data DHS GPS dataset with cluster coordinates.
 #' @param indicators Character vector of indicator codes to calculate.
-#'   See \code{.pfpr_mbg_dictionary()} for the full list. Standard codes
-#'   include \code{"pfpr_rdt"} and \code{"pfpr_mic"} (default 2-10 age
-#'   range, 24-119 months), as well as age-suffixed variants like
-#'   \code{"pfpr_rdt_u5"}, \code{"pfpr_mic_2_10"}, \code{"pfpr_either_u10"}.
-#'   Legacy parameters (\code{test_type}, \code{age_groups}) are also
-#'   accepted for backward compatibility.
+#'   Available codes: \code{"pfpr_rdt"}, \code{"pfpr_mic"} (6-59 months),
+#'   \code{"pfpr_rdt_u5"}, \code{"pfpr_mic_u5"} (0-59 months).
 #'   Default: all indicators from the dictionary.
 #' @param test_type \strong{Deprecated}. Character. Use \code{indicators}
 #'   instead. When provided, translated to indicator codes for backward
@@ -63,7 +59,7 @@
 #' pfpr_mbg <- calc_pfpr_mbg(
 #'   dhs_pr = pr_data,
 #'   gps_data = gps_data,
-#'   indicators = c("pfpr_rdt_u5", "pfpr_mic_2_10", "pfpr_either_u5")
+#'   indicators = c("pfpr_rdt_u5", "pfpr_mic_u5")
 #' )
 #'
 #' # Legacy style (still works, with deprecation warning)
@@ -266,54 +262,18 @@ calc_pfpr_mbg <- function(
 #'
 #' @noRd
 .pfpr_mbg_dictionary <- function() {
-  tests <- list(
-    rdt = list(test_col = "rdt_res", pos_value = 1, valid_values = c(0, 1)),
-    mic = list(test_col = "mic_res", pos_value = 1, valid_values = c(0, 1, 6))
-  )
-  ages <- list(
-    u5     = c(6, 59),
-    "5_10" = c(60, 120),
-    u10    = c(6, 119),
-    "2_10" = c(24, 119)
-  )
-
-  dict <- list()
-
-  # Standard PfPR (default 2-10 age range, matching DHS pfpr_rdt / pfpr_mic)
-  dict <- c(dict, list(
+  dict <- list(
+    # Standard PfPR (6-59 months, matching DHS pfpr_rdt / pfpr_mic)
     list(name = "pfpr_rdt", test_type = "rdt", test_col = "rdt_res",
-         pos_value = 1, valid_values = c(0, 1), age_min = 24, age_max = 119),
+         pos_value = 1, valid_values = c(0, 1), age_min = 6, age_max = 59),
     list(name = "pfpr_mic", test_type = "mic", test_col = "mic_res",
-         pos_value = 1, valid_values = c(0, 1, 6), age_min = 24, age_max = 119)
-  ))
-
-  # RDT and microscopy indicators (age-suffixed variants)
-  for (tname in names(tests)) {
-    for (aname in names(ages)) {
-      dict <- c(dict, list(list(
-        name         = paste0("pfpr_", tname, "_", aname),
-        test_type    = tname,
-        test_col     = tests[[tname]]$test_col,
-        pos_value    = tests[[tname]]$pos_value,
-        valid_values = tests[[tname]]$valid_values,
-        age_min      = ages[[aname]][1],
-        age_max      = ages[[aname]][2]
-      )))
-    }
-  }
-
-  # Either test (RDT OR microscopy positive)
-  for (aname in names(ages)) {
-    dict <- c(dict, list(list(
-      name         = paste0("pfpr_either_", aname),
-      test_type    = "either",
-      test_col     = NULL,
-      pos_value    = NULL,
-      valid_values = NULL,
-      age_min      = ages[[aname]][1],
-      age_max      = ages[[aname]][2]
-    )))
-  }
+         pos_value = 1, valid_values = c(0, 1, 6), age_min = 6, age_max = 59),
+    # U5 variants (0-59 months)
+    list(name = "pfpr_rdt_u5", test_type = "rdt", test_col = "rdt_res",
+         pos_value = 1, valid_values = c(0, 1), age_min = 0, age_max = 59),
+    list(name = "pfpr_mic_u5", test_type = "mic", test_col = "mic_res",
+         pos_value = 1, valid_values = c(0, 1, 6), age_min = 0, age_max = 59)
+  )
 
   dict
 }
