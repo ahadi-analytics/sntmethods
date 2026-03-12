@@ -260,28 +260,46 @@ calc_act_mbg <- function(
     s$outcome == "had_test"
   }, logical(1)))
   if (needs_dx) {
-    # Mirror DHS derivation: try ml1 first, then h47 fallback
-    if ("ml1" %in% names(enriched)) {
+    # h47 ("blood taken from finger/heel for testing") is the standard
+    # DHS malaria diagnostic variable. ml1 means "blood taken for
+    # testing" in the KR (children) recode, but in the IR (women)
+    # recode it means "times took Fansidar during pregnancy" (IPTp).
+    # Since labels from parquet files sometimes carry the wrong recode
+    # label, we validate ml1 by rejecting known-bad labels (IPTp/
+    # pregnancy patterns) rather than requiring a positive match.
+    dx_var <- NULL
+    if ("h47" %in% names(enriched)) {
+      dx_var <- "h47"
+    } else if ("ml1" %in% names(enriched)) {
+      ml1_label <- attr(dhs_kr[["ml1"]], "label") %||% ""
+      is_iptp <- grepl(
+        "fansidar|sp\\/fansidar|pregnancy|iptp|ipt\\b|dose.*preg",
+        ml1_label, ignore.case = TRUE
+      )
+      if (is_iptp) {
+        cli::cli_alert_warning(
+          "ml1 label is {.val {ml1_label}} \\
+          {cli::symbol$em_dash} IPTp variable, not malaria \\
+          diagnostic; mal_dx indicators will be skipped"
+        )
+      } else {
+        dx_var <- "ml1"
+      }
+    }
+
+    if (!is.null(dx_var)) {
       enriched$had_test <- as.integer(
-        !is.na(enriched$ml1) & enriched$ml1 == 1
+        !is.na(enriched[[dx_var]]) &
+          enriched[[dx_var]] == 1
       )
       cli::cli_alert_info(
-        "Enriched with malaria diagnostic (ml1): \\
-        {sum(enriched$had_test == 1, na.rm = TRUE)} \\
-        tested"
-      )
-    } else if ("h47" %in% names(enriched)) {
-      enriched$had_test <- as.integer(
-        !is.na(enriched$h47) & enriched$h47 == 1
-      )
-      cli::cli_alert_info(
-        "Enriched with malaria diagnostic (h47): \\
+        "Enriched with malaria diagnostic ({dx_var}): \\
         {sum(enriched$had_test == 1, na.rm = TRUE)} \\
         tested"
       )
     } else {
       cli::cli_alert_warning(
-        "Neither ml1 nor h47 found \\
+        "No valid malaria diagnostic variable found \\
         {cli::symbol$em_dash} mal_dx indicators \\
         will be skipped"
       )

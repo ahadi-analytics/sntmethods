@@ -735,7 +735,7 @@ run_mbg_pipeline <- function(
     derived_indicators <- c("eff_cm", names(default_pairs))
     primary_indicators <- setdiff(indicators, derived_indicators)
 
-    cat("\n")  # visual gap before progress bar
+    cat("\n\n")  # visual gap before progress bar
 
     # Pre-compute expected sub-indicator total for progress bar
     expected_total <- sum(vapply(primary_indicators, .expected_sub_count, integer(1)))
@@ -841,6 +841,9 @@ run_mbg_pipeline <- function(
       })
     }
 
+    cli::cli_progress_done(id = ind_pb)
+    cat("\n")  # line break after progress bar
+
     # ---- Compute derived indicators (eff_cm = CSB x ACT) ----
     if (isTRUE(run_mbg) && length(year_results$raster_paths) > 0) {
       derived_args <- list(
@@ -873,17 +876,6 @@ run_mbg_pipeline <- function(
       }
     }
 
-    # ---- Save cluster data for this year ----
-    if (length(year_results$cluster_data) > 0) {
-      .save_cluster_data(
-        cluster_data = year_results$cluster_data,
-        output_dir = output_dirs$tables,
-        country_iso3 = country_iso3,
-        survey_year = current_year,
-        survey_type = current_survey_type
-      )
-    }
-
     # ---- Summary for this survey ----
     cli::cli_h3("Summary for {current_survey_type} {current_year}")
 
@@ -898,6 +890,25 @@ run_mbg_pipeline <- function(
           "Indicators: {paste(processed_indicators, collapse = ', ')}"
         )
       }
+    }
+
+    # Save cluster data (after summary header so path appears under summary)
+    if (length(year_results$cluster_data) > 0) {
+      .save_cluster_data(
+        cluster_data = year_results$cluster_data,
+        output_dir = output_dirs$tables,
+        country_iso3 = country_iso3,
+        survey_year = current_year,
+        survey_type = current_survey_type
+      )
+    }
+
+    n_rasters <- length(year_results$raster_paths)
+    if (n_rasters > 0) {
+      rel_dir <- .relative_path(output_dirs$rasters)
+      cli::cli_alert_success(
+        "Saved {n_rasters} raster(s) to {.file {rel_dir}}"
+      )
     }
 
     if (length(skipped_indicators) > 0) {

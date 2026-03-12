@@ -379,34 +379,59 @@ calc_act_dhs <- function(
     cli::cli_alert_success("CSB indicators created")
   }
 
-  # ---- 5b. Add malaria diagnostic test variable (ml1) ----
-  # ml1 = "blood taken from finger/heel for malaria testing"
-  # Used for MALARIA_DX indicators
-  malaria_dx_var <- survey_vars$malaria_dx %||% "ml1"
+  # ---- 5b. Add malaria diagnostic test variable ----
+  # h47 ("blood taken from finger/heel for testing") is the standard
+  # DHS malaria diagnostic variable. ml1 means "blood taken for
+  # testing" in KR (children) recode but "times took Fansidar" in
+  # IR (women) recode. Reject ml1 only if its label indicates IPTp.
+  malaria_dx_var <- survey_vars$malaria_dx %||% "h47"
+  dx_resolved <- NULL
+
   if (malaria_dx_var %in% names(kr_fever)) {
+    if (malaria_dx_var == "ml1") {
+      ml1_lbl <- attr(dhs_kr[["ml1"]], "label") %||% ""
+      is_iptp <- grepl(
+        "fansidar|sp\\/fansidar|pregnancy|iptp|ipt\\b|dose.*preg",
+        ml1_lbl, ignore.case = TRUE
+      )
+      if (!is_iptp) {
+        dx_resolved <- "ml1"
+      } else {
+        cli::cli_alert_warning(
+          "ml1 label is {.val {ml1_lbl}} — IPTp variable, not malaria test"
+        )
+      }
+    } else {
+      dx_resolved <- malaria_dx_var
+    }
+  }
+
+  # Fallback: h47 → ml1 (with label validation)
+  if (is.null(dx_resolved) && "h47" %in% names(kr_fever)) {
+    dx_resolved <- "h47"
+  }
+  if (is.null(dx_resolved) && "ml1" %in% names(kr_fever)) {
+    ml1_lbl <- attr(dhs_kr[["ml1"]], "label") %||% ""
+    is_iptp <- grepl(
+      "fansidar|sp\\/fansidar|pregnancy|iptp|ipt\\b|dose.*preg",
+      ml1_lbl, ignore.case = TRUE
+    )
+    if (!is_iptp) dx_resolved <- "ml1"
+  }
+
+  if (!is.null(dx_resolved)) {
     kr_fever$had_test <- dplyr::if_else(
-      kr_fever[[malaria_dx_var]] == 1, 1, 0, missing = NA_real_
+      kr_fever[[dx_resolved]] == 1, 1, 0, missing = NA_real_
     )
     n_tested <- sum(kr_fever$had_test == 1, na.rm = TRUE)
     cli::cli_alert_info(
-      "Malaria diagnostic test ({.var {malaria_dx_var}}): {n_tested}/{nrow(kr_fever)}"
+      "Malaria diagnostic test ({.var {dx_resolved}}): {n_tested}/{nrow(kr_fever)}"
     )
   } else {
-    # Try h47 as fallback
-    if ("h47" %in% names(kr_fever)) {
-      kr_fever$had_test <- dplyr::if_else(
-        kr_fever$h47 == 1, 1, 0, missing = NA_real_
-      )
-      n_tested <- sum(kr_fever$had_test == 1, na.rm = TRUE)
-      cli::cli_alert_info(
-        "Malaria diagnostic test ({.var h47}): {n_tested}/{nrow(kr_fever)}"
-      )
-    } else {
-      cli::cli_alert_warning(
-        "No malaria diagnostic test variable ({.var {malaria_dx_var}}/{.var h47}) found; MALARIA_DX indicators will be skipped"
-      )
-      kr_fever$had_test <- NA_real_
-    }
+    cli::cli_alert_warning(
+      "No valid malaria diagnostic variable found; MALARIA_DX indicators will be skipped"
+    )
+    kr_fever$had_test <- NA_real_
   }
 
   # ---- 6. Spatial join (GE + shapefile) or region grouping ----
