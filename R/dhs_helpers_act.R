@@ -216,9 +216,10 @@
     return(0)
   })
 
-  # Build columns
+  # Build columns (include .row_id for downstream enrichment)
   kr <- kr |>
     dplyr::mutate(
+      .row_id = dplyr::row_number(),
       cluster_id = .data[[survey_vars$cluster]],
       age_months = .data[[survey_vars$age]],
       had_fever = .data[[survey_vars$fever]]
