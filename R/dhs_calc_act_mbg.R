@@ -864,8 +864,22 @@ calc_act_mbg <- function(
   # Build febrile index matching .prepare_act_data()
   has_alive_var <- !is.null(survey_vars$alive) &&
     survey_vars$alive %in% names(dhs_kr_zapped)
+
+  # Detect fever coding scheme: Some surveys use 0=No/1=Yes, others use 1=No/2=Yes
+  fever_values <- unique(dhs_kr_zapped[[survey_vars$fever]][
+    !is.na(dhs_kr_zapped[[survey_vars$fever]])
+  ])
+
+  # Determine "Yes" value: if values are strictly {1, 2} or {2}, assume 2=Yes
+  # Otherwise, assume 1=Yes (standard DHS coding)
+  if (all(fever_values %in% c(1, 2)) && 2 %in% fever_values && !0 %in% fever_values) {
+    fever_yes_value <- 2
+  } else {
+    fever_yes_value <- 1
+  }
+
   febrile_cond <-
-    dhs_kr_zapped[[survey_vars$fever]] == 1 &
+    dhs_kr_zapped[[survey_vars$fever]] == fever_yes_value &
     dhs_kr_zapped[[survey_vars$age]] >= 0 &
     dhs_kr_zapped[[survey_vars$age]] <= 59
   if (has_alive_var) {

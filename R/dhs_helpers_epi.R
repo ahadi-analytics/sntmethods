@@ -79,6 +79,21 @@
     cli::cli_abort("`dhs_kr` is empty.")
   }
 
+  # Auto-detect age variable if specified one is missing
+  # Fallback order: b19 (recall-corrected) -> hc1 (standard KR) -> b8 (current age) -> hw1 (anthropometry)
+  if (!survey_vars$age %in% names(dhs_kr)) {
+    age_candidates <- c("b19", "hc1", "b8", "hw1")
+    available_age <- intersect(age_candidates, names(dhs_kr))
+
+    if (length(available_age) > 0) {
+      old_age_var <- survey_vars$age
+      survey_vars$age <- available_age[1]
+      cli::cli_alert_info(
+        "Age variable {.var {old_age_var}} not found; using {.var {survey_vars$age}} instead"
+      )
+    }
+  }
+
   # Recall bias correction: prefer b19 over hw1
   # b19 = current age computed from interview CMC - birth CMC (DHS-7+)
   # hw1 = age from health card (subject to heaping at 12/24 months)
