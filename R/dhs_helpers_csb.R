@@ -247,8 +247,15 @@
     cli::cli_abort("No h32 treatment-seeking variables found in data.")
   }
 
+  # Preserve existing .row_id if present (from upstream like .prepare_act_data)
+  # Use internal .csb_row_id for pivot logic to avoid overwriting
+  has_original_row_id <- ".row_id" %in% names(data)
+  if (has_original_row_id) {
+    data$.original_row_id <- data$.row_id
+  }
+
   data <- data |>
-    dplyr::mutate(.row_id = dplyr::row_number())
+    dplyr::mutate(.csb_row_id = dplyr::row_number())
 
   # Ensure h32 columns are numeric (guards against residual haven labels
   # or character values in older DHS surveys like BDI 2012)
@@ -258,7 +265,7 @@
 
   # Convert h32 to binary and reshape
   kr_long <- data |>
-    dplyr::select(.row_id, dplyr::all_of(h32_cols)) |>
+    dplyr::select(.csb_row_id, dplyr::all_of(h32_cols)) |>
     tidyr::pivot_longer(
       cols = dplyr::all_of(h32_cols),
       names_to = "variable",
@@ -273,7 +280,7 @@
   # Aggregate to base categories per child
   if (nrow(kr_long) > 0) {
     base_cats <- kr_long |>
-      dplyr::group_by(.row_id, csb) |>
+      dplyr::group_by(.csb_row_id, csb) |>
       dplyr::summarise(visited = 1L, .groups = "drop") |>
       tidyr::pivot_wider(
         names_from = csb,
@@ -282,7 +289,7 @@
         names_prefix = "has_"
       )
     data <- data |>
-      dplyr::left_join(base_cats, by = ".row_id")
+      dplyr::left_join(base_cats, by = ".csb_row_id")
   }
 
   # Ensure all base categories exist
@@ -295,7 +302,7 @@
   }
 
   # Create derived indicators
-  data |>
+  result <- data |>
     dplyr::mutate(
       # Composite sectors
       csb_public = as.numeric(
@@ -333,6 +340,15 @@
       csb_trained_provider = csb_trained,
       csb_no_treatment = csb_none
     )
+
+  # Restore original .row_id if it was present, remove temporary columns
+  if (has_original_row_id) {
+    result$.row_id <- result$.original_row_id
+    result$.original_row_id <- NULL
+  }
+  result$.csb_row_id <- NULL
+
+  result
 }
 
 

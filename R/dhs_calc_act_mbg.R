@@ -407,7 +407,7 @@ calc_act_mbg <- function(
 
   # ---- Special: act_tested ----
 
-  has_test_var <- survey_vars$test %in% names(dhs_kr)
+  has_test_var <- !is.null(survey_vars$test) && survey_vars$test %in% names(dhs_kr)
   if ("act_tested" %in% indicators) {
     if (!has_test_var) {
       cli::cli_alert_warning(

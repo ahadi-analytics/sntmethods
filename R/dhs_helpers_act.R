@@ -192,7 +192,7 @@
     }
   }
 
-  has_test_var <- survey_vars$test %in% names(dhs_kr)
+  has_test_var <- !is.null(survey_vars$test) && survey_vars$test %in% names(dhs_kr)
 
   # Zap labels
   kr <- dhs_kr |>
