@@ -116,6 +116,21 @@
     cli::cli_abort("`dhs_kr` is empty.")
   }
 
+  # Auto-detect age variable if specified one is missing
+  # Fallback order: hw1 (anthropometry) -> hc1 (standard KR) -> b8 (current age)
+  if (!survey_vars$age %in% names(dhs_kr)) {
+    age_candidates <- c("hc1", "b8", "hw1")
+    available_age <- intersect(age_candidates, names(dhs_kr))
+
+    if (length(available_age) > 0) {
+      old_age_var <- survey_vars$age
+      survey_vars$age <- available_age[1]
+      cli::cli_alert_info(
+        "Age variable {.var {old_age_var}} not found; using {.var {survey_vars$age}} instead"
+      )
+    }
+  }
+
   # Check required columns
   needed <- c(survey_vars$cluster, survey_vars$age, survey_vars$fever)
   if (include_survey_vars) {
