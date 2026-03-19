@@ -94,10 +94,24 @@
     )
   }
 
+  # Detect fever coding scheme: Some surveys use 0=No/1=Yes, others use 1=No/2=Yes
+  fever_values <- unique(kr_u5$fever_raw[!is.na(kr_u5$fever_raw)])
+
+  # Determine "Yes" value: if values are strictly {1, 2} or {2}, assume 2=Yes
+  # Otherwise, assume 1=Yes (standard DHS coding)
+  if (all(fever_values %in% c(1, 2)) && 2 %in% fever_values && !0 %in% fever_values) {
+    fever_yes_value <- 2
+    cli::cli_alert_info(
+      "Detected alternative fever coding (1=No, 2=Yes) - using 2 as 'Yes'"
+    )
+  } else {
+    fever_yes_value <- 1
+  }
+
   # Create binary fever indicator
   kr_u5 <- kr_u5 |>
     dplyr::mutate(
-      had_fever = dplyr::if_else(fever_raw == 1, 1, 0, missing = NA_real_)
+      had_fever = dplyr::if_else(fever_raw == fever_yes_value, 1, 0, missing = NA_real_)
     )
 
   cli::cli_alert_info(

@@ -231,21 +231,51 @@
       dplyr::mutate(child_alive = .data[[survey_vars$alive]])
   }
 
-  # Filter to febrile U5 children
-  kr_fever <- kr |>
+  # Filter to U5 children
+  kr_u5 <- kr |>
     dplyr::filter(
       age_months >= 0,
-      age_months <= 59,
-      had_fever == 1
+      age_months <= 59
     )
 
   if (has_alive) {
-    kr_fever <- kr_fever |>
+    kr_u5 <- kr_u5 |>
       dplyr::filter(child_alive == 1)
   }
 
+  # Detect fever coding scheme: Some surveys use 0=No/1=Yes, others use 1=No/2=Yes
+  fever_values <- unique(kr_u5$had_fever[!is.na(kr_u5$had_fever)])
+
+  if (length(fever_values) == 0) {
+    cli::cli_abort(
+      "Fever variable has no valid values. Check that {.var {survey_vars$fever}} exists and contains data."
+    )
+  }
+
+  # Determine "Yes" value: if values are strictly {1, 2} or {2}, assume 2=Yes
+  # Otherwise, assume 1=Yes (standard DHS coding)
+  if (all(fever_values %in% c(1, 2)) && 2 %in% fever_values && !0 %in% fever_values) {
+    fever_yes_value <- 2
+    cli::cli_alert_info(
+      "Detected alternative fever coding (1=No, 2=Yes) - using 2 as 'Yes'"
+    )
+  } else {
+    fever_yes_value <- 1
+  }
+
+  # Filter to children with fever
+  kr_fever <- kr_u5 |>
+    dplyr::filter(had_fever == fever_yes_value)
+
   if (nrow(kr_fever) == 0) {
-    cli::cli_abort("No children with fever in the last 2 weeks found.")
+    n_with_data <- sum(!is.na(kr_u5$had_fever))
+    cli::cli_abort(c(
+      "No children with fever in the last 2 weeks found.",
+      "i" = "Total U5 children: {nrow(kr_u5)}",
+      "i" = "Children with fever data: {n_with_data}",
+      "i" = "Unique fever values: {paste(sort(fever_values), collapse = ', ')}",
+      "i" = "Expected 'Yes' value: {fever_yes_value}"
+    ))
   }
 
   if (all(is.na(kr_fever$received_act))) {

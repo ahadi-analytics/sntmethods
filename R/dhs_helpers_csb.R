@@ -82,12 +82,29 @@
     dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
 
   # Build selection (force numeric to guard against haven character residuals)
+  # Diagnostic: check fever values before coercion
+  fever_raw <- kr[[survey_vars$fever]]
+  unique_fever_raw <- unique(fever_raw[!is.na(fever_raw)])
+
   kr <- kr |>
     dplyr::mutate(
       cluster_id = .data[[survey_vars$cluster]],
       age_months = suppressWarnings(as.numeric(as.character(.data[[survey_vars$age]]))),
       had_fever = suppressWarnings(as.numeric(as.character(.data[[survey_vars$fever]])))
     )
+
+  # Diagnostic: check fever values after coercion
+  unique_fever_coerced <- unique(kr$had_fever[!is.na(kr$had_fever)])
+
+  if (length(unique_fever_coerced) > 0) {
+    cli::cli_alert_info(
+      "Fever variable ({.var {survey_vars$fever}}) unique values: {paste(sort(unique_fever_coerced), collapse = ', ')}"
+    )
+  } else {
+    cli::cli_warn(
+      "Fever variable ({.var {survey_vars$fever}}) has no non-NA values after coercion. Raw values: {paste(head(unique_fever_raw, 10), collapse = ', ')}"
+    )
+  }
 
   if (include_survey_vars) {
     kr <- kr |>
@@ -107,21 +124,56 @@
       )
   }
 
-  # Filter to U5 children with fever
-  kr_fever <- kr |>
+  # Filter to U5 children
+  kr_u5 <- kr |>
     dplyr::filter(
       age_months >= 0,
-      age_months <= 59,
-      had_fever == 1
+      age_months <= 59
     )
 
   if (has_alive) {
-    kr_fever <- kr_fever |>
+    kr_u5 <- kr_u5 |>
       dplyr::filter(child_alive == 1)
   }
 
+  cli::cli_alert_info(
+    "Total children under 5 (alive): {format(nrow(kr_u5), big.mark = ',')}"
+  )
+
+  # Detect fever coding scheme: Some surveys use 0=No/1=Yes, others use 1=No/2=Yes
+  # Standardize: if unique values are {1, 2}, assume 2=Yes; otherwise assume 1=Yes
+  fever_values <- unique(kr_u5$had_fever[!is.na(kr_u5$had_fever)])
+
+  if (length(fever_values) == 0) {
+    cli::cli_abort(
+      "Fever variable has no valid values. Check that {.var {survey_vars$fever}} exists and contains data."
+    )
+  }
+
+  # Determine "Yes" value: if values are strictly {1, 2} or {2}, assume 2=Yes
+  # Otherwise, assume 1=Yes (standard DHS coding)
+  if (all(fever_values %in% c(1, 2)) && 2 %in% fever_values && !0 %in% fever_values) {
+    fever_yes_value <- 2
+    cli::cli_alert_info(
+      "Detected alternative fever coding (1=No, 2=Yes) - using 2 as 'Yes'"
+    )
+  } else {
+    fever_yes_value <- 1
+  }
+
+  # Filter to children with fever
+  kr_fever <- kr_u5 |>
+    dplyr::filter(had_fever == fever_yes_value)
+
   if (nrow(kr_fever) == 0) {
-    cli::cli_abort("No children with fever in the last 2 weeks found.")
+    n_with_data <- sum(!is.na(kr_u5$had_fever))
+    cli::cli_abort(c(
+      "No children with fever in the last 2 weeks found.",
+      "i" = "Total U5 children: {nrow(kr_u5)}",
+      "i" = "Children with fever data: {n_with_data}",
+      "i" = "Unique fever values: {paste(sort(fever_values), collapse = ', ')}",
+      "i" = "Expected 'Yes' value: {fever_yes_value}"
+    ))
   }
 
   cli::cli_alert_info(
