@@ -386,7 +386,7 @@ calc_severe_anemia_dhs_core <- function(
 #'     \item{`adm1`}{Admin-1 estimates (when `region_var` or adm1 available)}
 #'   }
 #'   Each tibble contains columns: survey_id, iso3, iso2, survey_type,
-#'   survey_year, adm0, [adm1], type, geo_source, point, ci_l, ci_u,
+#'   survey_year, adm0, adm1, type, geo_source, point, ci_l, ci_u,
 #'   numerator, denominator, indicator, indicator_code,
 #'   numerator_description, denominator_description, denominator_code.
 #'

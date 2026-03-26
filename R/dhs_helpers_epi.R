@@ -159,6 +159,12 @@
   available_vaccines <- sapply(vaccine_mapping, function(v) !is.null(v) && v %in% names(dhs_kr))
   available_vaccine_cols <- unlist(vaccine_mapping[available_vaccines])
 
+  # Check if any vaccines are available
+  if (length(available_vaccine_cols) == 0) {
+    cli::cli_warn("No vaccine variables found in KR data; EPI indicators not available for this survey")
+    return(NULL)
+  }
+
   # Select columns
   select_cols <- unique(c(
     survey_vars$cluster, survey_vars$age,

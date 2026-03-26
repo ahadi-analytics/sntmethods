@@ -52,15 +52,33 @@
     dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
     dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
 
+  # Check for interview date/CMC variable
+  interview_var <- survey_vars$interview_date %||% survey_vars$interview_cmc
+  if (!interview_var %in% names(ir)) {
+    cli::cli_warn(
+      "Interview date variable {.var {interview_var}} not found; IPTp not available for this survey"
+    )
+    return(NULL)
+  }
+
+  # Check for birth date/CMC variable
+  birth_var <- survey_vars$birth_date %||% survey_vars$birth_cmc
+  if (!birth_var %in% names(ir)) {
+    cli::cli_warn(
+      "Birth date variable {.var {birth_var}} not found; IPTp not available for this survey"
+    )
+    return(NULL)
+  }
+
   # Build core columns (force numeric to guard against haven character residuals)
   ir <- ir |>
     dplyr::mutate(
       cluster_id = .data[[survey_vars$cluster]],
       interview_cmc = suppressWarnings(as.numeric(as.character(
-        .data[[survey_vars$interview_date %||% survey_vars$interview_cmc]]
+        .data[[interview_var]]
       ))),
       birth_cmc = suppressWarnings(as.numeric(as.character(
-        .data[[survey_vars$birth_date %||% survey_vars$birth_cmc]]
+        .data[[birth_var]]
       ))),
       sp_doses = suppressWarnings(as.numeric(as.character(.data[[sp_var]])))
     )

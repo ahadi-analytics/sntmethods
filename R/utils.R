@@ -585,9 +585,20 @@ dhs_read <- function(
       # Exact survey_id provided
       target_dir <- fs::path(year_dir, paste0("survey_id=", survey_id))
     } else if (fs::dir_exists(year_dir)) {
-      # No survey_id -- auto-discover if there's exactly one survey partition
+      # No survey_id -- auto-discover survey partition
       survey_dirs <- fs::dir_ls(year_dir, type = "directory")
-      target_dir <- if (length(survey_dirs) == 1) survey_dirs[1] else NULL
+
+      # For GE files: GPS data is shared across all survey types for a given year,
+      # so we can safely read from the first available survey_id partition
+      # (e.g., TGGE8I instead of constructed TGGE20). This handles cases where
+      # GE files have irregular survey_id naming that doesn't follow the standard
+      # pattern of {country_code}GE{year_suffix}.
+      if (file_type == "GE" && length(survey_dirs) >= 1) {
+        target_dir <- survey_dirs[1]
+      } else {
+        # For other file types, only use direct read if exactly one partition exists
+        target_dir <- if (length(survey_dirs) == 1) survey_dirs[1] else NULL
+      }
     } else {
       target_dir <- NULL
     }
@@ -609,7 +620,8 @@ dhs_read <- function(
     out <- arrow::read_parquet(parquet_file)
 
     # Apply survey_type filter if needed (not a partition column)
-    if (!is.null(survey_type) && "survey_type" %in% names(out)) {
+    # Skip filter for GE files - GPS data is shared across all survey types
+    if (!is.null(survey_type) && file_type != "GE" && "survey_type" %in% names(out)) {
       survey_type_val <- as.character(survey_type)
       out <- out |> dplyr::filter(.data$survey_type %in% survey_type_val)
     }
@@ -713,7 +725,8 @@ dhs_read <- function(
   )
 
   # survey_type (NOT partitioned, so filter last)
-  if (!is.null(survey_type)) {
+  # Skip filter for GE files - GPS data is shared across all survey types
+  if (!is.null(survey_type) && file_type != "GE") {
     survey_type_val <- as.character(survey_type)
     if (length(survey_type_val) == 1) {
       ds <- ds |> dplyr::filter(survey_type == survey_type_val)

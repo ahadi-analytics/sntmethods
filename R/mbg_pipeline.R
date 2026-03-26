@@ -113,7 +113,7 @@ NULL
 #'   \itemize{
 #'     \item final_dataset: Named list with `adm0`, `adm1`, and `adm2` (or `adm3`)
 #'       tibbles in long format. Each tibble has standard columns: survey_id, iso3,
-#'       iso2, survey_type, survey_year, adm0, [adm1], [adm2], type, geo_source,
+#'       iso2, survey_type, survey_year, adm0, adm1, adm2, type, geo_source,
 #'       point, ci_l, ci_u, numerator, denominator,
 #'       survey_numerator, survey_denominator, n_survey_clusters,
 #'       indicator, indicator_code, numerator_description,
@@ -421,6 +421,22 @@ run_mbg_pipeline <- function(
 
   if (is.null(gps_check) || nrow(gps_check) == 0) {
     cli::cli_abort("No surveys with GPS data found for {country_iso2}")
+  }
+
+  # Handle missing survey_type - infer from survey_id if needed
+  if ("survey_type" %in% names(gps_check)) {
+    na_types <- is.na(gps_check$survey_type) | gps_check$survey_type == ""
+    if (any(na_types)) {
+      # Default to "DHS" for missing survey types
+      gps_check$survey_type[na_types] <- "DHS"
+      cli::cli_warn(
+        "survey_type is missing for {sum(na_types)} record(s), defaulting to {.val DHS}"
+      )
+    }
+  } else {
+    # If survey_type column doesn't exist at all, add it
+    gps_check$survey_type <- "DHS"
+    cli::cli_warn("survey_type column not found in GPS data, defaulting to {.val DHS}")
   }
 
   # Build available surveys data frame with (year, type) pairs
@@ -1907,6 +1923,18 @@ run_mbg_pipeline <- function(
   survey_year,
   survey_type = "DHS"
 ) {
+  # Validate required parameters
+  if (is.null(country_iso3) || is.na(country_iso3) || !nzchar(country_iso3)) {
+    cli::cli_abort("country_iso3 must be a non-empty string")
+  }
+  if (is.null(survey_year) || is.na(survey_year)) {
+    cli::cli_abort("survey_year must be non-NA")
+  }
+  if (is.null(survey_type) || is.na(survey_type) || !nzchar(survey_type)) {
+    survey_type <- "DHS"  # Fallback to default
+    cli::cli_warn("survey_type is NA or empty, using default: {.val DHS}")
+  }
+
   fs::dir_create(output_dir)
   saved_files <- character()
 

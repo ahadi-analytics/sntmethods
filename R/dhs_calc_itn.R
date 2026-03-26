@@ -55,12 +55,11 @@
 #'     \item{`adm2`}{Admin-2 estimates (when shapefile with adm2 used)}
 #'   }
 #'   Each tibble contains columns: survey_id, iso3, iso2, survey_type,
-#'   survey_year, adm0, [adm1], [adm2], type, geo_source, point, ci_l, ci_u,
+#'   survey_year, adm0, adm1, adm2, type, geo_source, point, ci_l, ci_u,
 #'   numerator, denominator, indicator, indicator_code,
 #'   numerator_description, denominator_description, denominator_code.
 #'
-#' @seealso [itn_dictionary()] for indicator definitions,
-#'   [calc_itn_dhs_core()] for the legacy wide-format output
+#' @seealso [itn_dictionary()] for indicator definitions
 #' @export
 calc_itn_dhs <- function(
   dhs_hr,

@@ -73,7 +73,8 @@
     }
   }
   if (length(available_h32) == 0) {
-    cli::cli_abort("No h32 treatment-seeking variables found in data.")
+    cli::cli_warn("No h32 treatment-seeking variables found in data.")
+    return(NULL)
   }
 
   # Warn if any detected h32 variables are not in the classification table

@@ -109,10 +109,10 @@ save_mbg_cluster_data <- function(
 
     # Build filename
     name_parts <- c(file_prefix, indicator_name)
-    if (!is.null(country_iso3)) {
+    if (!is.null(country_iso3) && !is.na(country_iso3)) {
       name_parts <- c(country_iso3, name_parts)
     }
-    if (!is.null(survey_year)) {
+    if (!is.null(survey_year) && !is.na(survey_year)) {
       name_parts <- c(name_parts, survey_year)
     }
 
@@ -432,6 +432,17 @@ save_mbg_rasters <- function(
   country_iso3,
   format = "tif"
 ) {
+  # Validate required parameters
+  if (is.null(country_iso3) || is.na(country_iso3) || !nzchar(country_iso3)) {
+    cli::cli_abort("country_iso3 must be a non-empty string")
+  }
+  if (is.null(indicator_name) || is.na(indicator_name) || !nzchar(indicator_name)) {
+    cli::cli_abort("indicator_name must be a non-empty string")
+  }
+  if (is.null(survey_year) || is.na(survey_year)) {
+    cli::cli_abort("survey_year must be non-NA")
+  }
+
   # Check for required spatial packages
   .check_spatial_pkg("terra", "save_mbg_rasters")
   .check_spatial_pkg("fs", "save_mbg_rasters")

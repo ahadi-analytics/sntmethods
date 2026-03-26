@@ -156,7 +156,7 @@ A list containing:
 \itemize{
 \item final_dataset: Named list with \code{adm0}, \code{adm1}, and \code{adm2} (or \code{adm3})
 tibbles in long format. Each tibble has standard columns: survey_id, iso3,
-iso2, survey_type, survey_year, adm0, \link{adm1}, \link{adm2}, type, geo_source,
+iso2, survey_type, survey_year, adm0, adm1, adm2, type, geo_source,
 point, ci_l, ci_u, numerator, denominator,
 survey_numerator, survey_denominator, n_survey_clusters,
 indicator, indicator_code, numerator_description,
