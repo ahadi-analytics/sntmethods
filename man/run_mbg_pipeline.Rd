@@ -127,6 +127,7 @@ key indicators. Default: NULL (no minimum).}
 \item "smc": SMC receipt
 \item "fever": Fever prevalence (U5)
 \item "antimalarial": Any antimalarial treatment (febrile U5)
+\item "wealth": Wealth quintile distribution (proportion in poorest/richest)
 \item "eff_cm": Effective coverage of case management (derived;
 auto-adds "csb" and "act" as dependencies)
 }}

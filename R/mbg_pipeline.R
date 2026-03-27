@@ -92,6 +92,7 @@ NULL
 #'     \item "smc": SMC receipt
 #'     \item "fever": Fever prevalence (U5)
 #'     \item "antimalarial": Any antimalarial treatment (febrile U5)
+#'     \item "wealth": Wealth quintile distribution (proportion in poorest/richest)
 #'     \item "eff_cm": Effective coverage of case management (derived;
 #'       auto-adds "csb" and "act" as dependencies)
 #'   }
@@ -1195,6 +1196,7 @@ run_mbg_pipeline <- function(
     smc = 1L,
     fever = 1L,
     antimalarial = 2L,
+    wealth = 2L,  # Default: prop_poorest and prop_richest
     # Individual pfpr indicators fall through to full pfpr calc
     pfpr_rdt = , pfpr_mic = , pfpr_rdt_u5 = , pfpr_mic_u5 = 4L,
     # Individual ITN indicators process only themselves
@@ -1244,6 +1246,10 @@ run_mbg_pipeline <- function(
     irs_coverage = 1L,
     smc_coverage = 1L,
     antimalarial_public = 2L,
+    # Individual wealth indicators
+    prop_poorest = , prop_q1 = , prop_poorer = , prop_q2 = ,
+    prop_middle = , prop_q3 = , prop_richer = , prop_q4 = ,
+    prop_richest = , prop_q5 = 1L,
     # Default fallback
     1L
   )
@@ -1665,6 +1671,25 @@ run_mbg_pipeline <- function(
           dhs_kr = survey_data$KR,
           gps_data = gps_data,
           indicators = c("antimalarial", "antimalarial_public")
+        )
+      }, error = function(e) {
+        results$skipped <<- glue::glue("Calculation error: {e$message}")
+        list()
+      })
+    },
+
+    prop_poorest = , prop_q1 = , prop_poorer = , prop_q2 = ,
+    prop_middle = , prop_q3 = , prop_richer = , prop_q4 = ,
+    prop_richest = , prop_q5 = ,
+    wealth = {
+      if (!"HR" %in% names(survey_data)) {
+        return(skip_indicator("Missing HR data (Household Recode)"))
+      }
+      tryCatch({
+        calc_wealth_mbg(
+          dhs_hr = survey_data$HR,
+          gps_data = gps_data,
+          indicators = c("prop_poorest", "prop_richest")
         )
       }, error = function(e) {
         results$skipped <<- glue::glue("Calculation error: {e$message}")

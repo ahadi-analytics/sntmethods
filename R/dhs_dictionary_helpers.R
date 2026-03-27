@@ -196,6 +196,17 @@
     anemia_mild_only   = list(recode = "PR", category = "Nutrition",    cascade = na_int, age = "6-59 months",  pop_type = "u5"),
     anemia_moderate_only = list(recode = "PR", category = "Nutrition",  cascade = na_int, age = "6-59 months",  pop_type = "u5"),
     anemia_severe_only = list(recode = "PR", category = "Nutrition",    cascade = na_int, age = "6-59 months",  pop_type = "u5"),
+    # Wealth -- HR module
+    prop_poorest       = list(recode = "HR", category = "Wealth",       cascade = na_int, age = "all ages",     pop_type = "all"),
+    prop_q1            = list(recode = "HR", category = "Wealth",       cascade = na_int, age = "all ages",     pop_type = "all"),
+    prop_poorer        = list(recode = "HR", category = "Wealth",       cascade = na_int, age = "all ages",     pop_type = "all"),
+    prop_q2            = list(recode = "HR", category = "Wealth",       cascade = na_int, age = "all ages",     pop_type = "all"),
+    prop_middle        = list(recode = "HR", category = "Wealth",       cascade = na_int, age = "all ages",     pop_type = "all"),
+    prop_q3            = list(recode = "HR", category = "Wealth",       cascade = na_int, age = "all ages",     pop_type = "all"),
+    prop_richer        = list(recode = "HR", category = "Wealth",       cascade = na_int, age = "all ages",     pop_type = "all"),
+    prop_q4            = list(recode = "HR", category = "Wealth",       cascade = na_int, age = "all ages",     pop_type = "all"),
+    prop_richest       = list(recode = "HR", category = "Wealth",       cascade = na_int, age = "all ages",     pop_type = "all"),
+    prop_q5            = list(recode = "HR", category = "Wealth",       cascade = na_int, age = "all ages",     pop_type = "all"),
     # ANC -- IR module
     anc_1plus         = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49", pop_type = "wra"),
     anc_2plus         = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49", pop_type = "wra"),
@@ -443,7 +454,7 @@
   # Category-level dispatch keys (run all sub-indicators for that family)
   categories <- c(
     "pfpr", "itn", "irs", "anc", "csb", "act", "anemia", "iptp", "epi",
-    "u5mr", "smc", "fever", "antimalarial",
+    "u5mr", "smc", "fever", "antimalarial", "wealth",
     # Derived (auto-expands to dependencies)
     "eff_cm"
   )
@@ -506,6 +517,10 @@
     "irs_coverage",
     # SMC (KR module)
     "smc_coverage",
+    # Wealth (HR module)
+    "prop_poorest", "prop_q1", "prop_poorer", "prop_q2",
+    "prop_middle", "prop_q3", "prop_richer", "prop_q4",
+    "prop_richest", "prop_q5",
     # Derived
     "eff_cm_any", "eff_cm_public"
   )
