@@ -626,8 +626,9 @@ dhs_read <- function(
       out <- out |> dplyr::filter(.data$survey_type %in% survey_type_val)
     }
 
+    # Only remove completely empty rows (not columns - preserves hml10_* etc)
     suppressWarnings(
-      out <- janitor::remove_empty(out, which = c("rows", "cols"))
+      out <- janitor::remove_empty(out, which = "rows")
     )
 
     n <- nrow(out)
