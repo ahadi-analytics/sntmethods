@@ -1210,6 +1210,8 @@ run_mbg_pipeline <- function(
     csb_private = , csb_priv_formal = , csb_pharmacy = ,
     csb_priv_informal = , csb_priv_form_pha = ,
     csb_trained = , csb_none = 11L,
+    # Individual wealth-stratified CSB -> single quintile
+    csb_q1 = , csb_q2 = , csb_q3 = , csb_q4 = , csb_q5 = 1L,
     # Individual ACT -> full ACT calc
     act_care_seek = , act_am = , act_any_tx_am = ,
     act_trained_am = , act_pub_am = , act_pub_nochw_am = ,
@@ -1470,6 +1472,25 @@ run_mbg_pipeline <- function(
             "priv_informal", "priv_form_pha",
             "trained", "none"
           )
+        )
+      }, error = function(e) {
+        results$skipped <<- glue::glue("Calculation error: {e$message}")
+        list()
+      })
+    },
+
+    csb_q1 = , csb_q2 = , csb_q3 = , csb_q4 = , csb_q5 = {
+      if (!"KR" %in% names(survey_data)) {
+        return(skip_indicator("Missing KR data (Children Recode)"))
+      }
+      tryCatch({
+        # Extract quintile number from indicator name (e.g., "csb_q1" -> 1)
+        quintile_num <- as.integer(sub(".*q([1-5])$", "\\1", category))
+        calc_csb_by_wealth_mbg(
+          dhs_kr = survey_data$KR,
+          gps_data = gps_data,
+          indicators = "any",
+          quintiles = quintile_num
         )
       }, error = function(e) {
         results$skipped <<- glue::glue("Calculation error: {e$message}")

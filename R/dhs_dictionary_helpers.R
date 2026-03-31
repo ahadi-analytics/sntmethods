@@ -130,6 +130,12 @@
     csb_priv_informal = list(recode = "KR", category = "Malaria",       cascade = 1L, age = "0-59 months",  pop_type = "u5"),
     csb_priv_form_pha = list(recode = "KR", category = "Malaria",       cascade = 1L, age = "0-59 months",  pop_type = "u5"),
     csb_pub_nochw     = list(recode = "KR", category = "Malaria",       cascade = 1L, age = "0-59 months",  pop_type = "u5"),
+    # Wealth-stratified CSB -- KR module
+    csb_q1            = list(recode = "KR", category = "Malaria",       cascade = 1L, age = "0-59 months",  pop_type = "u5"),
+    csb_q2            = list(recode = "KR", category = "Malaria",       cascade = 1L, age = "0-59 months",  pop_type = "u5"),
+    csb_q3            = list(recode = "KR", category = "Malaria",       cascade = 1L, age = "0-59 months",  pop_type = "u5"),
+    csb_q4            = list(recode = "KR", category = "Malaria",       cascade = 1L, age = "0-59 months",  pop_type = "u5"),
+    csb_q5            = list(recode = "KR", category = "Malaria",       cascade = 1L, age = "0-59 months",  pop_type = "u5"),
     malaria_dx        = list(recode = "KR", category = "Malaria",       cascade = 2L, age = "0-59 months",  pop_type = "u5"),
     antimalarial      = list(recode = "KR", category = "Malaria",       cascade = 3L, age = "0-59 months",  pop_type = "u5"),
     antimalarial_public = list(recode = "KR", category = "Malaria",     cascade = 3L, age = "0-59 months",  pop_type = "u5"),
@@ -475,6 +481,8 @@
     "csb_private", "csb_priv_formal", "csb_pharmacy",
     "csb_priv_informal", "csb_priv_form_pha",
     "csb_trained", "csb_none",
+    # Wealth-stratified CSB (KR module)
+    "csb_q1", "csb_q2", "csb_q3", "csb_q4", "csb_q5",
     # Antimalarial (KR module)
     "antimalarial", "antimalarial_public",
     # ACT (KR module) -- from .act_mbg_dictionary()
