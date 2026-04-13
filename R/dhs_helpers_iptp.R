@@ -1,14 +1,75 @@
+#' Detect DHS File Type and Adjust Variable Mapping
+#'
+#' Detects whether the dataset is IR (Individual Recode) or KR (Children's Recode)
+#' format and adjusts variable names accordingly.
+#'
+#' @param dhs_data DHS dataset (IR or KR format).
+#' @param survey_vars Named list mapping DHS variable names.
+#'
+#' @return Updated survey_vars list with correct variable names for the detected format.
+#'
+#' @noRd
+.detect_file_type_and_adjust_vars <- function(dhs_data, survey_vars) {
+  # Try to detect file type based on variable patterns
+  has_birth_suffix <- any(grepl("_01$|_1$", names(dhs_data)))
+  has_kr_vars <- "b8" %in% names(dhs_data)  # b8 is specific to KR
+
+  # Check if IPTp variables exist in different formats
+  has_ml1_1 <- !is.null(survey_vars$sp_doses) && survey_vars$sp_doses %in% names(dhs_data)
+  has_ml1 <- "ml1" %in% names(dhs_data)
+  has_m49a_1 <- !is.null(survey_vars$sp_taken) && survey_vars$sp_taken %in% names(dhs_data)
+  has_m49a <- "m49a" %in% names(dhs_data)
+
+  # Determine file type
+  if (has_kr_vars || (!has_birth_suffix && (has_ml1 || has_m49a))) {
+    # KR format detected
+    cli::cli_alert_info("Detected KR (Children's Recode) format - adjusting variable names")
+
+    # Map KR variables (without suffixes) to expected names
+    if (!has_ml1_1 && has_ml1) {
+      survey_vars$sp_doses <- "ml1"
+    }
+    if (!has_m49a_1 && has_m49a) {
+      survey_vars$sp_taken <- "m49a"
+    }
+
+    # KR uses different variable names for birth date
+    birth_var <- survey_vars$birth_date %||% survey_vars$birth_cmc
+    if (is.null(birth_var) || !birth_var %in% names(dhs_data)) {
+      if ("b3" %in% names(dhs_data)) {
+        survey_vars$birth_date <- "b3"
+        survey_vars$birth_cmc <- "b3"
+      }
+    }
+
+    # KR uses v008 for interview date (same as IR)
+    interview_var <- survey_vars$interview_date %||% survey_vars$interview_cmc
+    if (is.null(interview_var) || !interview_var %in% names(dhs_data)) {
+      if ("v008" %in% names(dhs_data)) {
+        survey_vars$interview_date <- "v008"
+        survey_vars$interview_cmc <- "v008"
+      }
+    }
+  } else {
+    # IR format (default)
+    cli::cli_alert_info("Detected IR (Individual Recode) format")
+  }
+
+  survey_vars
+}
+
 #' Prepare IPTp Data for Analysis
 #'
 #' Shared data cleaning and indicator computation for IPTp functions.
 #' Used by both calc_iptp_dhs_core() and calc_iptp_mbg().
+#' Supports both IR (Individual Recode) and KR (Children's Recode) formats.
 #'
-#' @param dhs_ir DHS Individual Recode dataset.
+#' @param dhs_ir DHS Individual Recode or Children's Recode dataset.
 #' @param survey_vars Named list mapping DHS variable names.
 #' @param birth_window_months Months to look back for births.
 #' @param include_survey_vars Logical. If TRUE, includes survey design columns.
 #'
-#' @return A data frame of eligible women with columns:
+#' @return A data frame of eligible women/births with columns:
 #'   cluster_id, sp_doses, and binary indicators:
 #'   has_1plus, has_2plus, has_3plus, has_1only, has_2only, has_3only.
 #'   If include_survey_vars = TRUE, also: survey_weight, stratum_id.
@@ -27,8 +88,10 @@
     cli::cli_abort("`dhs_ir` is empty.")
   }
 
+  # Detect file type and adjust variable names
+  survey_vars <- .detect_file_type_and_adjust_vars(dhs_ir, survey_vars)
 
-  # Check SP variable -- prefer dose count (ml1_1) over binary (m49a_1)
+  # Check SP variable -- prefer dose count (ml1_1 or ml1) over binary (m49a_1 or m49a)
   sp_var <- survey_vars$sp_doses %||% survey_vars$sp_taken
   if (!sp_var %in% names(dhs_ir)) {
     # Fallback: try sp_taken if sp_doses column missing

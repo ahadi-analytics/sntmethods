@@ -4,10 +4,13 @@
 #' data for MBG analysis. Calculates both cumulative (1+, 2+, 3+) and
 #' exclusive (exactly 1, exactly 2, exactly 3) dose categories.
 #'
+#' Supports both IR (Individual Recode) and KR (Children's Recode) formats.
+#' The function automatically detects the file type and adjusts variable names.
+#'
 #' @details
 #' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/iptp_dhs.yml}
 #'
-#' @param dhs_ir DHS Individual Recode dataset.
+#' @param dhs_ir DHS Individual Recode (IR) or Children's Recode (KR) dataset.
 #' @param gps_data DHS GPS dataset with cluster coordinates.
 #' @param indicators Character vector of indicators to calculate:
 #'   \itemize{
