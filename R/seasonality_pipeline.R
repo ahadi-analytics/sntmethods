@@ -72,6 +72,10 @@
 #'   \code{"adm1"}.
 #' @param adm2_var Character. Column name for admin level 2. Default:
 #'   \code{"adm2"}.
+#' @param adm3_var Character or \code{NULL}. Column name for admin level 3.
+#'   When supplied, adm3 is carried through the block analysis outputs
+#'   (summary, detailed, and frequency tables). Requires the column to exist
+#'   in the source rainfall/DHIS2 file. Default: \code{NULL}.
 #' @param year_var Character. Column name for year. Default: \code{"year"}.
 #' @param month_var Character. Column name for month (1-12). Default:
 #'   \code{"month"}.
@@ -128,8 +132,10 @@
 #'   (uses \code{s_year} if supplied, otherwise all data).
 #' @param case_rain_e_date Character or \code{NULL}. End date filter for
 #'   case_rain_plots. Default: \code{NULL}.
-#' @param panels_per_row Integer. Number of district panels per row in the
-#'   cases vs rainfall faceted plots. Default: \code{3}.
+#' @param panels_per_row Integer. Default number of district panels per row in
+#'   the cases vs rainfall faceted plots. Automatically scaled up for regions
+#'   with many districts (≥9 → 4, ≥15 → 5, ≥30 → 6) so no plot exceeds
+#'   ~30 inches wide. Default: \code{3}.
 #' @param output_dir Character. Root output folder. Only used for Option C
 #'   (direct paths — no sntutils). Default: \code{here::here("outputs")}.
 #' @param dpi Numeric. Resolution for all saved plots. Default: \code{400}.
@@ -195,6 +201,7 @@ run_seasonality_pipeline <- function(
     # ── column name overrides ─────────────────────────────────────────────────
     adm1_var           = "adm1",
     adm2_var           = "adm2",
+    adm3_var           = NULL,
     year_var           = "year",
     month_var          = "month",
     value_var_rainfall = NULL,
@@ -410,6 +417,7 @@ run_seasonality_pipeline <- function(
         e_year    = e_year,
         adm1_var  = adm1_var,
         adm2_var  = adm2_var,
+        adm3_var  = adm3_var,
         year_var  = year_var,
         month_var = month_var,
         value_var = if (.x == "rainfall") value_var_rainfall else value_var_cases,
@@ -649,7 +657,7 @@ run_seasonality_pipeline <- function(
 #' @keywords internal
 .run_block_step <- function(
     dirs, iso3, type, s_year, e_year,
-    adm1_var, adm2_var, year_var, month_var, value_var,
+    adm1_var, adm2_var, adm3_var = NULL, year_var, month_var, value_var,
     case_stratification,
     tbl_root
 ) {
@@ -664,10 +672,47 @@ run_seasonality_pipeline <- function(
     .filter_years(s_year, e_year) |>
     dplyr::mutate(district = paste(adm1, adm2, sep = " - "))
 
+  # Optionally attach adm3 if the source file contains it
+  adm3_lookup <- NULL
+  if (!is.null(adm3_var)) {
+    cfg_type <- switch(type,
+      rainfall = list(folder = dirs$climate,
+                      filename = glue::glue("{iso3}_rainfall_processed")),
+      cases    = list(folder = dirs$dhis2,
+                      filename = glue::glue("{iso3}_dhis2_processed"))
+    )
+    raw <- sntutils::read_snt_data(cfg_type$folder, cfg_type$filename, "xlsx")
+    if (adm3_var %in% names(raw) && adm1_var %in% names(raw) && adm2_var %in% names(raw)) {
+      adm3_lookup <- raw |>
+        dplyr::select(dplyr::all_of(c(adm1_var, adm2_var, adm3_var))) |>
+        dplyr::rename(adm1 = !!adm1_var, adm2 = !!adm2_var, adm3 = !!adm3_var) |>
+        dplyr::distinct() |>
+        dplyr::mutate(district = paste(adm1, adm2, sep = " - "))
+    } else {
+      cli::cli_warn(c(
+        "{.arg adm3_var} ({.val {adm3_var}}) not found in {.val {type}} source data.",
+        "i" = "Proceeding without adm3."
+      ))
+    }
+  }
+
   windows       <- .calculate_rolling_windows(df)
   summary_tbl   <- windows$summary
   detailed_tbl  <- windows$detailed
   frequency_tbl <- .build_block_frequency(summary_tbl, detailed_tbl)
+
+  # Join adm3 into all three tables when available
+  if (!is.null(adm3_lookup)) {
+    adm_cols <- c("adm1", "adm2", "adm3")
+    summary_tbl   <- summary_tbl   |> dplyr::left_join(adm3_lookup, by = "district") |>
+      dplyr::select(district, adm1, adm2, adm3, dplyr::everything())
+    detailed_tbl  <- detailed_tbl  |> dplyr::left_join(adm3_lookup, by = "district") |>
+      dplyr::select(district, adm1, adm2, adm3, years, dplyr::everything())
+    frequency_tbl <- frequency_tbl |> dplyr::left_join(
+      adm3_lookup |> dplyr::select(district, adm3), by = "district"
+    ) |>
+      dplyr::select(district, adm1, adm2, adm3, dplyr::everything())
+  }
 
   # ── save tables ─────────────────────────────────────────────────────────────
   # Block tables → type-specific subfolder (val_tbl/rainfall/ or val_tbl/cases_{strat}_block/)
@@ -1215,8 +1260,9 @@ run_seasonality_pipeline <- function(
     ggplot2::coord_sf(datum = NA) +
     ggplot2::labs(
       title    = glue::glue(
-        "Minimum months required to \ncover ~60% of {type_label_min}"
-      )
+        "Minimum months to cover ~60% of {type_label_min}"
+      ),
+      subtitle = "Minimum SMC cycles required per district"
     ) +
     smc_theme
 
@@ -1478,18 +1524,28 @@ run_seasonality_pipeline <- function(
   adm1_regions <- sort(unique(df_median$adm1))
 
   median_plots <- purrr::map(purrr::set_names(adm1_regions), function(region) {
-    p      <- .build_median_adm1_plot(df_median, region, panels_per_row)
     n_adm2 <- dplyr::n_distinct(df_median$adm2[df_median$adm1 == region])
-    n_rows <- ceiling(n_adm2 / panels_per_row)
+
+    # Adapt panels_per_row to district count so no region exceeds ~30 inches wide
+    ppr <- dplyr::case_when(
+      n_adm2 >= 30 ~ 6L,
+      n_adm2 >= 15 ~ 5L,
+      n_adm2 >= 9  ~ 4L,
+      TRUE         ~ as.integer(panels_per_row)
+    )
+
+    p      <- .build_median_adm1_plot(df_median, region, ppr)
+    n_rows <- ceiling(n_adm2 / ppr)
 
     ggplot2::ggsave(
       filename = glue::glue("Cases_v_rainfall_median_{region}.png"),
       plot     = p,
       path     = median_dir,
-      width    = max(12, n_adm2 * 5),
+      width    = ppr * 5,
       height   = 3.5 * n_rows + 1.5,
       dpi      = dpi,
-      bg       = "white"
+      bg       = "white",
+      limitsize = FALSE
     )
 
     cli::cli_alert_success("Median plot saved: {.val {region}}")
@@ -1499,18 +1555,27 @@ run_seasonality_pipeline <- function(
   adm1_crude <- sort(unique(combined_crude$adm1))
 
   crude_plots <- purrr::map(purrr::set_names(adm1_crude), function(region) {
-    p      <- .build_crude_adm1_plot(combined_crude, region, panels_per_row)
     n_adm2 <- dplyr::n_distinct(combined_crude$adm2[combined_crude$adm1 == region])
-    n_rows <- ceiling(n_adm2 / panels_per_row)
+
+    ppr <- dplyr::case_when(
+      n_adm2 >= 30 ~ 6L,
+      n_adm2 >= 15 ~ 5L,
+      n_adm2 >= 9  ~ 4L,
+      TRUE         ~ as.integer(panels_per_row)
+    )
+
+    p      <- .build_crude_adm1_plot(combined_crude, region, ppr)
+    n_rows <- ceiling(n_adm2 / ppr)
 
     ggplot2::ggsave(
       filename = glue::glue("Cases_v_rainfall_crude_{region}.png"),
       plot     = p,
       path     = crude_dir,
-      width    = 15,
+      width    = ppr * 5,
       height   = 3.5 * n_rows + 1.5,
       dpi      = dpi,
-      bg       = "white"
+      bg       = "white",
+      limitsize = FALSE
     )
 
     cli::cli_alert_success("Crude plot saved: {.val {region}}")
@@ -2331,23 +2396,28 @@ run_seasonality_pipeline <- function(
       if (total == 0) next
 
       lkp <- stats::setNames(d[[value_col]], as.character(d$month))
+      b2  <- make_blocks(lkp, 4:10, 2)
       b3  <- make_blocks(lkp, 4:9, 3)
       b4  <- make_blocks(lkp, 4:9, 4)
       b5  <- make_blocks(lkp, 4:8, 5)
 
+      v2  <- purrr::map_dbl(b2, "val")
       v3  <- purrr::map_dbl(b3, "val")
       v4  <- purrr::map_dbl(b4, "val")
       v5  <- purrr::map_dbl(b5, "val")
+      n2  <- purrr::map_chr(b2, "name")
       n3  <- purrr::map_chr(b3, "name")
       n4  <- purrr::map_chr(b4, "name")
       n5  <- purrr::map_chr(b5, "name")
 
       summary <- rbind(summary, data.frame(
         year         = yr, district = dist, total = total,
-        max_3m       = max(v3), max_4m = max(v4), max_5m = max(v5),
+        max_2m       = max(v2), max_3m = max(v3), max_4m = max(v4), max_5m = max(v5),
+        pct_2m       = max(v2)/total*100,
         pct_3m       = max(v3)/total*100,
         pct_4m       = max(v4)/total*100,
         pct_5m       = max(v5)/total*100,
+        max_2m_block = n2[which.max(v2)],
         max_3m_block = n3[which.max(v3)],
         max_4m_block = n4[which.max(v4)],
         max_5m_block = n5[which.max(v5)],
@@ -2355,10 +2425,12 @@ run_seasonality_pipeline <- function(
       ))
 
       det_row <- data.frame(district = dist, years = yr, stringsAsFactors = FALSE)
-      for (x in c(b3, b4, b5)) det_row[[x$name]] <- x$val / total * 100
+      for (x in c(b2, b3, b4, b5)) det_row[[x$name]] <- x$val / total * 100
+      det_row$max_2m       <- max(v2)/total*100
       det_row$max_3m       <- max(v3)/total*100
       det_row$max_4m       <- max(v4)/total*100
       det_row$max_5m       <- max(v5)/total*100
+      det_row$max_2m_block <- n2[which.max(v2)]
       det_row$max_3m_block <- n3[which.max(v3)]
       det_row$max_4m_block <- n4[which.max(v4)]
       det_row$max_5m_block <- n5[which.max(v5)]
@@ -2383,7 +2455,7 @@ run_seasonality_pipeline <- function(
     sm          <- summary_tbl  |> dplyr::filter(district == dist)
     total_years <- length(unique(det$years))
 
-    for (dur in c(3L, 4L, 5L)) {
+    for (dur in c(2L, 3L, 4L, 5L)) {
       blk_col <- paste0("max_", dur, "m_block")
       pct_col <- paste0("pct_",  dur, "m")
 
