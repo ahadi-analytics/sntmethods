@@ -356,7 +356,7 @@ calc_act_dhs <- function(
   csb_class <- .detect_csb_from_labels(label_source)
 
   kr_fever_csb <- tryCatch(
-    .classify_csb_from_h32(kr_fever, csb_classification = csb_class),
+    .classify_csb_from_h32(kr_fever, classification = csb_class),
     error = function(e) {
       cli::cli_alert_warning("CSB classification failed: {e$message}")
       NULL

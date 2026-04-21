@@ -6,8 +6,6 @@
 #' @param dhs_kr DHS Children's Recode (KR) dataset.
 #' @param survey_vars Named list mapping DHS variable names. Must include:
 #'   cluster, age, fever. Optionally: weight, stratum.
-#' @param csb_classification Data frame with variable and csb columns.
-#'   If NULL, uses default classification.
 #' @param include_survey_vars Logical. If TRUE, includes survey_weight and
 #'   stratum_id columns for DHS survey design. If FALSE, omits them (for MBG).
 #' @param csb_priority_method Character, one of "all" (default), "first",
@@ -36,7 +34,6 @@
 .prepare_csb_data <- function(
   dhs_kr,
   survey_vars,
-  csb_classification = NULL,
   include_survey_vars = FALSE,
   csb_priority_method = c("all", "first", "public", "private")
 ) {
@@ -80,14 +77,12 @@
   # Auto-detect h32 variables (before label zapping)
   available_h32 <- grep("^h32[a-z0-9]+$", names(dhs_kr), value = TRUE)
 
-  # Default classification: detect from haven labels first, then fall back
-  # to hardcoded mapping. Label detection correctly classifies CHW and
-  # pharmacy slots across DHS-7 and DHS-8 survey versions.
-  if (is.null(csb_classification)) {
-    csb_classification <- .detect_csb_from_labels(dhs_kr)
-    if (nrow(csb_classification) == 0) {
-      csb_classification <- .default_csb_classification()
-    }
+  # Classification: detect from haven labels first, fall back to the
+  # hardcoded default mapping. Label detection correctly classifies CHW
+  # and pharmacy slots across DHS-7 and DHS-8 survey versions.
+  classification <- .detect_csb_from_labels(dhs_kr)
+  if (nrow(classification) == 0) {
+    classification <- .default_csb_classification()
   }
   if (length(available_h32) == 0) {
     cli::cli_warn("No h32 treatment-seeking variables found in data.")
@@ -95,19 +90,19 @@
   }
 
   # Warn if any detected h32 variables are not in the classification table
-  expected_h32 <- csb_classification$variable
+  expected_h32 <- classification$variable
   unexpected_h32 <- setdiff(available_h32, expected_h32)
   if (length(unexpected_h32) > 0) {
     cli::cli_warn(
-      "Detected h32 variables not in standard classification: {paste(unexpected_h32, collapse = ', ')}. These may be country-specific non-standard slots. Check that the default classification is appropriate or supply a custom csb_classification."
+      "Detected h32 variables not in standard classification: {paste(unexpected_h32, collapse = ', ')}. These may be country-specific non-standard slots."
     )
   }
 
   # Filter classification to available variables
-  csb_classification <- csb_classification |>
+  classification <- classification |>
     dplyr::filter(variable %in% available_h32)
 
-  h32_cols <- intersect(csb_classification$variable, names(dhs_kr))
+  h32_cols <- intersect(classification$variable, names(dhs_kr))
 
   # Zap labels and build base dataset
   kr <- dhs_kr |>
@@ -217,7 +212,7 @@
   kr_fever <- .classify_csb_from_h32(
     kr_fever,
     h32_cols,
-    csb_classification,
+    classification = classification,
     csb_priority_method = csb_priority_method
   )
 
@@ -239,8 +234,9 @@
 #'   target population, e.g. febrile U5).
 #' @param h32_cols Character vector of h32 column names present in data.
 #'   If NULL, auto-detects from column names.
-#' @param csb_classification Data frame with variable and csb columns.
-#'   If NULL, uses default classification.
+#' @param classification Data frame with variable and csb columns mapping
+#'   h32 slots to sector labels. If NULL, uses the package default
+#'   (see \code{.default_csb_classification()}).
 #' @param csb_priority_method Character, one of "all" (default), "first",
 #'   "public", or "private". Controls overlap handling. See
 #'   \code{.prepare_csb_data()} for details. With non-"all" values, each
@@ -254,14 +250,14 @@
 #'
 #' @noRd
 .classify_csb_from_h32 <- function(data, h32_cols = NULL,
-                                    csb_classification = NULL,
+                                    classification = NULL,
                                     csb_priority_method = c("all", "first",
                                                              "public",
                                                              "private")) {
   csb_priority_method <- match.arg(csb_priority_method)
   # Default classification
-  if (is.null(csb_classification)) {
-    csb_classification <- .default_csb_classification()
+  if (is.null(classification)) {
+    classification <- .default_csb_classification()
   }
 
   # Auto-detect h32 columns if not provided
@@ -270,9 +266,9 @@
     if (length(available_h32) == 0) {
       cli::cli_abort("No h32 treatment-seeking variables found in data.")
     }
-    csb_classification <- csb_classification |>
+    classification <- classification |>
       dplyr::filter(variable %in% available_h32)
-    h32_cols <- intersect(csb_classification$variable, names(data))
+    h32_cols <- intersect(classification$variable, names(data))
   }
 
   if (length(h32_cols) == 0) {
@@ -304,7 +300,7 @@
       values_to = "visited"
     ) |>
     dplyr::left_join(
-      csb_classification |> dplyr::select(variable, csb),
+      classification |> dplyr::select(variable, csb),
       by = "variable"
     ) |>
     dplyr::filter(!is.na(visited) & visited == 1)
@@ -314,10 +310,9 @@
   # sector assignment mutually exclusive so csb_public + csb_private +
   # csb_none sums to exactly 100% at the cluster level.
   #
-  # We sort alphabetically (rather than using csb_classification order) so
-  # behavior is deterministic regardless of how users supply
-  # csb_classification. The default classification groups h32 slots by
-  # sector, which would otherwise change the meaning of "first".
+  # We sort alphabetically (rather than using the classification order) so
+  # behavior is deterministic. The default classification groups h32 slots
+  # by sector, which would otherwise change the meaning of "first".
   if (csb_priority_method == "first" && nrow(kr_long) > 0) {
     h32_sorted <- sort(h32_cols)
     h32_order <- data.frame(

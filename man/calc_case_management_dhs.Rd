@@ -8,7 +8,6 @@ calc_case_management_dhs(
   dhs_kr,
   survey_vars = list(cluster = "v021", weight = "v005", stratum = "v022", age = "hw1",
     fever = "h22", alive = "b5", act = "ml13e"),
-  csb_classification = NULL,
   region_var = NULL
 )
 }
@@ -25,10 +24,6 @@ calc_case_management_dhs(
 \item \code{alive}: Child survival status (default: "b5")
 \item \code{act}: Received ACT treatment (default: "ml13e")
 }}
-
-\item{csb_classification}{Data frame specifying h32 variable to CSB category
-mapping (passed to \code{.prepare_csb_data()}). Must have columns
-\code{variable} and \code{csb}. If NULL, uses default classification.}
 
 \item{region_var}{Optional column name in \code{dhs_kr} to use as grouping
 variable (e.g., "v024" for region).}

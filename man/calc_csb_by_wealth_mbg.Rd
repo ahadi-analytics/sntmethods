@@ -10,7 +10,6 @@ calc_csb_by_wealth_mbg(
   indicators = c("any", "public", "private", "none"),
   quintiles = 1:5,
   wealth_var = "v190",
-  csb_classification = NULL,
   csb_priority_method = c("all", "first", "public", "private"),
   survey_vars = list(cluster = "v001", age = "hw1", fever = "h22"),
   gps_vars = list(cluster = "DHSCLUST", lat = "LATNUM", lon = "LONGNUM")
@@ -41,9 +40,6 @@ Default: c("any", "public", "private", "none").}
 (all quintiles). Use c(1) for poorest only, c(1,2) for poorest + poorer, etc.}
 
 \item{wealth_var}{Name of wealth quintile variable in dhs_kr. Default: "v190".}
-
-\item{csb_classification}{Data frame with h32 variable to category mapping.
-Must have columns \code{variable} and \code{csb}. If NULL, uses default classification.}
 
 \item{csb_priority_method}{Character, one of "all" (default), "first",
 "public", or "private". Controls how overlapping care-seeking records

@@ -19,15 +19,6 @@
 #'       methodology assumes filtering to living children (b5 == 1) is done
 #'       upstream. This function does NOT filter by alive status.
 #'   }
-#' @param csb_classification Data frame specifying h32 variable to CSB category
-#'   mapping. Must have columns:
-#'   \itemize{
-#'     \item `variable`: h32 variable name (e.g., "h32a", "h32j")
-#'     \item `csb`: Category - one of: "public", "chw", "private_formal",
-#'       "private_informal", "pharmacy"
-#'   }
-#'   If NULL, uses default classification. See Details for category
-#'   meanings.
 #' @param csb_priority_method Character, one of "all" (default), "first",
 #'   "public", or "private". Controls how overlapping care-seeking records
 #'   are resolved so each child is assigned to at most one sector.
@@ -40,7 +31,7 @@
 #'     \item `"private"`: Private priority when a child sought both sectors.
 #'   }
 #'   With non-`"all"` values, csb_public + csb_private + csb_none sums to 100%.
-#' @param source_config **Deprecated**. Use `csb_classification` instead.
+#' @param source_config **Deprecated**. No longer used.
 #'   Legacy parameter for backwards compatibility. Named list with:
 #'   \itemize{
 #'     \item `public`: Character vector of h32 codes for public sector
@@ -111,7 +102,6 @@ calc_csb_dhs_core <- function(
     fever = "h22",
     alive = "b5"
   ),
-  csb_classification = NULL,
   csb_priority_method = c("all", "first", "public", "private"),
   source_config = NULL,
   region_var = NULL,
@@ -200,68 +190,29 @@ calc_csb_dhs_core <- function(
     "Detected {length(available_h32)} h32 source variables"
   )
 
-  # Warn if any detected h32 variables are not in the (default) classification
+  # Warn if any detected h32 variables are not in the default classification
   {
-    ref_class <- if (!is.null(csb_classification)) csb_classification else .default_csb_classification()
+    ref_class <- .default_csb_classification()
     expected_h32 <- ref_class$variable
     unexpected_h32 <- setdiff(available_h32, expected_h32)
     if (length(unexpected_h32) > 0) {
       cli::cli_warn(
-        "Detected h32 variables not in standard classification: {paste(unexpected_h32, collapse = ', ')}. These may be country-specific non-standard slots. Check that the default classification is appropriate or supply a custom csb_classification."
+        "Detected h32 variables not in standard classification: {paste(unexpected_h32, collapse = ', ')}. These may be country-specific non-standard slots."
       )
     }
   }
 
-  # ---- 2. Handle classification parameter ------------------------------------
+  # ---- 2. Prepare base dataset -----------------------------------------------
 
-  if (!is.null(source_config) && is.null(csb_classification)) {
+  if (!is.null(source_config)) {
     cli::cli_alert_warning(
-      "source_config is deprecated. Use csb_classification instead."
-    )
-    csb_classification <- .convert_source_config(source_config)
-    cli::cli_alert_info(
-      "Converted source_config to csb_classification format"
-    )
-  } else if (is.null(csb_classification)) {
-    # Auto-detect from haven labels (same approach as ACT detection)
-    csb_classification <- .detect_csb_from_labels(dhs_kr)
-    if (nrow(csb_classification) == 0) {
-      csb_classification <- .default_csb_classification()
-    }
-  }
-
-  # Validate csb_classification
-  if (!is.data.frame(csb_classification)) {
-    cli::cli_abort("`csb_classification` must be a data.frame")
-  }
-  if (!all(c("variable", "csb") %in% names(csb_classification))) {
-    cli::cli_abort(
-      c(
-        "`csb_classification` must have columns: variable, csb",
-        "i" = "Got columns: {.var {names(csb_classification)}}"
-      )
+      "source_config is deprecated and ignored. Default classification is used."
     )
   }
-
-  # Filter to variables present in data
-  csb_classification <- csb_classification |>
-    dplyr::filter(variable %in% available_h32)
-
-  if (nrow(csb_classification) == 0) {
-    cli::cli_abort(
-      c(
-        "No h32 variables from csb_classification found in data.",
-        "i" = "Available h32 variables: {.var {available_h32}}"
-      )
-    )
-  }
-
-  # ---- 3. Prepare base dataset -----------------------------------------------
 
   kr_fever <- .prepare_csb_data(
     dhs_kr = dhs_kr,
     survey_vars = survey_vars,
-    csb_classification = csb_classification,
     include_survey_vars = TRUE,
     csb_priority_method = csb_priority_method
   )
@@ -479,40 +430,6 @@ calc_csb_dhs_core <- function(
     ),
     stringsAsFactors = FALSE
   )
-}
-
-#' Convert legacy source_config to csb_classification
-#'
-#' @param source_config Named list with public, private, excluded vectors
-#' @return Data frame with columns: variable, csb
-#' @noRd
-.convert_source_config <- function(source_config) {
-  result <- dplyr::bind_rows(
-    if (length(source_config$public) > 0) {
-      data.frame(
-        variable = source_config$public,
-        csb = "public",
-        stringsAsFactors = FALSE
-      )
-    },
-    if (length(source_config$private) > 0) {
-      # In legacy mode, all private sources are treated as private_formal
-      # This maintains backwards compatibility with the old behavior
-      data.frame(
-        variable = source_config$private,
-        csb = "private_formal",
-        stringsAsFactors = FALSE
-      )
-    }
-  )
-
-  if (nrow(result) == 0) {
-    cli::cli_abort(
-      "source_config must have at least one public or private source"
-    )
-  }
-
-  result
 }
 
 #' Internal: CSB indicator conditions (with filter expressions)
@@ -852,17 +769,6 @@ csb_dictionary <- function() {
 #' #   admin_level = c("adm1")
 #' # )
 #' #
-#' # # Example with custom classification (country-specific)
-#' # my_classification <- data.frame(
-#' #   variable = c("h32a", "h32b", "h32c", "h32j", "h32k", "h32n"),
-#' #   csb = c("public", "public", "chw",
-#' #           "private_formal", "pharmacy", "pharmacy")
-#' # )
-#' # csb_results <- calc_csb_dhs(
-#' #   dhs_kr = kr_data,
-#' #   csb_classification = my_classification
-#' # )
-#' #
 #' # # Access the data
 #' # csb_data <- csb_results$data
 #' #
@@ -883,7 +789,6 @@ calc_csb_dhs <- function(
     fever = "h22",
     alive = "b5"
   ),
-  csb_classification = NULL,
   csb_priority_method = c("all", "first", "public", "private"),
   source_config = NULL,
   region_var = NULL,
@@ -903,7 +808,6 @@ calc_csb_dhs <- function(
   calc_csb_dhs_core(
     dhs_kr = dhs_kr,
     survey_vars = survey_vars,
-    csb_classification = csb_classification,
     csb_priority_method = csb_priority_method,
     source_config = source_config,
     region_var = region_var,

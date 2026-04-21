@@ -17,8 +17,6 @@
 #' @param quintiles Numeric vector of wealth quintiles to include. Default: 1:5
 #'   (all quintiles). Use c(1) for poorest only, c(1,2) for poorest + poorer, etc.
 #' @param wealth_var Name of wealth quintile variable in dhs_kr. Default: "v190".
-#' @param csb_classification Data frame with h32 variable to category mapping.
-#'   See [calc_csb_dhs_core()] for details.
 #' @param csb_priority_method Character, one of "all" (default), "first",
 #'   "public", or "private". Controls how overlapping care-seeking records
 #'   are resolved so each individual is assigned to at most one sector.
@@ -93,7 +91,6 @@ calc_csb_by_wealth_dhs <- function(
   ),
   quintiles = 1:5,
   wealth_var = "v190",
-  csb_classification = NULL,
   csb_priority_method = c("all", "first", "public", "private"),
   region_var = NULL,
   ci_method = "logit"
@@ -133,7 +130,6 @@ calc_csb_by_wealth_dhs <- function(
   kr_fever <- .prepare_csb_data(
     dhs_kr = dhs_kr,
     survey_vars = survey_vars,
-    csb_classification = csb_classification,
     include_survey_vars = TRUE,
     csb_priority_method = csb_priority_method
   )

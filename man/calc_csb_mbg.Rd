@@ -8,7 +8,6 @@ calc_csb_mbg(
   dhs_kr,
   gps_data,
   indicators = c("any", "public", "private", "none"),
-  csb_classification = NULL,
   csb_priority_method = c("all", "first", "public", "private"),
   survey_vars = list(cluster = "v001", age = "hw1", fever = "h22"),
   gps_vars = list(cluster = "DHSCLUST", lat = "LATNUM", lon = "LONGNUM")
@@ -36,9 +35,6 @@ pharmacy)
 \item "none": Did not seek care
 }
 Default: c("any", "public", "private", "none").}
-
-\item{csb_classification}{Data frame with h32 variable to category mapping.
-Must have columns \code{variable} and \code{csb}. If NULL, uses default classification.}
 
 \item{csb_priority_method}{Character, one of "all" (default), "first",
 "public", or "private". Controls how overlapping care-seeking records

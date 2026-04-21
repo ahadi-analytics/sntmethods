@@ -8,7 +8,6 @@ calc_csb_dhs_core(
   dhs_kr,
   survey_vars = list(cluster = "v021", weight = "v005", stratum = "v022", age = "hw1",
     fever = "h22", alive = "b5"),
-  csb_classification = NULL,
   csb_priority_method = c("all", "first", "public", "private"),
   source_config = NULL,
   region_var = NULL,
@@ -35,16 +34,6 @@ methodology assumes filtering to living children (b5 == 1) is done
 upstream. This function does NOT filter by alive status.
 }}
 
-\item{csb_classification}{Data frame specifying h32 variable to CSB category
-mapping. Must have columns:
-\itemize{
-\item \code{variable}: h32 variable name (e.g., "h32a", "h32j")
-\item \code{csb}: Category - one of: "public", "chw", "private_formal",
-"private_informal", "pharmacy"
-}
-If NULL, uses default classification. See Details for category
-meanings.}
-
 \item{csb_priority_method}{Character, one of "all" (default), "first",
 "public", or "private". Controls how overlapping care-seeking records
 are resolved so each child is assigned to at most one sector.
@@ -58,7 +47,7 @@ per child.
 }
 With non-\code{"all"} values, csb_public + csb_private + csb_none sums to 100\%.}
 
-\item{source_config}{\strong{Deprecated}. Use \code{csb_classification} instead.
+\item{source_config}{\strong{Deprecated}. No longer used.
 Legacy parameter for backwards compatibility. Named list with:
 \itemize{
 \item \code{public}: Character vector of h32 codes for public sector

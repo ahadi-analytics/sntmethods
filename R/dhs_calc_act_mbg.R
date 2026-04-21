@@ -230,7 +230,7 @@ calc_act_mbg <- function(
     csb_class <- .detect_csb_from_labels(dhs_kr)
     if (nrow(csb_class) == 0) csb_class <- NULL
     enriched <- tryCatch(
-      .classify_csb_from_h32(enriched, csb_classification = csb_class),
+      .classify_csb_from_h32(enriched, classification = csb_class),
       error = function(e) {
         cli::cli_alert_warning(
           "CSB classification failed: \\

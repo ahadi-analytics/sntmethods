@@ -26,8 +26,6 @@
 #'     \item "none": Did not seek care
 #'   }
 #'   Default: c("any", "public", "private", "none").
-#' @param csb_classification Data frame with h32 variable to category mapping.
-#'   Must have columns `variable` and `csb`. If NULL, uses default classification.
 #' @param csb_priority_method Character, one of "all" (default), "first",
 #'   "public", or "private". Controls how overlapping care-seeking records
 #'   are resolved so each individual is assigned to at most one sector:
@@ -76,7 +74,6 @@ calc_csb_mbg <- function(
   dhs_kr,
   gps_data,
   indicators = c("any", "public", "private", "none"),
-  csb_classification = NULL,
   csb_priority_method = c("all", "first", "public", "private"),
   survey_vars = list(
     cluster = "v001",
@@ -123,7 +120,6 @@ calc_csb_mbg <- function(
   kr_fever <- .prepare_csb_data(
     dhs_kr = dhs_kr,
     survey_vars = survey_vars,
-    csb_classification = csb_classification,
     include_survey_vars = FALSE,
     csb_priority_method = csb_priority_method
   )
@@ -197,7 +193,6 @@ prep_csb_mbg <- function(
   dhs_kr,
   gps_data,
   indicator = "public",
-  csb_classification = NULL,
   csb_priority_method = c("all", "first", "public", "private"),
   survey_vars = list(
     cluster = "v001",
@@ -216,7 +211,6 @@ prep_csb_mbg <- function(
     dhs_kr = dhs_kr,
     gps_data = gps_data,
     indicators = indicator,
-    csb_classification = csb_classification,
     csb_priority_method = csb_priority_method,
     survey_vars = survey_vars,
     gps_vars = gps_vars

@@ -28,9 +28,6 @@
 #'     \item \code{alive}: Child survival status (default: "b5")
 #'     \item \code{act}: Received ACT treatment (default: "ml13e")
 #'   }
-#' @param csb_classification Data frame specifying h32 variable to CSB category
-#'   mapping (passed to \code{.prepare_csb_data()}). Must have columns
-#'   \code{variable} and \code{csb}. If NULL, uses default classification.
 #' @param region_var Optional column name in \code{dhs_kr} to use as grouping
 #'   variable (e.g., "v024" for region).
 #'
@@ -76,7 +73,6 @@ calc_case_management_dhs <- function(
     alive = "b5",
     act = "ml13e"
   ),
-  csb_classification = NULL,
   region_var = NULL
 ) {
   # ---- 1. Input validation ----
@@ -128,7 +124,6 @@ calc_case_management_dhs <- function(
   kr_fever <- .prepare_csb_data(
     dhs_kr = dhs_kr,
     survey_vars = csb_vars,
-    csb_classification = csb_classification,
     include_survey_vars = TRUE
   )
 

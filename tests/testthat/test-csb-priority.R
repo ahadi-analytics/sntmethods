@@ -48,7 +48,7 @@ test_that("csb_priority_method = 'all' allows overlap (WHO default)", {
   out <- sntmethods:::.classify_csb_from_h32(
     data = df,
     h32_cols = c("h32a", "h32b", "h32j", "h32n", "h32s"),
-    csb_classification = cls,
+    classification = cls,
     csb_priority_method = "all"
   )
 
@@ -72,7 +72,7 @@ test_that("csb_priority_method = 'public' classifies overlap as public only", {
   out <- sntmethods:::.classify_csb_from_h32(
     data = df,
     h32_cols = c("h32a", "h32b", "h32j", "h32n", "h32s"),
-    csb_classification = cls,
+    classification = cls,
     csb_priority_method = "public"
   )
 
@@ -97,7 +97,7 @@ test_that("csb_priority_method = 'private' classifies overlap as private only", 
   out <- sntmethods:::.classify_csb_from_h32(
     data = df,
     h32_cols = c("h32a", "h32b", "h32j", "h32n", "h32s"),
-    csb_classification = cls,
+    classification = cls,
     csb_priority_method = "private"
   )
 
@@ -122,7 +122,7 @@ test_that("csb_priority_method = 'first' keeps the first visited h32 source", {
   out <- sntmethods:::.classify_csb_from_h32(
     data = df,
     h32_cols = c("h32a", "h32b", "h32j", "h32n", "h32s"),
-    csb_classification = cls,
+    classification = cls,
     csb_priority_method = "first"
   )
 
@@ -149,7 +149,7 @@ test_that("non-'all' methods make csb_public + csb_private + csb_none = 100%", {
     out <- sntmethods:::.classify_csb_from_h32(
       data = df,
       h32_cols = cols,
-      csb_classification = cls,
+      classification = cls,
       csb_priority_method = method
     )
     total_pct <- mean(out$csb_public) + mean(out$csb_private) +
@@ -173,7 +173,7 @@ test_that("csb_priority_method rejects invalid values via match.arg", {
     sntmethods:::.classify_csb_from_h32(
       data = df,
       h32_cols = c("h32a", "h32b", "h32j", "h32n", "h32s"),
-      csb_classification = cls,
+      classification = cls,
       csb_priority_method = "bogus"
     ),
     "should be one of"
