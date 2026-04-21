@@ -28,6 +28,18 @@
 #'   }
 #'   If NULL, uses default classification. See Details for category
 #'   meanings.
+#' @param csb_priority_method Character, one of "all" (default), "first",
+#'   "public", or "private". Controls how overlapping care-seeking records
+#'   are resolved so each child is assigned to at most one sector.
+#'   \itemize{
+#'     \item `"all"`: WHO default. Overlaps allowed; csb_public + csb_private
+#'       may exceed 100%.
+#'     \item `"first"`: Take the first h32 source (alphabetical order) visited
+#'       per child.
+#'     \item `"public"`: Public/CHW priority when a child sought both sectors.
+#'     \item `"private"`: Private priority when a child sought both sectors.
+#'   }
+#'   With non-`"all"` values, csb_public + csb_private + csb_none sums to 100%.
 #' @param source_config **Deprecated**. Use `csb_classification` instead.
 #'   Legacy parameter for backwards compatibility. Named list with:
 #'   \itemize{
@@ -100,6 +112,7 @@ calc_csb_dhs_core <- function(
     alive = "b5"
   ),
   csb_classification = NULL,
+  csb_priority_method = c("all", "first", "public", "private"),
   source_config = NULL,
   region_var = NULL,
   gps_data = NULL,
@@ -112,6 +125,7 @@ calc_csb_dhs_core <- function(
   admin_level = NULL,
   join_nearest = TRUE
 ) {
+  csb_priority_method <- match.arg(csb_priority_method)
   # ---- 1. Input validation ---------------------------------------------------
 
   if (!is.data.frame(dhs_kr)) {
@@ -248,7 +262,8 @@ calc_csb_dhs_core <- function(
     dhs_kr = dhs_kr,
     survey_vars = survey_vars,
     csb_classification = csb_classification,
-    include_survey_vars = TRUE
+    include_survey_vars = TRUE,
+    csb_priority_method = csb_priority_method
   )
 
   # Add aliases needed by indicator conditions (.csb_conditions() outcome_var)
@@ -869,6 +884,7 @@ calc_csb_dhs <- function(
     alive = "b5"
   ),
   csb_classification = NULL,
+  csb_priority_method = c("all", "first", "public", "private"),
   source_config = NULL,
   region_var = NULL,
   gps_data = NULL,
@@ -881,12 +897,14 @@ calc_csb_dhs <- function(
   admin_level = NULL,
   join_nearest = TRUE
 ) {
+  csb_priority_method <- match.arg(csb_priority_method)
   # calc_csb_dhs is now a thin wrapper around calc_csb_dhs_core
   # which returns the same named list structure as calc_act_dhs
   calc_csb_dhs_core(
     dhs_kr = dhs_kr,
     survey_vars = survey_vars,
     csb_classification = csb_classification,
+    csb_priority_method = csb_priority_method,
     source_config = source_config,
     region_var = region_var,
     gps_data = gps_data,

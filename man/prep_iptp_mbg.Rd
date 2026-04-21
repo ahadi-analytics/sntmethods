@@ -15,7 +15,7 @@ prep_iptp_mbg(
 )
 }
 \arguments{
-\item{dhs_ir}{DHS Individual Recode dataset.}
+\item{dhs_ir}{DHS Individual Recode (IR) or Children's Recode (KR) dataset.}
 
 \item{gps_data}{DHS GPS dataset with cluster coordinates.}
 

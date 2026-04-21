@@ -106,6 +106,21 @@ NULL
 #' @param cache Logical. If TRUE (default), reuses cached intermediate outputs
 #'   (aggregation tables, ID rasters) when available. Set to FALSE to force
 #'   regeneration of all intermediate outputs.
+#' @param csb_priority_method Character, one of "all" (default), "first",
+#'   "public", or "private". Controls how overlapping care-seeking records
+#'   are resolved in the CSB (and wealth-stratified CSB) indicators so each
+#'   individual is assigned to at most one sector:
+#'   \itemize{
+#'     \item "all": Keep WHO methodology; overlaps allowed (csb_public and
+#'       csb_private can both be 1 for the same child).
+#'     \item "first": Take the first recurring h32 source visited per child
+#'       (alphabetical h32 order: h32a, h32b, ..., h32x). Mutually exclusive.
+#'     \item "public": Public-sector priority - if any public/CHW care,
+#'       classify as public; otherwise private if any private; otherwise none.
+#'     \item "private": Private-sector priority - if any private care,
+#'       classify as private; otherwise public if any public; otherwise none.
+#'   }
+#'   With non-"all" values, csb_public + csb_private + csb_none sums to 100%.
 #' @param verbose Logical. If TRUE, prints detailed progress. Default: TRUE.
 #' @param debug Logical. If TRUE, prints additional
 #'   diagnostic messages for troubleshooting.
@@ -174,9 +189,12 @@ run_mbg_pipeline <- function(
   run_mbg = TRUE,
   save_rasters = TRUE,
   cache = TRUE,
+  csb_priority_method = c("all", "first", "public", "private"),
   verbose = TRUE,
   debug = FALSE
 ) {
+
+  csb_priority_method <- match.arg(csb_priority_method)
 
   # Check for required spatial packages
   .check_spatial_pkg("sf", "run_mbg_pipeline")
@@ -815,6 +833,7 @@ run_mbg_pipeline <- function(
             run_mbg = run_mbg,
             save_rasters = save_rasters,
             cache = cache,
+            csb_priority_method = csb_priority_method,
             verbose = verbose,
             debug = debug,
             progress_callback = function(ind_name) {
@@ -1286,6 +1305,7 @@ run_mbg_pipeline <- function(
   run_mbg,
   save_rasters,
   cache,
+  csb_priority_method = "all",
   verbose,
   debug = FALSE,
   progress_callback = NULL
@@ -1471,7 +1491,8 @@ run_mbg_pipeline <- function(
             "private", "priv_formal", "pharmacy",
             "priv_informal", "priv_form_pha",
             "trained", "none"
-          )
+          ),
+          csb_priority_method = csb_priority_method
         )
       }, error = function(e) {
         results$skipped <<- glue::glue("Calculation error: {e$message}")
@@ -1490,7 +1511,8 @@ run_mbg_pipeline <- function(
           dhs_kr = survey_data$KR,
           gps_data = gps_data,
           indicators = "any",
-          quintiles = quintile_num
+          quintiles = quintile_num,
+          csb_priority_method = csb_priority_method
         )
       }, error = function(e) {
         results$skipped <<- glue::glue("Calculation error: {e$message}")

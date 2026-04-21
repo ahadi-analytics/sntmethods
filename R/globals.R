@@ -9,6 +9,11 @@ globalVariables(
     ".should_fallback",
     ".active_key",
     ".temp_key",
+    ".csb_row_id",
+    ".h32_order",
+    ".dhs_outcome",
+    "ci_l..dhs_outcome",
+    "ci_u..dhs_outcome",
 
     # Geographic identifiers
     "adm0",
@@ -136,6 +141,9 @@ globalVariables(
     "ci_l.itn_used_u5",
     "ci_u.itn_used_preg",
     "ci_u.itn_used_u5",
+    "itn_outcome",
+    "ci_l.itn_outcome",
+    "ci_u.itn_outcome",
 
     # IRS variables
     "sprayed",
@@ -233,6 +241,9 @@ globalVariables(
     "dhs_n_antimalarial_public",
     "ci_l.has_antimalarial",
     "ci_u.has_antimalarial",
+    "antimalarial_public",
+    "ci_l.antimalarial_public",
+    "ci_u.antimalarial_public",
 
     # MBG binary indicators (fever, malaria_dx, antimalarial)
     "fever_binary",
@@ -309,6 +320,9 @@ globalVariables(
     "has_1only",
     "has_2only",
     "has_3only",
+    "iptp_1only",
+    "iptp_2only",
+    "iptp_3only",
 
     # Anemia indicators
     "hemoglobin",
@@ -457,6 +471,8 @@ globalVariables(
     "ci_u.received_smc",
 
     # Wealth/inequality
+    "wealth",
+    "residence",
     "wealth_quintile",
     "wealth_score",
     "weight",
@@ -724,6 +740,20 @@ globalVariables(
     "file_path",
     "file_type",
     "file_types",
-    "parts"
+    "parts",
+
+    # Standard DHS indicator output columns
+    "point",
+    "numerator",
+    "denominator",
+    "indicator_code",
+    "indicator_title",
+    "numerator_description",
+    "denominator_description",
+    "denominator_code",
+    "survey_numerator",
+    "survey_denominator",
+    "n_survey_clusters",
+    "median_survey_month"
   )
 )

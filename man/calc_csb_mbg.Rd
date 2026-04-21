@@ -9,6 +9,7 @@ calc_csb_mbg(
   gps_data,
   indicators = c("any", "public", "private", "none"),
   csb_classification = NULL,
+  csb_priority_method = c("all", "first", "public", "private"),
   survey_vars = list(cluster = "v001", age = "hw1", fever = "h22"),
   gps_vars = list(cluster = "DHSCLUST", lat = "LATNUM", lon = "LONGNUM")
 )
@@ -38,6 +39,21 @@ Default: c("any", "public", "private", "none").}
 
 \item{csb_classification}{Data frame with h32 variable to category mapping.
 Must have columns \code{variable} and \code{csb}. If NULL, uses default classification.}
+
+\item{csb_priority_method}{Character, one of "all" (default), "first",
+"public", or "private". Controls how overlapping care-seeking records
+are resolved so each individual is assigned to at most one sector:
+\itemize{
+\item "all": Keep WHO methodology; overlaps allowed (csb_public and
+csb_private can both be 1 for the same child).
+\item "first": Take the first recurring h32 source visited per child
+(alphabetical h32 order: h32a, h32b, ..., h32x). Mutually exclusive.
+\item "public": If child sought any public/CHW care, classify as
+public; otherwise private if any private; otherwise none.
+\item "private": If child sought any private care, classify as
+private; otherwise public if any public; otherwise none.
+}
+With non-"all" values, csb_public + csb_private + csb_none sums to 100\%.}
 
 \item{survey_vars}{Named list mapping DHS variable names.}
 

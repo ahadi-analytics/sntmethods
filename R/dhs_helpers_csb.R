@@ -10,6 +10,21 @@
 #'   If NULL, uses default classification.
 #' @param include_survey_vars Logical. If TRUE, includes survey_weight and
 #'   stratum_id columns for DHS survey design. If FALSE, omits them (for MBG).
+#' @param csb_priority_method Character, one of "all" (default), "first",
+#'   "public", or "private". Controls how overlapping care-seeking is
+#'   handled so each individual is assigned to at most one sector:
+#'   \itemize{
+#'     \item "all": Keep WHO methodology (overlaps allowed; a child can be
+#'       in both csb_public and csb_private).
+#'     \item "first": Keep the first recurring h32 source visited per child
+#'       (based on h32 alphabetical order: h32a, h32b, ..., h32x). Each
+#'       child is assigned to exactly one category.
+#'     \item "public": Public priority - if any public/CHW care, classify
+#'       as public; else private if any private; else none.
+#'     \item "private": Private priority - if any private care, classify
+#'       as private; else public if any public; else none.
+#'   }
+#'   Non-"all" options make csb_public + csb_private + csb_none sum to 100%.
 #'
 #' @return A data frame of febrile children with columns:
 #'   cluster_id, age_months, and binary indicators:
@@ -22,8 +37,10 @@
   dhs_kr,
   survey_vars,
   csb_classification = NULL,
-  include_survey_vars = FALSE
+  include_survey_vars = FALSE,
+  csb_priority_method = c("all", "first", "public", "private")
 ) {
+  csb_priority_method <- match.arg(csb_priority_method)
   # Input validation
   if (!is.data.frame(dhs_kr)) {
     cli::cli_abort("`dhs_kr` must be a data.frame or tibble.")
@@ -197,7 +214,12 @@
   )
 
   # Apply care-seeking classification from h32 variables
-  kr_fever <- .classify_csb_from_h32(kr_fever, h32_cols, csb_classification)
+  kr_fever <- .classify_csb_from_h32(
+    kr_fever,
+    h32_cols,
+    csb_classification,
+    csb_priority_method = csb_priority_method
+  )
 
   kr_fever
 }
@@ -219,6 +241,11 @@
 #'   If NULL, auto-detects from column names.
 #' @param csb_classification Data frame with variable and csb columns.
 #'   If NULL, uses default classification.
+#' @param csb_priority_method Character, one of "all" (default), "first",
+#'   "public", or "private". Controls overlap handling. See
+#'   \code{.prepare_csb_data()} for details. With non-"all" values, each
+#'   child is assigned to at most one of csb_public / csb_private so that
+#'   csb_public + csb_private + csb_none sums to 100%.
 #'
 #' @return The input data frame with added columns: .row_id, has_public,
 #'   has_chw, has_private_formal, has_private_informal, has_pharmacy,
@@ -227,7 +254,11 @@
 #'
 #' @noRd
 .classify_csb_from_h32 <- function(data, h32_cols = NULL,
-                                    csb_classification = NULL) {
+                                    csb_classification = NULL,
+                                    csb_priority_method = c("all", "first",
+                                                             "public",
+                                                             "private")) {
+  csb_priority_method <- match.arg(csb_priority_method)
   # Default classification
   if (is.null(csb_classification)) {
     csb_classification <- .default_csb_classification()
@@ -278,6 +309,31 @@
     ) |>
     dplyr::filter(!is.na(visited) & visited == 1)
 
+  # Optional: keep only the FIRST recurring h32 source visited per child
+  # (ordered alphabetically: h32a, h32b, ..., h32x). This makes the resulting
+  # sector assignment mutually exclusive so csb_public + csb_private +
+  # csb_none sums to exactly 100% at the cluster level.
+  #
+  # We sort alphabetically (rather than using csb_classification order) so
+  # behavior is deterministic regardless of how users supply
+  # csb_classification. The default classification groups h32 slots by
+  # sector, which would otherwise change the meaning of "first".
+  if (csb_priority_method == "first" && nrow(kr_long) > 0) {
+    h32_sorted <- sort(h32_cols)
+    h32_order <- data.frame(
+      variable = h32_sorted,
+      .h32_order = seq_along(h32_sorted),
+      stringsAsFactors = FALSE
+    )
+    kr_long <- kr_long |>
+      dplyr::left_join(h32_order, by = "variable") |>
+      dplyr::group_by(.csb_row_id) |>
+      dplyr::arrange(.h32_order, .by_group = TRUE) |>
+      dplyr::slice_head(n = 1) |>
+      dplyr::ungroup() |>
+      dplyr::select(-.h32_order)
+  }
+
   # Aggregate to base categories per child
   if (nrow(kr_long) > 0) {
     base_cats <- kr_long |>
@@ -300,6 +356,24 @@
       data[[col]] <- 0L
     }
     data[[col]] <- tidyr::replace_na(data[[col]], 0L)
+  }
+
+  # Sector-priority resolution for overlapping care-seeking.
+  # When csb_priority_method is "public" or "private", zero out the
+  # non-priority sector for children who sought both. This ensures each
+  # child is classified into exactly one of public / private so that
+  # csb_public + csb_private + csb_none sums to 100% at the cluster level.
+  if (csb_priority_method == "public") {
+    .has_public_any <- data$has_public == 1 | data$has_chw == 1
+    data$has_private_formal[.has_public_any] <- 0L
+    data$has_private_informal[.has_public_any] <- 0L
+    data$has_pharmacy[.has_public_any] <- 0L
+  } else if (csb_priority_method == "private") {
+    .has_private_any <- data$has_private_formal == 1 |
+      data$has_private_informal == 1 |
+      data$has_pharmacy == 1
+    data$has_public[.has_private_any] <- 0L
+    data$has_chw[.has_private_any] <- 0L
   }
 
   # Create derived indicators

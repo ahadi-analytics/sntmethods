@@ -303,7 +303,7 @@ calc_u5mr_mbg <- function(
   # This satisfies svydesign() which requires >= 2 PSUs per stratum.
   br$v021 <- paste0(
     br[[cluster_var]], "_",
-    ave(
+    stats::ave(
       rep(1L, nrow(br)),
       br[[cluster_var]],
       FUN = function(x) ((seq_along(x) - 1L) %% 2L) + 1L

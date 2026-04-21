@@ -19,6 +19,11 @@
 #' @param wealth_var Name of wealth quintile variable in dhs_kr. Default: "v190".
 #' @param csb_classification Data frame with h32 variable to category mapping.
 #'   See [calc_csb_dhs_core()] for details.
+#' @param csb_priority_method Character, one of "all" (default), "first",
+#'   "public", or "private". Controls how overlapping care-seeking records
+#'   are resolved so each individual is assigned to at most one sector.
+#'   See [calc_csb_mbg()] for details. With non-"all" values, csb_public +
+#'   csb_private + csb_none sums to 100% within each quintile.
 #' @param region_var Optional column name for regional grouping.
 #' @param ci_method Method for confidence intervals. Default: "logit".
 #'
@@ -89,9 +94,11 @@ calc_csb_by_wealth_dhs <- function(
   quintiles = 1:5,
   wealth_var = "v190",
   csb_classification = NULL,
+  csb_priority_method = c("all", "first", "public", "private"),
   region_var = NULL,
   ci_method = "logit"
 ) {
+  csb_priority_method <- match.arg(csb_priority_method)
   # ---- 1. Input validation ----
 
   if (!is.data.frame(dhs_kr)) {
@@ -127,7 +134,8 @@ calc_csb_by_wealth_dhs <- function(
     dhs_kr = dhs_kr,
     survey_vars = survey_vars,
     csb_classification = csb_classification,
-    include_survey_vars = TRUE
+    include_survey_vars = TRUE,
+    csb_priority_method = csb_priority_method
   )
 
   # Add wealth quintile and filter

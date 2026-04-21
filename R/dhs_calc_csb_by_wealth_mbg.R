@@ -38,6 +38,11 @@
 #' @param wealth_var Name of wealth quintile variable in dhs_kr. Default: "v190".
 #' @param csb_classification Data frame with h32 variable to category mapping.
 #'   Must have columns `variable` and `csb`. If NULL, uses default classification.
+#' @param csb_priority_method Character, one of "all" (default), "first",
+#'   "public", or "private". Controls how overlapping care-seeking records
+#'   are resolved so each individual is assigned to at most one sector.
+#'   See [calc_csb_mbg()] for details. With non-"all" values, csb_public +
+#'   csb_private + csb_none sums to 100% within each quintile.
 #' @param survey_vars Named list mapping DHS variable names.
 #' @param gps_vars Named list for GPS variable mapping.
 #'
@@ -96,6 +101,7 @@ calc_csb_by_wealth_mbg <- function(
   quintiles = 1:5,
   wealth_var = "v190",
   csb_classification = NULL,
+  csb_priority_method = c("all", "first", "public", "private"),
   survey_vars = list(
     cluster = "v001",
     age = "hw1",
@@ -107,6 +113,8 @@ calc_csb_by_wealth_mbg <- function(
     lon = "LONGNUM"
   )
 ) {
+  csb_priority_method <- match.arg(csb_priority_method)
+
   # ---- Input validation ----
 
   if (!is.data.frame(dhs_kr)) {
@@ -145,7 +153,8 @@ calc_csb_by_wealth_mbg <- function(
     dhs_kr = dhs_kr,
     survey_vars = survey_vars,
     csb_classification = csb_classification,
-    include_survey_vars = FALSE
+    include_survey_vars = FALSE,
+    csb_priority_method = csb_priority_method
   )
 
   # Add wealth quintile and filter
@@ -248,6 +257,7 @@ prep_csb_by_wealth_mbg <- function(
   quintiles = 1:5,
   wealth_var = "v190",
   csb_classification = NULL,
+  csb_priority_method = c("all", "first", "public", "private"),
   survey_vars = list(
     cluster = "v001",
     age = "hw1",
@@ -259,6 +269,8 @@ prep_csb_by_wealth_mbg <- function(
     lon = "LONGNUM"
   )
 ) {
+  csb_priority_method <- match.arg(csb_priority_method)
+
   result <- calc_csb_by_wealth_mbg(
     dhs_kr = dhs_kr,
     gps_data = gps_data,
@@ -266,6 +278,7 @@ prep_csb_by_wealth_mbg <- function(
     quintiles = quintiles,
     wealth_var = wealth_var,
     csb_classification = csb_classification,
+    csb_priority_method = csb_priority_method,
     survey_vars = survey_vars,
     gps_vars = gps_vars
   )

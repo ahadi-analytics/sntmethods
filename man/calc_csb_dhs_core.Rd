@@ -9,6 +9,7 @@ calc_csb_dhs_core(
   survey_vars = list(cluster = "v021", weight = "v005", stratum = "v022", age = "hw1",
     fever = "h22", alive = "b5"),
   csb_classification = NULL,
+  csb_priority_method = c("all", "first", "public", "private"),
   source_config = NULL,
   region_var = NULL,
   gps_data = NULL,
@@ -43,6 +44,19 @@ mapping. Must have columns:
 }
 If NULL, uses default classification. See Details for category
 meanings.}
+
+\item{csb_priority_method}{Character, one of "all" (default), "first",
+"public", or "private". Controls how overlapping care-seeking records
+are resolved so each child is assigned to at most one sector.
+\itemize{
+\item \code{"all"}: WHO default. Overlaps allowed; csb_public + csb_private
+may exceed 100\%.
+\item \code{"first"}: Take the first h32 source (alphabetical order) visited
+per child.
+\item \code{"public"}: Public/CHW priority when a child sought both sectors.
+\item \code{"private"}: Private priority when a child sought both sectors.
+}
+With non-\code{"all"} values, csb_public + csb_private + csb_none sums to 100\%.}
 
 \item{source_config}{\strong{Deprecated}. Use \code{csb_classification} instead.
 Legacy parameter for backwards compatibility. Named list with:

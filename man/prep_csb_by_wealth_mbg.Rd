@@ -11,6 +11,7 @@ prep_csb_by_wealth_mbg(
   quintiles = 1:5,
   wealth_var = "v190",
   csb_classification = NULL,
+  csb_priority_method = c("all", "first", "public", "private"),
   survey_vars = list(cluster = "v001", age = "hw1", fever = "h22"),
   gps_vars = list(cluster = "DHSCLUST", lat = "LATNUM", lon = "LONGNUM")
 )
@@ -29,6 +30,12 @@ prep_csb_by_wealth_mbg(
 
 \item{csb_classification}{Data frame with h32 variable to category mapping.
 Must have columns \code{variable} and \code{csb}. If NULL, uses default classification.}
+
+\item{csb_priority_method}{Character, one of "all" (default), "first",
+"public", or "private". Controls how overlapping care-seeking records
+are resolved so each individual is assigned to at most one sector.
+See \code{\link[=calc_csb_mbg]{calc_csb_mbg()}} for details. With non-"all" values, csb_public +
+csb_private + csb_none sums to 100\% within each quintile.}
 
 \item{survey_vars}{Named list mapping DHS variable names.}
 

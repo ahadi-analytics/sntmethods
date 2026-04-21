@@ -11,6 +11,7 @@ calc_csb_by_wealth_dhs(
   quintiles = 1:5,
   wealth_var = "v190",
   csb_classification = NULL,
+  csb_priority_method = c("all", "first", "public", "private"),
   region_var = NULL,
   ci_method = "logit"
 )
@@ -28,6 +29,12 @@ for details.}
 
 \item{csb_classification}{Data frame with h32 variable to category mapping.
 See \code{\link[=calc_csb_dhs_core]{calc_csb_dhs_core()}} for details.}
+
+\item{csb_priority_method}{Character, one of "all" (default), "first",
+"public", or "private". Controls how overlapping care-seeking records
+are resolved so each individual is assigned to at most one sector.
+See \code{\link[=calc_csb_mbg]{calc_csb_mbg()}} for details. With non-"all" values, csb_public +
+csb_private + csb_none sums to 100\% within each quintile.}
 
 \item{region_var}{Optional column name for regional grouping.}
 

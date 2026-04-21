@@ -15,7 +15,7 @@ calc_iptp_mbg(
 )
 }
 \arguments{
-\item{dhs_ir}{DHS Individual Recode dataset.}
+\item{dhs_ir}{DHS Individual Recode (IR) or Children's Recode (KR) dataset.}
 
 \item{gps_data}{DHS GPS dataset with cluster coordinates.}
 
@@ -52,6 +52,9 @@ data for MBG analysis. Calculates both cumulative (1+, 2+, 3+) and
 exclusive (exactly 1, exactly 2, exactly 3) dose categories.
 }
 \details{
+Supports both IR (Individual Recode) and KR (Children's Recode) formats.
+The function automatically detects the file type and adjusts variable names.
+
 Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/iptp_dhs.yml}
 
 No ANC attendance restriction is applied; the denominator is all women
