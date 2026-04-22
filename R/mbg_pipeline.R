@@ -1229,11 +1229,11 @@ run_mbg_pipeline <- function(
     use_itn_5_10 = , use_itn_10_20 = , use_itn_20plus = 1L,
     # Individual ANC -> full ANC calc
     anc_1plus = , anc_2plus = , anc_3plus = , anc_4plus = , anc_8plus = 5L,
-    # Individual CSB -> full CSB calc
+    # Individual CSB -> single sub-indicator
     csb_any = , csb_public = , csb_pub_nochw = , csb_chw = ,
     csb_private = , csb_priv_formal = , csb_pharmacy = ,
     csb_priv_informal = , csb_priv_form_pha = ,
-    csb_trained = , csb_none = 11L,
+    csb_trained = , csb_none = 1L,
     # Individual wealth-stratified CSB -> single quintile
     csb_q1 = , csb_q2 = , csb_q3 = , csb_q4 = , csb_q5 = 1L,
     # Individual ACT -> full ACT calc
@@ -1487,16 +1487,32 @@ run_mbg_pipeline <- function(
       if (!"KR" %in% names(survey_data)) {
         return(skip_indicator("Missing KR data (Children Recode)"))
       }
+      # Map prefixed category name -> short form expected by calc_csb_mbg()
+      csb_short_map <- c(
+        csb_any            = "any",
+        csb_public         = "public",
+        csb_pub_nochw      = "pub_nochw",
+        csb_chw            = "chw",
+        csb_private        = "private",
+        csb_priv_formal    = "priv_formal",
+        csb_pharmacy       = "pharmacy",
+        csb_priv_informal  = "priv_informal",
+        csb_priv_form_pha  = "priv_form_pha",
+        csb_trained        = "trained",
+        csb_none           = "none"
+      )
+      if (identical(category, "csb")) {
+        # Meta category: run the full list (legacy behaviour)
+        short_indicators <- unname(csb_short_map)
+      } else {
+        # Individual csb_* category: run only that one sub-indicator
+        short_indicators <- csb_short_map[[category]]
+      }
       tryCatch({
         calc_csb_mbg(
           dhs_kr = survey_data$KR,
           gps_data = gps_data,
-          indicators = c(
-            "any", "public", "pub_nochw", "chw",
-            "private", "priv_formal", "pharmacy",
-            "priv_informal", "priv_form_pha",
-            "trained", "none"
-          ),
+          indicators = short_indicators,
           csb_priority_method = csb_priority_method
         )
       }, error = function(e) {
@@ -2906,16 +2922,26 @@ run_mbg_pipeline <- function(
   # weighting. Rescale them here so the exported estimates respect the
   # mutually-exclusive partition the user requested.
   if (!identical(csb_priority_method, "all")) {
-    csb_present <- all(
-      c("csb_public", "csb_private", "csb_none") %in% names(mbg_estimates)
-    )
-    if (csb_present) {
+    sector_inds <- c("csb_public", "csb_private", "csb_none")
+    csb_present_any <- any(sector_inds %in% names(mbg_estimates))
+    csb_present_all <- all(sector_inds %in% names(mbg_estimates))
+    if (csb_present_all) {
       cli::cli_alert_info(
         paste0(
           "Rescaling MBG csb_public/csb_private/csb_none to sum to 100% ",
           "per {.val {primary_col}} (csb_priority_method = ",
           "{.val {csb_priority_method}}); csb_any set to ",
           "100% - csb_none."
+        )
+      )
+    } else if (csb_present_any) {
+      missing_sectors <- setdiff(sector_inds, names(mbg_estimates))
+      cli::cli_alert_warning(
+        paste0(
+          "csb_priority_method = {.val {csb_priority_method}} requires all ",
+          "three sector indicators (csb_public, csb_private, csb_none) to ",
+          "rescale to 100%. Missing: {.val {missing_sectors}}. ",
+          "Sector normalisation skipped."
         )
       )
     }
