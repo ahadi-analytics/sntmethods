@@ -196,6 +196,10 @@ run_mbg_pipeline <- function(
 
   csb_priority_method <- match.arg(csb_priority_method)
 
+  cli::cli_alert_info(
+    "CSB priority method: {.val {csb_priority_method}}{if (csb_priority_method == 'all') ' (overlaps allowed; csb_public + csb_private + csb_none may exceed 100%)' else ' (mutually exclusive; csb_public + csb_private + csb_none sums to 100%)'}"
+  )
+
   # Check for required spatial packages
   .check_spatial_pkg("sf", "run_mbg_pipeline")
   .check_spatial_pkg("terra", "run_mbg_pipeline")
