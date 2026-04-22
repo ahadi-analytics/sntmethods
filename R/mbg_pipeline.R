@@ -1007,7 +1007,8 @@ run_mbg_pipeline <- function(
       country_iso2 = country_iso2,
       adm3_sf = adm3_aligned,
       aggregation_level = aggregation_level,
-      cluster_interview_months = cluster_interview_months
+      cluster_interview_months = cluster_interview_months,
+      csb_priority_method = csb_priority_method
     )
 
     # Apply smart rounding
@@ -2715,6 +2716,158 @@ run_mbg_pipeline <- function(
 }
 
 
+#' Normalize CSB sector MBG estimates to a mutually-exclusive partition
+#'
+#' When \code{csb_priority_method} is anything other than \code{"all"},
+#' \code{csb_public + csb_private + csb_none} is guaranteed to equal the
+#' total sample size at the cluster level. Independent MBG binomial models
+#' for the three sectors do not preserve that constraint after
+#' logit-transform, spatial smoothing and population-weighted aggregation,
+#' so their admin-level posterior means typically sum to a value different
+#' from 1. This helper rescales the three sector estimates so they sum to 1
+#' per admin unit and derives \code{csb_any} as \code{1 - csb_none} for
+#' consistency. Lower/upper credible bounds are rescaled by the same
+#' per-row factor to preserve the relative uncertainty. Numerators are
+#' recomputed from the rescaled means when population columns are present.
+#'
+#' @param mbg_estimates Named list of admin-level estimate tibbles keyed by
+#'   indicator code. Each tibble is expected to contain at least
+#'   \code{primary_col} and \code{<ind>_mean}; optionally \code{_lower},
+#'   \code{_upper}, \code{_pop}.
+#' @param primary_col Character scalar, name of the admin join column
+#'   (\code{"adm2"} or \code{"adm3"}).
+#'
+#' @return Modified \code{mbg_estimates} list with rescaled CSB entries.
+#' @noRd
+.normalize_csb_mbg_estimates <- function(mbg_estimates, primary_col) {
+  sector_names <- c("csb_public", "csb_private", "csb_none")
+  if (!all(sector_names %in% names(mbg_estimates))) {
+    return(mbg_estimates)
+  }
+
+  # Build a combined table of the three sector means joined by primary_col.
+  mean_cols <- paste0(sector_names, "_mean")
+  joined <- NULL
+  for (i in seq_along(sector_names)) {
+    ind <- sector_names[i]
+    est <- mbg_estimates[[ind]]
+    if (is.null(est) || nrow(est) == 0) return(mbg_estimates)
+    if (!all(c(primary_col, mean_cols[i]) %in% names(est))) {
+      return(mbg_estimates)
+    }
+    part <- est |>
+      dplyr::select(dplyr::all_of(c(primary_col, mean_cols[i])))
+    joined <- if (is.null(joined)) part else
+      dplyr::full_join(joined, part, by = primary_col)
+  }
+
+  # Determine the indicator multiplier (CSB indicators use 100 -> means are
+  # stored on the [0, 100] percentage scale). Target per-admin sum for the
+  # three sectors is therefore `multiplier` (i.e. 100 for percentages).
+  multiplier <- tryCatch(
+    .mbg_indicator_multiplier("csb_public"),
+    error = function(e) 100
+  )
+
+  # Per-admin rescaling factor: multiplier / (pub + priv + none).
+  # Guard against zero / NA sums (fall back to no rescaling: factor = 1).
+  csb_sum <- joined[[mean_cols[1]]] +
+    joined[[mean_cols[2]]] +
+    joined[[mean_cols[3]]]
+  csb_factor <- ifelse(
+    is.na(csb_sum) | csb_sum <= 0, 1, multiplier / csb_sum
+  )
+  factor_tbl <- tibble::tibble(
+    !!primary_col := joined[[primary_col]],
+    csb_factor_tmp = csb_factor
+  )
+
+  rescale_est <- function(est, ind_name) {
+    if (is.null(est) || nrow(est) == 0) return(est)
+    est <- dplyr::left_join(est, factor_tbl, by = primary_col)
+    est$csb_factor_tmp <- ifelse(
+      is.na(est$csb_factor_tmp), 1, est$csb_factor_tmp
+    )
+    cols <- c(
+      paste0(ind_name, "_mean"),
+      paste0(ind_name, "_lower"),
+      paste0(ind_name, "_upper")
+    )
+    for (col in cols) {
+      if (col %in% names(est)) {
+        est[[col]] <- pmin(
+          pmax(est[[col]] * est$csb_factor_tmp, 0), multiplier
+        )
+      }
+    }
+    # Numerator is recomputed downstream in .build_final_dataset from
+    # the (now rescaled) mean column and the population column, so no
+    # further change is needed here.
+    est$csb_factor_tmp <- NULL
+    est
+  }
+
+  for (ind in sector_names) {
+    mbg_estimates[[ind]] <- rescale_est(mbg_estimates[[ind]], ind)
+  }
+
+  # Derive csb_any = 1 - csb_none for consistency with the new partition.
+  if ("csb_any" %in% names(mbg_estimates) &&
+      !is.null(mbg_estimates[["csb_none"]])) {
+    none_est <- mbg_estimates[["csb_none"]]
+    any_est  <- mbg_estimates[["csb_any"]]
+    if (!is.null(any_est) && nrow(any_est) > 0 &&
+        all(c(primary_col, "csb_none_mean") %in% names(none_est))) {
+
+      none_lookup <- none_est |>
+        dplyr::select(dplyr::all_of(c(primary_col, "csb_none_mean")))
+      if ("csb_none_lower" %in% names(none_est)) {
+        none_lookup$csb_none_lower <- none_est$csb_none_lower
+      }
+      if ("csb_none_upper" %in% names(none_est)) {
+        none_lookup$csb_none_upper <- none_est$csb_none_upper
+      }
+
+      any_est <- any_est |>
+        dplyr::left_join(none_lookup, by = primary_col, suffix = c("", ".none"))
+
+      if ("csb_any_mean" %in% names(any_est)) {
+        any_est$csb_any_mean <- pmin(
+          pmax(multiplier - any_est$csb_none_mean, 0), multiplier
+        )
+      }
+      # Lower bound of any = multiplier - upper bound of none (and vice
+      # versa), so swap when both are available. Guard against missing
+      # columns.
+      if ("csb_any_lower" %in% names(any_est) &&
+          "csb_none_upper" %in% names(any_est)) {
+        any_est$csb_any_lower <- pmin(
+          pmax(multiplier - any_est$csb_none_upper, 0), multiplier
+        )
+      }
+      if ("csb_any_upper" %in% names(any_est) &&
+          "csb_none_lower" %in% names(any_est)) {
+        any_est$csb_any_upper <- pmin(
+          pmax(multiplier - any_est$csb_none_lower, 0), multiplier
+        )
+      }
+
+      drop_cols <- intersect(
+        c("csb_none_mean", "csb_none_lower", "csb_none_upper"),
+        names(any_est)
+      )
+      if (length(drop_cols) > 0) {
+        any_est <- dplyr::select(any_est, -dplyr::all_of(drop_cols))
+      }
+
+      mbg_estimates[["csb_any"]] <- any_est
+    }
+  }
+
+  mbg_estimates
+}
+
+
 #' Build Final Dataset (Long Format)
 #'
 #' Converts wide-format MBG estimates and cluster data into a long-format
@@ -2737,10 +2890,37 @@ run_mbg_pipeline <- function(
   country_iso2 = NULL,
   adm3_sf = NULL,
   aggregation_level = "adm2",
-  cluster_interview_months = NULL
+  cluster_interview_months = NULL,
+  csb_priority_method = "all"
 ) {
   base_sf <- if (aggregation_level == "adm3") adm3_sf else adm2_sf
   primary_col <- if (aggregation_level == "adm3") "adm3" else "adm2"
+
+  # ---- Normalize CSB sector estimates to a mutually-exclusive partition ----
+  #
+  # Independent MBG binomial models for csb_public, csb_private and csb_none are
+  # fit on logit-GP scales and aggregated to admin level independently. Even
+  # when cluster-level counts satisfy pub + priv + none == N (guaranteed by
+  # csb_priority_method %in% c("first", "public", "private")), the smoothed
+  # posterior means do not sum to 1 after spatial prediction and population
+  # weighting. Rescale them here so the exported estimates respect the
+  # mutually-exclusive partition the user requested.
+  if (!identical(csb_priority_method, "all")) {
+    csb_present <- all(
+      c("csb_public", "csb_private", "csb_none") %in% names(mbg_estimates)
+    )
+    if (csb_present) {
+      cli::cli_alert_info(
+        paste0(
+          "Rescaling MBG csb_public/csb_private/csb_none to sum to 100% ",
+          "per {.val {primary_col}} (csb_priority_method = ",
+          "{.val {csb_priority_method}}); csb_any set to ",
+          "100% - csb_none."
+        )
+      )
+    }
+    mbg_estimates <- .normalize_csb_mbg_estimates(mbg_estimates, primary_col)
+  }
 
   # ---- Resolve admin column names in shapefile ----
 
