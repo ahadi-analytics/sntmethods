@@ -13,3 +13,4 @@
 ^data-raw$
 ^.claude
 src
+^install_sysdeps\.sh$
