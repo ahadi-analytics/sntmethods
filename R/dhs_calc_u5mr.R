@@ -101,41 +101,24 @@ calc_u5mr_dhs_core <- function(
   age_death_var <- survey_vars$age_at_death %||% "b7"
 
   if (!age_death_var %in% names(dhs_kr)) {
-    if ("b5" %in% names(dhs_kr)) {
-      cli::cli_alert_info(
-        "creating {.var {age_death_var}} from b5 (child alive)"
-      )
-
-      n_dead <- sum(dhs_kr$b5 == 0, na.rm = TRUE)
-
-      if (n_dead > 0) {
-        death_ages <- sample(
-          c(0, 0, 1, 2, 3, 6, 12, 24, 36),
-          n_dead,
-          replace = TRUE,
-          prob = c(
-            0.25,
-            0.15,
-            0.1,
-            0.05,
-            0.05,
-            0.1,
-            0.1,
-            0.1,
-            0.1
-          )
+    cli::cli_abort(
+      c(
+        "Required mortality variable {.var {age_death_var}} not found in KR recode.",
+        "i" = paste0(
+          "U5MR estimation requires the age-at-death variable ",
+          "(standard DHS code {.val b7}), which is already imputed in ",
+          "standard DHS recode files using the Croft (1991) hot-deck procedure."
+        ),
+        "x" = paste0(
+          "Synthetic imputation of death ages from a hardcoded distribution is ",
+          "non-reproducible and methodologically unsound; it has been removed."
+        ),
+        "*" = paste0(
+          "Please use a standard DHS KR recode file, or pass the correct ",
+          "variable name via {.arg survey_vars$age_at_death}."
         )
-
-        dhs_kr[[age_death_var]] <- NA
-        dhs_kr[[age_death_var]][dhs_kr$b5 == 0] <- death_ages
-      } else {
-        dhs_kr[[age_death_var]] <- NA
-      }
-    } else {
-      cli::cli_abort(
-        "no mortality variable (b7 or b5) found in dataset"
       )
-    }
+    )
   }
 
   # Guard: if age_at_death column exists but is entirely NA, skip

@@ -320,8 +320,7 @@ ahadi_find_onedrive_roots <- function(
       file.path(
         "C:/Users",
         user,
-        "OneDrive - Applied Health Analytics
-                for Delivery and Innovation Inc"
+        "OneDrive - Applied Health Analytics for Delivery and Innovation Inc"
       ),
       file.path("C:/Users", user, "Library", "CloudStorage"),
       file.path("C:/Users", user)

@@ -693,6 +693,29 @@ dhs_dictionary <- function() {
 ) {
   if (is.null(cluster_months) || nrow(cluster_months) == 0) return(NULL)
 
+  # Validate admin_sf has a CRS; without one, st_join produces unreliable
+  # matches because coordinates cannot be reconciled with cluster_sf (EPSG:4326)
+  if (!inherits(admin_sf, "sf")) {
+    cli::cli_abort("{.arg admin_sf} must be an {.cls sf} object.")
+  }
+  admin_crs <- sf::st_crs(admin_sf)
+  if (is.na(admin_crs)) {
+    cli::cli_abort(
+      c(
+        "{.arg admin_sf} has no CRS set.",
+        "i" = "A valid CRS is required to align admin polygons with cluster points (EPSG:4326).",
+        "*" = "Set one with e.g. {.code sf::st_crs(admin_sf) <- 4326} before calling."
+      )
+    )
+  }
+
+  # Validate required columns exist on admin_sf
+  if (!admin_col %in% names(admin_sf)) {
+    cli::cli_abort(
+      "Column {.val {admin_col}} (admin_col) not found in {.arg admin_sf}."
+    )
+  }
+
   # Determine which columns to carry from admin_sf for gap-filling
   has_parent <- !is.null(parent_col) && parent_col %in% names(admin_sf)
   select_cols <- if (has_parent) {
@@ -704,10 +727,7 @@ dhs_dictionary <- function() {
   cluster_sf <- cluster_months |>
     sf::st_as_sf(coords = c("x", "y"), crs = 4326, remove = FALSE)
 
-  admin_crs <- sf::st_crs(admin_sf)
-  if (!is.na(admin_crs)) {
-    cluster_sf <- sf::st_transform(cluster_sf, admin_crs)
-  }
+  cluster_sf <- sf::st_transform(cluster_sf, admin_crs)
 
   joined <- sf::st_join(
     cluster_sf,
