@@ -22,8 +22,9 @@ test_that("dhs_dictionary returns a tibble with correct columns", {
 test_that("dhs_dictionary has correct total row count", {
   dict <- dhs_dictionary()
 
-  # Sum of all individual dictionaries: 163
-  expect_equal(nrow(dict), 163L)
+  # Sum of all individual dictionaries: 165
+  # (includes `irs`/`irs_coverage` and `smc`/`smc_coverage` alias pairs)
+  expect_equal(nrow(dict), 165L)
 })
 
 

@@ -176,5 +176,7 @@ test_that("smc_dictionary returns correct structure", {
   expect_true("indicator" %in% names(dict))
   expect_true("numerator_description" %in% names(dict))
   expect_true("denominator_description" %in% names(dict))
-  expect_equal(nrow(dict), 1)
+  # Two rows: `smc` (short alias) and `smc_coverage` (full code)
+  expect_equal(nrow(dict), 2)
+  expect_setequal(dict$indicator_code, c("smc", "smc_coverage"))
 })
