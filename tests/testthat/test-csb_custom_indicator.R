@@ -280,17 +280,90 @@ test_that(".custom_csb_dictionary_rows returns one row per derived code", {
     c("csb_eff_dhis", "csb_eff_nondhis", "csb_eff_untreat")
   )
   expect_true(all(nzchar(out$indicator_title)))
-  expect_true(all(out$denominator_description == "Under 5 with fever"))
+  # Denominator now matches the built-in CSB family wording so MBG output
+  # is internally consistent.
+  expect_true(all(
+    out$denominator_description ==
+      "Children 0-59 months with fever (h22==1), alive (b5==1)"
+  ))
 })
 
 test_that(".custom_csb_dictionary_rows returns empty tibble when spec is NULL", {
   out <- sntmethods:::.custom_csb_dictionary_rows(NULL)
   expect_equal(nrow(out), 0L)
-  expect_setequal(
-    names(out),
-    c("indicator_code", "indicator_title",
-      "numerator_description", "denominator_description")
+  # Schema must match the populated case so dplyr::bind_rows() works
+  # without column-mismatch warnings inside .build_final_dataset().
+  expect_true(all(c(
+    "indicator_code", "indicator", "indicator_title",
+    "numerator_code", "numerator_description",
+    "denominator_code", "denominator_description",
+    "domain", "observation_unit", "dhs_recode", "calc_function",
+    "eligibility", "dhs_variables", "notes"
+  ) %in% names(out)))
+})
+
+test_that(".custom_csb_dictionary_rows embeds user-supplied vars per indicator", {
+  # Use the exact spec the user requested in production: full h32* lists
+  # for each partition. The dictionary must keep these verbatim so the
+  # Excel output is fully traceable back to the user's input.
+  spec <- sntmethods:::.validate_custom_csb_indicator_spec(list(
+    name = "csb_eff",
+    dhis_locs = c("h32a", "h32b", "h32c", "h32d", "h32e", "h32f", "h32i", "h32j"),
+    nondhis_locs = c("h32k", "h32l", "h32m", "h32n", "h32r"),
+    untreat_locs = c("h32s", "h32t", "h32x")
+  ))
+  out <- sntmethods:::.custom_csb_dictionary_rows(spec)
+
+  dhis_row    <- out[out$indicator_code == "csb_eff_dhis", ]
+  nondhis_row <- out[out$indicator_code == "csb_eff_nondhis", ]
+  untreat_row <- out[out$indicator_code == "csb_eff_untreat", ]
+
+  # numerator_description carries the literal user-supplied variable list
+  expect_true(grepl(
+    "h32a, h32b, h32c, h32d, h32e, h32f, h32i, h32j",
+    dhis_row$numerator_description, fixed = TRUE
+  ))
+  expect_true(grepl(
+    "h32k, h32l, h32m, h32n, h32r",
+    nondhis_row$numerator_description, fixed = TRUE
+  ))
+  expect_true(grepl(
+    "h32s, h32t, h32x",
+    untreat_row$numerator_description, fixed = TRUE
+  ))
+
+  # dhs_variables carries the same list for downstream auditing
+  expect_true(grepl(
+    "h32a, h32b, h32c, h32d, h32e, h32f, h32i, h32j",
+    dhis_row$dhs_variables, fixed = TRUE
+  ))
+
+  # denominator + numerator_code + domain are populated for every row
+  expect_true(all(out$denominator_code == "u5_fever"))
+  expect_equal(
+    out$numerator_code,
+    c("n_csb_eff_dhis", "n_csb_eff_nondhis", "n_csb_eff_untreat")
   )
+  expect_true(all(out$domain == "CSB (custom)"))
+  expect_true(all(out$dhs_recode == "KR"))
+  expect_true(all(out$calc_function == "calc_csb_custom_mbg"))
+})
+
+test_that(".custom_csb_dictionary_rows handles empty / missing slots gracefully", {
+  # If a user passes an empty vector (e.g. no untreat_locs) the row is
+  # still emitted, just with a clear "(none specified)" sentinel so the
+  # dictionary remains traceable.
+  spec <- list(
+    name = "csb_eff2",
+    dhis_locs = c("h32a"),
+    nondhis_locs = c("h32k"),
+    untreat_locs = character(0)
+  )
+  # Cannot run the validator on this (it requires non-empty), so call
+  # the helper directly to verify graceful handling.
+  out <- sntmethods:::.custom_csb_dictionary_rows(spec)
+  untreat_row <- out[out$indicator_code == "csb_eff2_untreat", ]
+  expect_true(grepl("(none specified)", untreat_row$numerator_description, fixed = TRUE))
 })
 
 

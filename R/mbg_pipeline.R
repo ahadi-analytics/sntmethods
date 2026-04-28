@@ -3473,25 +3473,43 @@ run_mbg_pipeline <- function(
     )
 
   # ---- Join indicator metadata from dhs_dictionary() ----
+  #
+  # The static dictionary plus runtime custom-CSB rows carry the full set
+  # of per-indicator metadata (numerator_code, dhs_variables, calc
+  # function, eligibility, ...). For backwards compatibility we still
+  # surface `indicator` (= indicator_title) plus the long descriptions
+  # used by the column-order helper, and we additionally surface the
+  # traceability columns when they are available so custom CSB
+  # indicators export the exact user-supplied variable list per row.
 
   dict <- dhs_dictionary() |>
     dplyr::select(
       indicator_code,
       indicator = indicator_title,
       numerator_description,
-      denominator_description
+      denominator_description,
+      dplyr::any_of(c(
+        "numerator_code", "denominator_code",
+        "dhs_variables", "calc_function", "eligibility"
+      ))
     ) |>
     dplyr::distinct(indicator_code, .keep_all = TRUE)
 
   # Bind on runtime metadata for custom CSB indicators (kept out of the
-  # public dictionary API but labeled in pipeline output).
+  # public dictionary API but labeled in pipeline output). The custom
+  # rows carry per-indicator user-supplied variable lists in
+  # `numerator_description` and `dhs_variables` for full traceability.
   if (!is.null(custom_csb_indicator)) {
     custom_dict <- .custom_csb_dictionary_rows(custom_csb_indicator) |>
       dplyr::select(
         indicator_code,
         indicator = indicator_title,
         numerator_description,
-        denominator_description
+        denominator_description,
+        dplyr::any_of(c(
+          "numerator_code", "denominator_code",
+          "dhs_variables", "calc_function", "eligibility"
+        ))
       )
     if (nrow(custom_dict) > 0) {
       dict <- dplyr::bind_rows(dict, custom_dict) |>
@@ -3540,7 +3558,11 @@ run_mbg_pipeline <- function(
       "point", "ci_l", "ci_u",
       "numerator", "denominator",
       "survey_numerator", "survey_denominator", "n_survey_clusters",
-      "numerator_description", "denominator_description",
+      # Traceability columns (only present when the dictionary surfaces
+      # them, e.g. for custom CSB indicators with user-supplied vars).
+      "numerator_code", "numerator_description",
+      "denominator_code", "denominator_description",
+      "dhs_variables", "calc_function", "eligibility",
       "notes"
     )
     extra <- setdiff(names(df), col_order)

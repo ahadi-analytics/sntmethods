@@ -587,60 +587,137 @@
 
 #' Build temporary dictionary rows for runtime custom CSB indicators
 #'
-#' Builds a tibble with the same metadata columns as
-#' \code{dhs_dictionary()} (`indicator_code`, `indicator_title`,
-#' `numerator_description`, `denominator_description`) for the three
-#' derived custom CSB codes. The pipeline binds these rows to the static
-#' \code{dhs_dictionary()} before joining indicator metadata onto the final
-#' MBG output, so custom indicators are not exposed in the public
+#' Builds a tibble carrying full per-indicator metadata for each of the
+#' three derived custom CSB codes (`<name>_dhis`, `<name>_nondhis`,
+#' `<name>_untreat`). The pipeline binds these rows to the static
+#' \code{dhs_dictionary()} before joining indicator metadata onto the
+#' final MBG output, so custom indicators are not exposed in the public
 #' dictionary API but still get fully labeled in pipeline outputs.
+#'
+#' Each row embeds the actual user-supplied DHS variable list
+#' (e.g. \code{h32a, h32b, h32c, h32d, h32e, h32f, h32i, h32j} for
+#' \code{_dhis}) inside both \code{numerator_description} and
+#' \code{dhs_variables} so the Excel output is fully traceable: a
+#' downstream reader can see exactly which `h32*` codes contributed to
+#' each numerator. The denominator description matches the built-in CSB
+#' family ("Children 0-59 months with fever, alive (h22==1, b5==1)").
 #'
 #' @param custom_csb_indicator A validated user spec.
 #' @return A tibble with one row per derived custom CSB code, or an empty
 #'   tibble (with the expected columns) when `custom_csb_indicator` is NULL.
 #' @noRd
 .custom_csb_dictionary_rows <- function(custom_csb_indicator) {
-  cols <- c(
-    "indicator_code", "indicator_title",
-    "numerator_description", "denominator_description"
-  )
   empty <- tibble::tibble(
-    indicator_code = character(0),
-    indicator_title = character(0),
-    numerator_description = character(0),
-    denominator_description = character(0)
+    indicator_code          = character(0),
+    indicator               = character(0),
+    indicator_title         = character(0),
+    numerator_code          = character(0),
+    numerator_description   = character(0),
+    denominator_code        = character(0),
+    denominator_description = character(0),
+    domain                  = character(0),
+    observation_unit        = character(0),
+    dhs_recode              = character(0),
+    calc_function           = character(0),
+    eligibility             = character(0),
+    dhs_variables           = character(0),
+    notes                   = character(0)
   )
   if (is.null(custom_csb_indicator)) return(empty)
 
   prefix <- custom_csb_indicator$name
-  denom_desc <- "Under 5 with fever"
-  pretty_prefix <- prefix
+
+  # Pull the actual user-supplied variable lists. These come from the
+  # validated spec so they are guaranteed to be character vectors.
+  dhis_vars    <- custom_csb_indicator$dhis_locs    %||% character(0)
+  nondhis_vars <- custom_csb_indicator$nondhis_locs %||% character(0)
+  untreat_vars <- custom_csb_indicator$untreat_locs %||% character(0)
+
+  # If the user passed labels rather than h32 codes, the spec validator
+  # accepts both; we keep whatever they passed verbatim so the user can
+  # always trace back to their input. Joined with commas for the
+  # `dhs_variables` column (matches the built-in dictionary style).
+  fmt <- function(v) {
+    if (length(v) == 0) "(none specified)" else paste(v, collapse = ", ")
+  }
+  dhis_str    <- fmt(dhis_vars)
+  nondhis_str <- fmt(nondhis_vars)
+  untreat_str <- fmt(untreat_vars)
+
+  # Standard CSB-family denominator (matches built-in csb_* indicators).
+  denom_desc <- "Children 0-59 months with fever (h22==1), alive (b5==1)"
+  denom_code <- "u5_fever"
+  elig       <- denom_desc
+
+  ind_codes <- c(
+    paste0(prefix, "_dhis"),
+    paste0(prefix, "_nondhis"),
+    paste0(prefix, "_untreat")
+  )
+
+  ind_titles <- c(
+    paste0(
+      "Custom care seeking (DHIS sources) [", prefix,
+      "] among under 5 with fever"
+    ),
+    paste0(
+      "Custom care seeking (non-DHIS sources) [", prefix,
+      "] among under 5 with fever"
+    ),
+    paste0(
+      "Custom no/untreated care seeking [", prefix,
+      "] among under 5 with fever"
+    )
+  )
+
+  # Numerator descriptions embed the exact user-supplied variables so a
+  # downstream consumer can audit which `h32*` slots fed each numerator.
+  num_descs <- c(
+    paste0(
+      "Children with fever who sought care at user-listed DHIS sources [",
+      dhis_str, "]"
+    ),
+    paste0(
+      "Children with fever who sought care at user-listed non-DHIS ",
+      "sources [", nondhis_str, "] (and not at any DHIS source)"
+    ),
+    paste0(
+      "Children with fever who did not seek care at any user-listed ",
+      "DHIS or non-DHIS source [untreat: ", untreat_str, "]"
+    )
+  )
+
+  # `dhs_variables` carries the full per-row variable list so the
+  # exported dictionary tab in Excel records exactly which DHS variables
+  # produced each derived indicator (full traceability).
+  dhs_var_strs <- c(
+    paste0("h22, b5, hw1; numerator vars: ", dhis_str),
+    paste0("h22, b5, hw1; numerator vars: ", nondhis_str),
+    paste0("h22, b5, hw1; numerator vars: ", untreat_str)
+  )
+
   tibble::tibble(
-    indicator_code = c(
-      paste0(prefix, "_dhis"),
-      paste0(prefix, "_nondhis"),
-      paste0(prefix, "_untreat")
-    ),
-    indicator_title = c(
+    indicator_code          = ind_codes,
+    indicator               = ind_titles,
+    indicator_title         = ind_titles,
+    numerator_code          = paste0("n_", ind_codes),
+    numerator_description   = num_descs,
+    denominator_code        = rep(denom_code, 3L),
+    denominator_description = rep(denom_desc, 3L),
+    domain                  = rep("CSB (custom)", 3L),
+    observation_unit        = rep("Person", 3L),
+    dhs_recode              = rep("KR", 3L),
+    calc_function           = rep("calc_csb_custom_mbg", 3L),
+    eligibility             = rep(elig, 3L),
+    dhs_variables           = dhs_var_strs,
+    notes                   = rep(
       paste0(
-        "Custom care seeking (DHIS sources) [", pretty_prefix,
-        "] among under 5 with fever"
+        "Runtime user-defined CSB partition (custom_csb_indicator); ",
+        "numerator may be NA when no respondents reported the listed ",
+        "sources for a given admin unit."
       ),
-      paste0(
-        "Custom care seeking (non-DHIS sources) [", pretty_prefix,
-        "] among under 5 with fever"
-      ),
-      paste0(
-        "Custom no/untreated care seeking [", pretty_prefix,
-        "] among under 5 with fever"
-      )
-    ),
-    numerator_description = c(
-      "Sought care at user-listed DHIS sources",
-      "Sought care at user-listed non-DHIS sources (and not at any DHIS source)",
-      "Did not seek care at any user-listed DHIS or non-DHIS source"
-    ),
-    denominator_description = rep(denom_desc, 3L)
+      3L
+    )
   )
 }
 
