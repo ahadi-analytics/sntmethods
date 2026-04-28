@@ -176,10 +176,16 @@ four character fields:
 \item \code{name}: A short alphanumeric prefix used to build the
 three derived indicator codes (e.g. \code{"foo"} -> \code{foo_dhis},
 \code{foo_nondhis}, \code{foo_untreat}).
-\item \code{dhis_locs}: Character vector of h32 label substrings
-(case-insensitive) that map to the DHIS bucket.
-\item \code{nondhis_locs}: Character vector for the non-DHIS bucket.
-\item \code{untreat_locs}: Character vector for the untreated bucket.
+\item \code{dhis_locs}: Character vector of h32 entries that map to
+the DHIS bucket. Each entry may be either an h32 variable name
+(e.g. \code{"h32a"}) or a haven label string (case-insensitive).
+The two styles can be mixed in the same vector; variable-name
+matches take precedence over label matches when an h32 column
+is referenced both ways.
+\item \code{nondhis_locs}: Character vector for the non-DHIS bucket
+(same dual-style semantics as \code{dhis_locs}).
+\item \code{untreat_locs}: Character vector for the untreated bucket
+(same dual-style semantics as \code{dhis_locs}).
 }
 To activate the custom partition in pipeline output, include the
 \code{name} (or any of the three derived codes) in \code{indicators}.

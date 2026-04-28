@@ -712,27 +712,59 @@
     )
   }
 
-  # Normalize and check pairwise disjointness (NAs in untreat are tolerated
-  # but ignored here since they cannot conflict with non-NA labels).
-  norm_dhis    <- unique(.normalize_custom_csb_label(spec$dhis_locs))
-  norm_nondhis <- unique(.normalize_custom_csb_label(spec$nondhis_locs))
-  norm_untreat <- unique(.normalize_custom_csb_label(spec$untreat_locs))
+  # Each *_locs entry may be either an h32 variable name (matches
+  # ^h32[a-z0-9]+$) or a haven label string. Split the two so the
+  # classification builder can resolve var names first and labels second.
+  is_h32_varname <- function(x) {
+    !is.na(x) & grepl("^h32[a-z0-9]+$", x)
+  }
+  split_spec <- function(vec) {
+    vec_chr <- as.character(vec)
+    is_var <- is_h32_varname(vec_chr)
+    list(
+      vars   = unique(vec_chr[is_var & !is.na(vec_chr)]),
+      labels = vec_chr[!is_var | is.na(vec_chr)]
+    )
+  }
+  parts_dhis    <- split_spec(spec$dhis_locs)
+  parts_nondhis <- split_spec(spec$nondhis_locs)
+  parts_untreat <- split_spec(spec$untreat_locs)
+
+  # Normalize labels (NAs in untreat are tolerated but ignored for
+  # conflict detection since they cannot conflict with non-NA labels).
+  norm_dhis    <- unique(.normalize_custom_csb_label(parts_dhis$labels))
+  norm_nondhis <- unique(.normalize_custom_csb_label(parts_nondhis$labels))
+  norm_untreat <- unique(.normalize_custom_csb_label(parts_untreat$labels))
   norm_untreat_nona <- norm_untreat[!is.na(norm_untreat)]
 
-  pairs <- list(
+  # Pairwise disjointness on labels
+  label_pairs <- list(
     list("dhis_locs", "nondhis_locs", intersect(norm_dhis, norm_nondhis)),
     list("dhis_locs", "untreat_locs", intersect(norm_dhis, norm_untreat_nona)),
     list("nondhis_locs", "untreat_locs",
          intersect(norm_nondhis, norm_untreat_nona))
   )
-  overlaps <- Filter(function(p) length(p[[3]]) > 0, pairs)
+  label_overlaps <- Filter(function(p) length(p[[3]]) > 0, label_pairs)
+
+  # Pairwise disjointness on var names
+  var_pairs <- list(
+    list("dhis_locs", "nondhis_locs",
+         intersect(parts_dhis$vars, parts_nondhis$vars)),
+    list("dhis_locs", "untreat_locs",
+         intersect(parts_dhis$vars, parts_untreat$vars)),
+    list("nondhis_locs", "untreat_locs",
+         intersect(parts_nondhis$vars, parts_untreat$vars))
+  )
+  var_overlaps <- Filter(function(p) length(p[[3]]) > 0, var_pairs)
+
+  overlaps <- c(label_overlaps, var_overlaps)
   if (length(overlaps) > 0) {
     msgs <- vapply(overlaps, function(p) {
       sprintf("%s & %s: %s", p[[1]], p[[2]],
               paste(p[[3]], collapse = ", "))
     }, character(1))
     cli::cli_abort(c(
-      "{.field custom_csb_indicator} label lists overlap (must be disjoint after normalization):",
+      "{.field custom_csb_indicator} entries overlap (must be disjoint after normalization):",
       stats::setNames(msgs, rep("x", length(msgs)))
     ))
   }
@@ -740,6 +772,9 @@
   attr(spec, "label_norm_dhis")    <- norm_dhis
   attr(spec, "label_norm_nondhis") <- norm_nondhis
   attr(spec, "label_norm_untreat") <- norm_untreat
+  attr(spec, "vars_dhis")    <- parts_dhis$vars
+  attr(spec, "vars_nondhis") <- parts_nondhis$vars
+  attr(spec, "vars_untreat") <- parts_untreat$vars
   invisible(spec)
 }
 
@@ -815,6 +850,10 @@
   norm_untreat <- attr(spec, "label_norm_untreat")
   norm_untreat_nona <- norm_untreat[!is.na(norm_untreat)]
 
+  vars_dhis    <- attr(spec, "vars_dhis")    %||% character(0)
+  vars_nondhis <- attr(spec, "vars_nondhis") %||% character(0)
+  vars_untreat <- attr(spec, "vars_untreat") %||% character(0)
+
   observed <- .extract_custom_csb_h32_labels(dhs_kr)
   if (nrow(observed) == 0) {
     cli::cli_warn(
@@ -828,8 +867,14 @@
     ))
   }
 
+  # Var-name routing wins over label routing because it is more specific
+  # (it disambiguates h32 columns that share an identical haven label,
+  # e.g. h32e and h32n both labelled "Fever/cough: comm.health wrkr").
   observed$csb_custom <- dplyr::case_when(
-    observed$label_norm %in% norm_dhis ~ "dhis",
+    observed$variable %in% vars_dhis    ~ "dhis",
+    observed$variable %in% vars_nondhis ~ "nondhis",
+    observed$variable %in% vars_untreat ~ "untreat",
+    observed$label_norm %in% norm_dhis    ~ "dhis",
     observed$label_norm %in% norm_nondhis ~ "nondhis",
     observed$label_norm %in% norm_untreat_nona ~ "untreat",
     TRUE ~ NA_character_
@@ -845,19 +890,25 @@
     cli::cli_abort(c(
       "{.arg custom_csb_indicator} does not classify {nrow(unmapped)} observed h32 label{?s}:",
       stats::setNames(msgs, rep("x", length(msgs))),
-      "i" = "Add each label to one of {.field dhis_locs}, {.field nondhis_locs}, or {.field untreat_locs}."
+      "i" = "Add each variable name (e.g. {.code h32a}) or label to one of {.field dhis_locs}, {.field nondhis_locs}, or {.field untreat_locs}."
     ))
   }
 
-  # Informational: list extra user labels not used by this survey
+  # Informational: list extra user-supplied entries not present in this survey
+  used_vars <- observed$variable
   used_norm <- observed$label_norm
-  extra_dhis    <- setdiff(norm_dhis, used_norm)
-  extra_nondhis <- setdiff(norm_nondhis, used_norm)
-  extra_untreat <- setdiff(norm_untreat_nona, used_norm)
-  n_extra <- length(extra_dhis) + length(extra_nondhis) + length(extra_untreat)
+  extra_var_dhis    <- setdiff(vars_dhis,    used_vars)
+  extra_var_nondhis <- setdiff(vars_nondhis, used_vars)
+  extra_var_untreat <- setdiff(vars_untreat, used_vars)
+  extra_lab_dhis    <- setdiff(norm_dhis,    used_norm)
+  extra_lab_nondhis <- setdiff(norm_nondhis, used_norm)
+  extra_lab_untreat <- setdiff(norm_untreat_nona, used_norm)
+  n_extra <- length(extra_var_dhis) + length(extra_var_nondhis) +
+    length(extra_var_untreat) + length(extra_lab_dhis) +
+    length(extra_lab_nondhis) + length(extra_lab_untreat)
   if (n_extra > 0) {
     cli::cli_alert_info(
-      "Custom CSB: {n_extra} user-supplied label{?s} not present in this survey (ignored)."
+      "Custom CSB: {n_extra} user-supplied entr{?y/ies} not present in this survey (ignored)."
     )
   }
 

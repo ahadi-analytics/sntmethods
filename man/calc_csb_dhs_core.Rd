@@ -83,8 +83,15 @@ non-DHIS source and not at any DHIS source), and \code{<name>_untreat}
 (did not seek care at any user-listed source). The list must have
 four character fields: \code{name} (alphanumeric prefix matching
 pattern \code{^csb_[a-z0-9_]+$}), \code{dhis_locs},
-\code{nondhis_locs}, and \code{untreat_locs} (each a character vector
-of h32 label substrings, case-insensitive). The custom triple is
+\code{nondhis_locs}, and \code{untreat_locs}. Each \code{*_locs}
+vector may contain either \strong{h32 variable names}
+(e.g. \code{"h32a"}, \code{"h32e"}) which are matched as columns in
+\code{dhs_kr}, or \strong{haven label strings} which are matched
+case-insensitively against the \code{label} attribute of each h32
+column. The two styles can be mixed in the same vector. Variable-name
+matches take precedence over label matches, which is useful when two
+h32 columns share an identical haven label (e.g. \code{h32e} and
+\code{h32n} both labelled "comm.health wrkr"). The custom triple is
 always mutually exclusive at the child level (priority
 \code{dhis > nondhis > untreat}). Default: NULL (disabled).}
 }
