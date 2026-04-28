@@ -630,6 +630,14 @@ dhs_read <- function(
       out <- janitor::remove_empty(out, which = "rows")
     )
 
+    # Defensive dedupe on standard DHS unique-row keys.
+    # Some parquet files contain each respondent twice (e.g. Ghana KR for
+    # 2008 / 2014 / 2022 -- every (caseid, bidx) appears as 2 rows). Dedupe
+    # on file-type-specific keys to guarantee one row per respondent unit.
+    # Skipped silently when keys aren't present (e.g. GE / SR / aggregated
+    # files) or when file_type is NULL.
+    out <- .dhs_dedupe_rows(out, file_type, verbose = verbose)
+
     n <- nrow(out)
     if (verbose) {
       cli::cli_inform("Rows loaded: {format(n, big.mark = ',')}")
@@ -756,6 +764,10 @@ dhs_read <- function(
       dplyr::collect() |>
       janitor::remove_empty(which = c("rows", "cols"))
   )
+
+  # Defensive dedupe on standard DHS unique-row keys (see direct-read
+  # branch above for rationale).
+  out <- .dhs_dedupe_rows(out, file_type, verbose = verbose)
 
   n <- nrow(out)
   if (verbose) {
@@ -904,4 +916,100 @@ cmc_to_date <- function(cmc) {
   year <- floor((cmc - 1) / 12) + 1900
   month <- ((cmc - 1) %% 12) + 1
   as.Date(paste(year, month, 15, sep = "-"))
+}
+
+
+#' Deduplicate DHS recode rows on file-type-specific unique keys
+#'
+#' Some DHS parquet partitions contain each respondent unit twice -- e.g.
+#' Ghana KR for survey years 2008 / 2014 / 2022 stores every
+#' \code{(caseid, bidx)} as two rows. Repeated rows inflate denominators
+#' (every count and direct estimate doubles), distort cluster-level sample
+#' sizes for MBG models, and produce ill-conditioned INLA hyperparameter
+#' posteriors (manifesting as credible intervals spanning ~0--90\%).
+#'
+#' This helper performs a defensive \code{dplyr::distinct()} on the
+#' standard DHS unique-row keys for the given recode file type, so every
+#' downstream consumer of \code{dhs_read()} sees one row per respondent
+#' unit. It is a no-op when:
+#' \itemize{
+#'   \item \code{file_type} is \code{NULL} or unrecognised (e.g. GE, SR,
+#'         aggregated outputs);
+#'   \item Any of the dedupe keys is missing from \code{x};
+#'   \item The data contained no duplicates (no rows are removed).
+#' }
+#'
+#' Keys used:
+#' \tabular{ll}{
+#'   \strong{file_type} \tab \strong{keys} \cr
+#'   KR / BR \tab survey_id, caseid, bidx \cr
+#'   IR      \tab survey_id, caseid \cr
+#'   MR      \tab survey_id, mcaseid \cr
+#'   PR / AR \tab survey_id, hhid, hvidx \cr
+#'   HR      \tab survey_id, hhid \cr
+#'   CR      \tab survey_id, caseid
+#' }
+#'
+#' @param x A data frame returned by an Arrow read of the DHS parquet
+#'   store.
+#' @param file_type Character scalar identifying the DHS recode
+#'   (e.g. \code{"KR"}, \code{"PR"}). May be \code{NULL}.
+#' @param verbose Logical; emit a CLI warning when duplicates are
+#'   removed.
+#'
+#' @return The (possibly de-duplicated) data frame.
+#' @noRd
+.dhs_dedupe_rows <- function(x, file_type, verbose = TRUE) {
+  if (is.null(file_type) || length(file_type) != 1L) {
+    return(x)
+  }
+  # Dedupe keys deliberately exclude `survey_id` because some parquet
+  # partitions contain a duplicate copy of every respondent with
+  # `survey_id = NA` alongside the canonical row with the populated
+  # `survey_id`. Including `survey_id` in the keys would treat those as
+  # distinct and the duplicates would survive. Using just the natural
+  # DHS within-survey keys (combined with the country_code / survey_year
+  # filter already applied upstream) collapses NA-survey_id duplicates
+  # onto the canonical row.
+  dedupe_keys <- switch(
+    as.character(file_type),
+    KR = c("caseid", "bidx"),
+    BR = c("caseid", "bidx"),
+    IR = c("caseid"),
+    MR = c("mcaseid"),
+    PR = c("hhid", "hvidx"),
+    HR = c("hhid"),
+    AR = c("hhid", "hvidx"),
+    CR = c("caseid"),
+    NULL
+  )
+  if (is.null(dedupe_keys)) {
+    return(x)
+  }
+  if (!all(dedupe_keys %in% names(x))) {
+    return(x)
+  }
+  # Prefer rows with non-NA `survey_id` when both versions of a duplicate
+  # exist, so the canonical row survives the `distinct()` call.
+  if ("survey_id" %in% names(x)) {
+    x <- x[order(is.na(x[["survey_id"]])), , drop = FALSE]
+  }
+  n_before <- nrow(x)
+  x <- dplyr::distinct(
+    x,
+    dplyr::across(dplyr::all_of(dedupe_keys)),
+    .keep_all = TRUE
+  )
+  n_after <- nrow(x)
+  if (isTRUE(verbose) && n_after < n_before) {
+    cli::cli_alert_warning(
+      paste0(
+        "Removed ", format(n_before - n_after, big.mark = ","),
+        " duplicate row(s) on keys ",
+        paste0("'", dedupe_keys, "'", collapse = ", "),
+        " (file_type = '", file_type, "')."
+      )
+    )
+  }
+  x
 }
