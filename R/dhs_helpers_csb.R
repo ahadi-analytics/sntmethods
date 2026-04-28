@@ -556,3 +556,422 @@
 
   result
 }
+
+
+# ---------------------------------------------------------------------------
+# Custom CSB indicator helpers (runtime-scoped)
+#
+# These helpers support the optional `custom_csb_indicator` argument of
+# `run_mbg_pipeline()`, which lets a user define a single mutually exclusive
+# care-seeking partition (`<name>_dhis`, `<name>_nondhis`, `<name>_untreat`)
+# from three lists of treatment-source labels. The helpers are intentionally
+# kept separate from `.classify_csb_from_h32()` so the built-in CSB pipeline
+# remains untouched.
+# ---------------------------------------------------------------------------
+
+#' Built-in CSB indicator codes that custom names must not collide with.
+#' @noRd
+.builtin_csb_indicator_codes <- function() {
+  c(
+    "csb_any", "csb_public", "csb_pub_nochw", "csb_chw",
+    "csb_private", "csb_priv_formal", "csb_pharmacy",
+    "csb_priv_informal", "csb_priv_form_pha",
+    "csb_trained", "csb_none",
+    "csb_q1", "csb_q2", "csb_q3", "csb_q4", "csb_q5"
+  )
+}
+
+
+#' Derived custom CSB sub-indicator names
+#'
+#' @param custom_csb_indicator Validated user spec list (must contain `name`).
+#' @return Character vector `c("<name>_dhis", "<name>_nondhis", "<name>_untreat")`.
+#' @noRd
+.custom_csb_indicator_names <- function(custom_csb_indicator) {
+  if (is.null(custom_csb_indicator)) return(character(0))
+  paste0(
+    custom_csb_indicator$name,
+    c("_dhis", "_nondhis", "_untreat")
+  )
+}
+
+
+#' Normalize a CSB label string for matching
+#'
+#' Lowercases, strips leading/trailing whitespace, and collapses runs of
+#' internal whitespace to a single space. Used so user-supplied labels and
+#' DHS haven labels match consistently across surveys with minor formatting
+#' differences (extra spaces, mixed case).
+#'
+#' `NA` values are returned as-is so the helper can be vectorized over
+#' character vectors that may contain `NA_character_`.
+#'
+#' @param x Character vector.
+#' @return Character vector of the same length, lowercased and trimmed.
+#' @noRd
+.normalize_custom_csb_label <- function(x) {
+  if (is.null(x)) return(character(0))
+  if (length(x) == 0) return(character(0))
+  out <- ifelse(is.na(x), NA_character_, tolower(trimws(as.character(x))))
+  # Collapse runs of internal whitespace to a single space (only for non-NA)
+  out <- ifelse(
+    is.na(out), NA_character_, gsub("\\s+", " ", out, perl = TRUE)
+  )
+  out
+}
+
+
+#' Validate the structure of a `custom_csb_indicator` spec
+#'
+#' Performs all checks that can be done without a DHS dataset: presence of
+#' the four required fields, type checks, name pattern, name collisions,
+#' and pairwise-disjointness of the three label lists after normalization.
+#' Per-survey label coverage is checked separately by
+#' `.build_custom_csb_classification()`.
+#'
+#' @param custom_csb_indicator A list with `name`, `dhis_locs`,
+#'   `nondhis_locs`, `untreat_locs`.
+#' @param other_indicators Optional character vector of other indicator codes
+#'   in the current pipeline run. Used to flag derived-name collisions.
+#' @return Invisibly returns the spec with normalized label vectors attached
+#'   as attributes (`label_norm_dhis`, etc.) for downstream reuse.
+#' @noRd
+.validate_custom_csb_indicator_spec <- function(
+  custom_csb_indicator,
+  other_indicators = character(0)
+) {
+  spec <- custom_csb_indicator
+  if (!is.list(spec) || is.data.frame(spec)) {
+    cli::cli_abort(
+      "{.arg custom_csb_indicator} must be a named list."
+    )
+  }
+
+  required <- c("name", "dhis_locs", "nondhis_locs", "untreat_locs")
+  missing_fields <- setdiff(required, names(spec))
+  if (length(missing_fields) > 0) {
+    cli::cli_abort(c(
+      "{.arg custom_csb_indicator} is missing required field{?s}: {.val {missing_fields}}",
+      "i" = "Required fields: {.val {required}}"
+    ))
+  }
+
+  # name -- single non-empty string, regex constrained, no collision
+  nm <- spec$name
+  if (!is.character(nm) || length(nm) != 1L || is.na(nm) || !nzchar(nm)) {
+    cli::cli_abort(
+      "{.field custom_csb_indicator$name} must be a single non-empty character."
+    )
+  }
+  if (!grepl("^csb_[a-z0-9_]+$", nm)) {
+    cli::cli_abort(c(
+      "{.field custom_csb_indicator$name} = {.val {nm}} is not a valid identifier.",
+      "i" = "Must match pattern {.code ^csb_[a-z0-9_]+$} (lowercase letters, digits, underscores)."
+    ))
+  }
+  builtin <- .builtin_csb_indicator_codes()
+  if (nm %in% builtin) {
+    cli::cli_abort(c(
+      "{.field custom_csb_indicator$name} = {.val {nm}} collides with a built-in CSB indicator.",
+      "i" = "Pick a different prefix (e.g. {.val csb_eff})."
+    ))
+  }
+  derived <- paste0(nm, c("_dhis", "_nondhis", "_untreat"))
+  collide_derived <- intersect(derived, builtin)
+  if (length(collide_derived) > 0) {
+    cli::cli_abort(c(
+      "Derived custom CSB names collide with built-in indicators: {.val {collide_derived}}",
+      "i" = "Pick a different prefix for {.field custom_csb_indicator$name}."
+    ))
+  }
+  collide_other <- intersect(derived, other_indicators)
+  if (length(collide_other) > 0) {
+    cli::cli_abort(c(
+      "Derived custom CSB names collide with user-requested indicators: {.val {collide_other}}",
+      "i" = "Pick a different prefix for {.field custom_csb_indicator$name} or remove the conflicting indicators."
+    ))
+  }
+
+  # label vectors -- character, NA only allowed in untreat_locs
+  for (slot in c("dhis_locs", "nondhis_locs", "untreat_locs")) {
+    val <- spec[[slot]]
+    if (!is.character(val)) {
+      cli::cli_abort(
+        "{.field custom_csb_indicator${slot}} must be a character vector."
+      )
+    }
+  }
+  if (anyNA(spec$dhis_locs)) {
+    cli::cli_abort(
+      "{.field custom_csb_indicator$dhis_locs} must not contain NA values."
+    )
+  }
+  if (anyNA(spec$nondhis_locs)) {
+    cli::cli_abort(
+      "{.field custom_csb_indicator$nondhis_locs} must not contain NA values."
+    )
+  }
+
+  # Normalize and check pairwise disjointness (NAs in untreat are tolerated
+  # but ignored here since they cannot conflict with non-NA labels).
+  norm_dhis    <- unique(.normalize_custom_csb_label(spec$dhis_locs))
+  norm_nondhis <- unique(.normalize_custom_csb_label(spec$nondhis_locs))
+  norm_untreat <- unique(.normalize_custom_csb_label(spec$untreat_locs))
+  norm_untreat_nona <- norm_untreat[!is.na(norm_untreat)]
+
+  pairs <- list(
+    list("dhis_locs", "nondhis_locs", intersect(norm_dhis, norm_nondhis)),
+    list("dhis_locs", "untreat_locs", intersect(norm_dhis, norm_untreat_nona)),
+    list("nondhis_locs", "untreat_locs",
+         intersect(norm_nondhis, norm_untreat_nona))
+  )
+  overlaps <- Filter(function(p) length(p[[3]]) > 0, pairs)
+  if (length(overlaps) > 0) {
+    msgs <- vapply(overlaps, function(p) {
+      sprintf("%s & %s: %s", p[[1]], p[[2]],
+              paste(p[[3]], collapse = ", "))
+    }, character(1))
+    cli::cli_abort(c(
+      "{.field custom_csb_indicator} label lists overlap (must be disjoint after normalization):",
+      stats::setNames(msgs, rep("x", length(msgs)))
+    ))
+  }
+
+  attr(spec, "label_norm_dhis")    <- norm_dhis
+  attr(spec, "label_norm_nondhis") <- norm_nondhis
+  attr(spec, "label_norm_untreat") <- norm_untreat
+  invisible(spec)
+}
+
+
+#' Extract usable h32 variable labels from a DHS KR dataset
+#'
+#' Reads haven labels from each `^h32[a-z0-9]+$` variable in `dhs_kr`,
+#' skipping `h32y`/`h32z` (no-treatment / medical-treatment flags) and any
+#' slot whose label is `NA - ...` (DHS country-specific placeholder for
+#' unused slots). Labels must be read **before** any zap/coercion.
+#'
+#' @param dhs_kr DHS Children's Recode with haven labels intact.
+#' @return Tibble with columns `variable`, `raw_label`, `label_norm`. Rows
+#'   are returned only for slots that have a usable scalar character label.
+#' @noRd
+.extract_custom_csb_h32_labels <- function(dhs_kr) {
+  if (!is.data.frame(dhs_kr)) {
+    cli::cli_abort("`dhs_kr` must be a data.frame or tibble.")
+  }
+  available_h32 <- grep("^h32[a-z0-9]+$", names(dhs_kr), value = TRUE)
+  meta_vars <- c("h32y", "h32z")
+  available_h32 <- setdiff(available_h32, meta_vars)
+  if (length(available_h32) == 0) {
+    return(tibble::tibble(
+      variable = character(0),
+      raw_label = character(0),
+      label_norm = character(0)
+    ))
+  }
+
+  rows <- list()
+  for (v in available_h32) {
+    lbl <- attr(dhs_kr[[v]], "label")
+    if (is.null(lbl) || !is.character(lbl) || length(lbl) != 1L) next
+    if (is.na(lbl) || !nzchar(lbl)) next
+    if (grepl("^NA\\s*-", lbl)) next
+    rows[[length(rows) + 1L]] <- tibble::tibble(
+      variable = v,
+      raw_label = lbl,
+      label_norm = .normalize_custom_csb_label(lbl)
+    )
+  }
+
+  if (length(rows) == 0) {
+    return(tibble::tibble(
+      variable = character(0),
+      raw_label = character(0),
+      label_norm = character(0)
+    ))
+  }
+  dplyr::bind_rows(rows)
+}
+
+
+#' Build a slot-to-bucket lookup for a custom CSB spec against one survey
+#'
+#' Maps each usable `h32*` variable in `dhs_kr` to one of `dhis`, `nondhis`,
+#' or `untreat` based on the user-supplied label lists. Validates that every
+#' observed label is mapped exactly once. User-supplied labels that are not
+#' present in the current survey are tolerated (the spec is treated as a
+#' superset across surveys).
+#'
+#' @param dhs_kr DHS Children's Recode with haven labels intact.
+#' @param custom_csb_indicator Validated user spec.
+#' @return Tibble with columns `variable`, `csb_custom` (one of "dhis",
+#'   "nondhis", "untreat"), `raw_label`, `label_norm`.
+#' @noRd
+.build_custom_csb_classification <- function(dhs_kr, custom_csb_indicator) {
+  spec <- .validate_custom_csb_indicator_spec(custom_csb_indicator)
+
+  norm_dhis    <- attr(spec, "label_norm_dhis")
+  norm_nondhis <- attr(spec, "label_norm_nondhis")
+  norm_untreat <- attr(spec, "label_norm_untreat")
+  norm_untreat_nona <- norm_untreat[!is.na(norm_untreat)]
+
+  observed <- .extract_custom_csb_h32_labels(dhs_kr)
+  if (nrow(observed) == 0) {
+    cli::cli_warn(
+      "No usable h32 labels found in {.arg dhs_kr}; custom CSB indicator will be empty."
+    )
+    return(tibble::tibble(
+      variable = character(0),
+      csb_custom = character(0),
+      raw_label = character(0),
+      label_norm = character(0)
+    ))
+  }
+
+  observed$csb_custom <- dplyr::case_when(
+    observed$label_norm %in% norm_dhis ~ "dhis",
+    observed$label_norm %in% norm_nondhis ~ "nondhis",
+    observed$label_norm %in% norm_untreat_nona ~ "untreat",
+    TRUE ~ NA_character_
+  )
+
+  unmapped <- observed[is.na(observed$csb_custom), , drop = FALSE]
+  if (nrow(unmapped) > 0) {
+    msgs <- sprintf(
+      "%s: %s",
+      unmapped$variable,
+      unmapped$raw_label
+    )
+    cli::cli_abort(c(
+      "{.arg custom_csb_indicator} does not classify {nrow(unmapped)} observed h32 label{?s}:",
+      stats::setNames(msgs, rep("x", length(msgs))),
+      "i" = "Add each label to one of {.field dhis_locs}, {.field nondhis_locs}, or {.field untreat_locs}."
+    ))
+  }
+
+  # Informational: list extra user labels not used by this survey
+  used_norm <- observed$label_norm
+  extra_dhis    <- setdiff(norm_dhis, used_norm)
+  extra_nondhis <- setdiff(norm_nondhis, used_norm)
+  extra_untreat <- setdiff(norm_untreat_nona, used_norm)
+  n_extra <- length(extra_dhis) + length(extra_nondhis) + length(extra_untreat)
+  if (n_extra > 0) {
+    cli::cli_alert_info(
+      "Custom CSB: {n_extra} user-supplied label{?s} not present in this survey (ignored)."
+    )
+  }
+
+  observed[, c("variable", "csb_custom", "raw_label", "label_norm")]
+}
+
+
+#' Classify febrile-U5 children into a custom CSB partition
+#'
+#' Adds three mutually exclusive 0/1 columns to `data` named
+#' `<prefix>_dhis`, `<prefix>_nondhis`, `<prefix>_untreat`. Children with
+#' no positive `h32*` slot are classified as `untreat`. When a child reports
+#' positive sources spanning multiple buckets, priority is
+#' `dhis > nondhis > untreat` so the cluster numerators sum to the
+#' denominator by construction.
+#'
+#' @param data Data frame already filtered to the target population.
+#' @param h32_cols Character vector of h32 column names present in `data`.
+#' @param classification Tibble from `.build_custom_csb_classification()`
+#'   with columns `variable`, `csb_custom`.
+#' @param prefix User-supplied indicator prefix (`custom_csb_indicator$name`).
+#' @return The input data with three new 0/1 columns.
+#' @noRd
+.classify_custom_csb_from_h32 <- function(
+  data,
+  h32_cols,
+  classification,
+  prefix
+) {
+  col_dhis    <- paste0(prefix, "_dhis")
+  col_nondhis <- paste0(prefix, "_nondhis")
+  col_untreat <- paste0(prefix, "_untreat")
+
+  if (!is.data.frame(data) || nrow(data) == 0) {
+    data[[col_dhis]] <- integer(0)
+    data[[col_nondhis]] <- integer(0)
+    data[[col_untreat]] <- integer(0)
+    return(data)
+  }
+
+  # Restrict h32 columns to those present in BOTH the data and the
+  # classification (a column may be missing from classification if its
+  # label was empty / "NA - ..." / not detectable; treat it as absent).
+  h32_cols <- intersect(intersect(h32_cols, names(data)),
+                        classification$variable)
+
+  if (length(h32_cols) == 0) {
+    # No usable slots -> everyone is untreat
+    data[[col_dhis]] <- 0L
+    data[[col_nondhis]] <- 0L
+    data[[col_untreat]] <- 1L
+    return(data)
+  }
+
+  # Coerce h32 columns to numeric (defensive; .prepare_csb_data already
+  # zaps labels but this function may be called directly in tests).
+  for (col in h32_cols) {
+    data[[col]] <- suppressWarnings(as.numeric(as.character(data[[col]])))
+  }
+
+  data$.csb_custom_row_id <- dplyr::row_number(data)
+
+  long <- data |>
+    dplyr::select(.csb_custom_row_id, dplyr::all_of(h32_cols)) |>
+    tidyr::pivot_longer(
+      cols = dplyr::all_of(h32_cols),
+      names_to = "variable",
+      values_to = "visited"
+    ) |>
+    dplyr::filter(!is.na(visited) & visited == 1) |>
+    dplyr::left_join(
+      classification[, c("variable", "csb_custom")],
+      by = "variable"
+    )
+
+  per_child <- if (nrow(long) > 0) {
+    long |>
+      dplyr::group_by(.csb_custom_row_id) |>
+      dplyr::summarise(
+        had_dhis    = as.integer(any(csb_custom == "dhis")),
+        had_nondhis = as.integer(any(csb_custom == "nondhis")),
+        had_untreat = as.integer(any(csb_custom == "untreat")),
+        .groups = "drop"
+      )
+  } else {
+    tibble::tibble(
+      .csb_custom_row_id = integer(0),
+      had_dhis = integer(0),
+      had_nondhis = integer(0),
+      had_untreat = integer(0)
+    )
+  }
+
+  data <- data |>
+    dplyr::left_join(per_child, by = ".csb_custom_row_id") |>
+    dplyr::mutate(
+      had_dhis    = tidyr::replace_na(had_dhis, 0L),
+      had_nondhis = tidyr::replace_na(had_nondhis, 0L),
+      had_untreat = tidyr::replace_na(had_untreat, 0L)
+    )
+
+  # Mutually exclusive assignment with priority dhis > nondhis > untreat.
+  # Children with no positive slot fall into _untreat by construction.
+  data[[col_dhis]] <- as.integer(data$had_dhis == 1L)
+  data[[col_nondhis]] <- as.integer(
+    data$had_dhis == 0L & data$had_nondhis == 1L
+  )
+  data[[col_untreat]] <- as.integer(
+    data$had_dhis == 0L & data$had_nondhis == 0L
+  )
+
+  data$.csb_custom_row_id <- NULL
+  data$had_dhis <- NULL
+  data$had_nondhis <- NULL
+  data$had_untreat <- NULL
+  data
+}
