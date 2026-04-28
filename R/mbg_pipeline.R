@@ -121,6 +121,28 @@ NULL
 #'       classify as private; otherwise public if any public; otherwise none.
 #'   }
 #'   With non-"all" values, csb_public + csb_private + csb_none sums to 100%.
+#' @param custom_csb_indicator Optional named list defining a user-specified,
+#'   mutually-exclusive care-seeking partition fitted in addition to the
+#'   built-in CSB family. When supplied, three derived indicators are
+#'   produced: \code{<name>_dhis} (sought care at any user-listed DHIS
+#'   source), \code{<name>_nondhis} (sought care at any user-listed
+#'   non-DHIS source and not at any DHIS source), and \code{<name>_untreat}
+#'   (did not seek care at any user-listed source). The list must have
+#'   four character fields:
+#'   \itemize{
+#'     \item \code{name}: A short alphanumeric prefix used to build the
+#'       three derived indicator codes (e.g. \code{"foo"} -> \code{foo_dhis},
+#'       \code{foo_nondhis}, \code{foo_untreat}).
+#'     \item \code{dhis_locs}: Character vector of h32 label substrings
+#'       (case-insensitive) that map to the DHIS bucket.
+#'     \item \code{nondhis_locs}: Character vector for the non-DHIS bucket.
+#'     \item \code{untreat_locs}: Character vector for the untreated bucket.
+#'   }
+#'   To activate the custom partition in pipeline output, include the
+#'   \code{name} (or any of the three derived codes) in \code{indicators}.
+#'   The custom triple is always mutually exclusive at the child level
+#'   (priority dhis > nondhis > untreat); admin-level estimates are
+#'   rescaled to sum to 100% per admin unit. Default: NULL (disabled).
 #' @param verbose Logical. If TRUE, prints detailed progress. Default: TRUE.
 #' @param debug Logical. If TRUE, prints additional
 #'   diagnostic messages for troubleshooting.
@@ -190,6 +212,7 @@ run_mbg_pipeline <- function(
   save_rasters = TRUE,
   cache = TRUE,
   csb_priority_method = c("all", "first", "public", "private"),
+  custom_csb_indicator = NULL,
   verbose = TRUE,
   debug = FALSE
 ) {
@@ -199,6 +222,20 @@ run_mbg_pipeline <- function(
   cli::cli_alert_info(
     "CSB priority method: {.val {csb_priority_method}}{if (csb_priority_method == 'all') ' (overlaps allowed; csb_public + csb_private + csb_none may exceed 100%)' else ' (mutually exclusive; csb_public + csb_private + csb_none sums to 100%)'}"
   )
+
+  # ---- Validate custom_csb_indicator (optional user-defined partition) ----
+  if (!is.null(custom_csb_indicator)) {
+    custom_csb_indicator <- .validate_custom_csb_indicator_spec(
+      custom_csb_indicator
+    )
+    custom_codes <- .custom_csb_indicator_names(custom_csb_indicator)
+    cli::cli_alert_info(
+      paste0(
+        "Custom CSB partition active: prefix {.val {custom_csb_indicator$name}} -> ",
+        "{.val {custom_codes}}"
+      )
+    )
+  }
 
   # Check for required spatial packages
   .check_spatial_pkg("sf", "run_mbg_pipeline")
@@ -288,7 +325,9 @@ run_mbg_pipeline <- function(
   # sub-indicators for that family. Individual indicator codes (from
   # _conditions() / _mbg_dictionary()) are also accepted and dispatch
   # to the same calc function via switch fall-through.
-  valid_indicators <- .valid_mbg_indicators()
+  valid_indicators <- .valid_mbg_indicators(
+    custom_csb_indicator = custom_csb_indicator
+  )
   invalid_indicators <- setdiff(indicators, valid_indicators)
   if (length(invalid_indicators) > 0) {
     cli::cli_abort(c(
@@ -777,7 +816,11 @@ run_mbg_pipeline <- function(
     cat("\n\n")  # visual gap before progress bar
 
     # Pre-compute expected sub-indicator total for progress bar
-    expected_total <- sum(vapply(primary_indicators, .expected_sub_count, integer(1)))
+    expected_total <- sum(vapply(
+      primary_indicators,
+      function(cat) .expected_sub_count(cat, custom_csb_indicator),
+      integer(1)
+    ))
     sub_count <- 0L
     ind_category <- primary_indicators[1]  # initialise for format string
 
@@ -800,7 +843,9 @@ run_mbg_pipeline <- function(
       # all csb_* indicators, so csb_public doesn't need a second run)
       if (ind_category %in% processed_indicators) {
         # Advance bar by expected count for this (already-done) category
-        sub_count <- sub_count + .expected_sub_count(ind_category)
+        sub_count <- sub_count + .expected_sub_count(
+          ind_category, custom_csb_indicator
+        )
         cli::cli_progress_update(
           id = ind_pb, set = min(sub_count, expected_total), force = TRUE
         )
@@ -838,6 +883,7 @@ run_mbg_pipeline <- function(
             save_rasters = save_rasters,
             cache = cache,
             csb_priority_method = csb_priority_method,
+            custom_csb_indicator = custom_csb_indicator,
             verbose = verbose,
             debug = debug,
             progress_callback = function(ind_name) {
@@ -1008,7 +1054,8 @@ run_mbg_pipeline <- function(
       adm3_sf = adm3_aligned,
       aggregation_level = aggregation_level,
       cluster_interview_months = cluster_interview_months,
-      csb_priority_method = csb_priority_method
+      csb_priority_method = csb_priority_method,
+      custom_csb_indicator = custom_csb_indicator
     )
 
     # Apply smart rounding
@@ -1204,7 +1251,12 @@ run_mbg_pipeline <- function(
 #' @param category Character. Indicator category or individual indicator name.
 #' @return Integer. Expected number of sub-indicators.
 #' @noRd
-.expected_sub_count <- function(category) {
+.expected_sub_count <- function(category, custom_csb_indicator = NULL) {
+  if (!is.null(custom_csb_indicator)) {
+    custom_codes <- .custom_csb_indicator_names(custom_csb_indicator)
+    if (identical(category, custom_csb_indicator$name)) return(3L)
+    if (category %in% custom_codes) return(1L)
+  }
   switch(category,
     # Category-level dispatch (processes all sub-indicators)
     pfpr = 4L,
@@ -1311,12 +1363,15 @@ run_mbg_pipeline <- function(
   save_rasters,
   cache,
   csb_priority_method = "all",
+  custom_csb_indicator = NULL,
   verbose,
   debug = FALSE,
   progress_callback = NULL
 ) {
   # Select population raster based on indicator's target population
-  ind_pop_type <- .mbg_indicator_pop_type(category)
+  ind_pop_type <- .mbg_indicator_pop_type(
+    category, custom_csb_indicator = custom_csb_indicator
+  )
 
   pop_for_indicator <- switch(ind_pop_type,
     u5     = pop_rast_u5     %||% pop_rast,
@@ -1354,6 +1409,102 @@ run_mbg_pipeline <- function(
   # Helper to return skipped result
   skip_indicator <- function(reason) {
     results$skipped <- reason
+    return(results)
+  }
+
+  # ---- Custom CSB partition dispatch (before built-in switch) ----
+  custom_codes <- if (!is.null(custom_csb_indicator)) {
+    .custom_csb_indicator_names(custom_csb_indicator)
+  } else {
+    character(0)
+  }
+  is_custom_csb_meta <- !is.null(custom_csb_indicator) &&
+    identical(category, custom_csb_indicator$name)
+  is_custom_csb_sub  <- category %in% custom_codes
+
+  if (is_custom_csb_meta || is_custom_csb_sub) {
+    if (!"KR" %in% names(survey_data)) {
+      return(skip_indicator("Missing KR data (Children Recode)"))
+    }
+    cluster_data <- tryCatch({
+      full_results <- calc_csb_custom_mbg(
+        dhs_kr = survey_data$KR,
+        gps_data = gps_data,
+        custom_csb_indicator = custom_csb_indicator
+      )
+      if (is_custom_csb_sub) {
+        full_results <- full_results[intersect(category, names(full_results))]
+      }
+      full_results
+    }, error = function(e) {
+      results$skipped <<- glue::glue("Calculation error: {e$message}")
+      list()
+    })
+
+    if (length(cluster_data) == 0) {
+      if (is.null(results$skipped)) {
+        results$skipped <- "No data returned from custom CSB calculation"
+      }
+      return(results)
+    }
+    for (name in names(cluster_data)) {
+      results$cluster_data[[name]] <- cluster_data[[name]]
+    }
+
+    # Run MBG (mirrors built-in path) using shared logic below; jump to end
+    # via a goto-style rewrite would complicate the function. Instead, run
+    # MBG inline here and return.
+    if (run_mbg && requireNamespace("mbg", quietly = TRUE) &&
+        requireNamespace("INLA", quietly = TRUE)) {
+      for (ind_name in names(cluster_data)) {
+        dt <- cluster_data[[ind_name]]
+        n_clusters <- if (!is.null(dt)) nrow(dt) else 0L
+        if (n_clusters < 5) {
+          cli::cli_alert_warning(
+            "Skipping MBG for {.val {ind_name}}: only {n_clusters} cluster(s) (need >= 5)"
+          )
+          if (is.function(progress_callback)) progress_callback(ind_name)
+          next
+        }
+        total_numerator <- if (!is.null(dt)) sum(dt$indicator, na.rm = TRUE) else 0
+        if (total_numerator == 0) {
+          cli::cli_alert_warning(
+            "Skipping MBG for {.val {ind_name}}: numerator is 0 across all clusters"
+          )
+          if (is.function(progress_callback)) progress_callback(ind_name)
+          next
+        }
+        mbg_result <- tryCatch({
+          .run_single_mbg(
+            cluster_dt = dt,
+            adm2_sf = adm2_sf,
+            adm3_sf = adm3_sf,
+            pop_rast = pop_for_indicator,
+            indicator_name = ind_name,
+            output_dirs = output_dirs,
+            country_iso3 = country_iso3,
+            survey_year = survey_year,
+            survey_type = survey_type,
+            aggregation_level = aggregation_level,
+            pop_type = ind_pop_type,
+            save_rasters = save_rasters,
+            cache = cache,
+            debug = debug
+          )
+        }, error = function(e) {
+          cli::cli_alert_warning("MBG failed for {ind_name}: {e$message}")
+          NULL
+        })
+        if (!is.null(mbg_result)) {
+          results$mbg_estimates[[ind_name]] <- mbg_result$adm_estimates
+          if (save_rasters && !is.null(mbg_result$raster_path)) {
+            results$raster_paths[[ind_name]] <- mbg_result$raster_path
+          }
+        }
+        if (is.function(progress_callback)) progress_callback(ind_name)
+      }
+    }
+
     return(results)
   }
 
@@ -2752,11 +2903,33 @@ run_mbg_pipeline <- function(
 #'   \code{_upper}, \code{_pop}.
 #' @param primary_col Character scalar, name of the admin join column
 #'   (\code{"adm2"} or \code{"adm3"}).
+#' @param sector_names Optional character vector of length 3 naming the
+#'   three indicator codes that form the partition. Defaults to the
+#'   built-in CSB sectors \code{c("csb_public", "csb_private", "csb_none")}
+#'   for backward compatibility. Pass the derived names from a
+#'   \code{custom_csb_indicator} (e.g.
+#'   \code{c("foo_dhis", "foo_nondhis", "foo_untreat")}) to rescale a
+#'   user-defined partition.
+#' @param any_name Optional character scalar naming a complementary
+#'   "any" indicator to be derived as \code{1 - <none>} (where
+#'   \code{<none>} is \code{sector_names[3]}). Pass NULL to skip the
+#'   derivation step (custom partitions do not have an "any" complement).
 #'
-#' @return Modified \code{mbg_estimates} list with rescaled CSB entries.
+#' @return Modified \code{mbg_estimates} list with rescaled entries.
 #' @noRd
-.normalize_csb_mbg_estimates <- function(mbg_estimates, primary_col) {
-  sector_names <- c("csb_public", "csb_private", "csb_none")
+.normalize_csb_mbg_estimates <- function(mbg_estimates,
+                                         primary_col,
+                                         sector_names = c(
+                                           "csb_public",
+                                           "csb_private",
+                                           "csb_none"
+                                         ),
+                                         any_name = "csb_any") {
+  if (length(sector_names) != 3L) {
+    cli::cli_abort(
+      "`sector_names` must be a length-3 character vector."
+    )
+  }
   if (!all(sector_names %in% names(mbg_estimates))) {
     return(mbg_estimates)
   }
@@ -2781,11 +2954,11 @@ run_mbg_pipeline <- function(
   # stored on the [0, 100] percentage scale). Target per-admin sum for the
   # three sectors is therefore `multiplier` (i.e. 100 for percentages).
   multiplier <- tryCatch(
-    .mbg_indicator_multiplier("csb_public"),
+    .mbg_indicator_multiplier(sector_names[1]),
     error = function(e) 100
   )
 
-  # Per-admin rescaling factor: multiplier / (pub + priv + none).
+  # Per-admin rescaling factor: multiplier / (s1 + s2 + s3).
   # Guard against zero / NA sums (fall back to no rescaling: factor = 1).
   csb_sum <- joined[[mean_cols[1]]] +
     joined[[mean_cols[2]]] +
@@ -2827,56 +3000,68 @@ run_mbg_pipeline <- function(
     mbg_estimates[[ind]] <- rescale_est(mbg_estimates[[ind]], ind)
   }
 
-  # Derive csb_any = 1 - csb_none for consistency with the new partition.
-  if ("csb_any" %in% names(mbg_estimates) &&
-      !is.null(mbg_estimates[["csb_none"]])) {
-    none_est <- mbg_estimates[["csb_none"]]
-    any_est  <- mbg_estimates[["csb_any"]]
+  # Derive <any_name> = 1 - <none-like> (third sector) for consistency
+  # with the new partition. Built-in CSB partition uses csb_any/csb_none;
+  # custom partitions skip this (any_name = NULL).
+  none_ind <- sector_names[3]
+  none_mean_col  <- paste0(none_ind, "_mean")
+  none_lower_col <- paste0(none_ind, "_lower")
+  none_upper_col <- paste0(none_ind, "_upper")
+
+  if (!is.null(any_name) &&
+      any_name %in% names(mbg_estimates) &&
+      !is.null(mbg_estimates[[none_ind]])) {
+    none_est <- mbg_estimates[[none_ind]]
+    any_est  <- mbg_estimates[[any_name]]
+    any_mean_col  <- paste0(any_name, "_mean")
+    any_lower_col <- paste0(any_name, "_lower")
+    any_upper_col <- paste0(any_name, "_upper")
+
     if (!is.null(any_est) && nrow(any_est) > 0 &&
-        all(c(primary_col, "csb_none_mean") %in% names(none_est))) {
+        all(c(primary_col, none_mean_col) %in% names(none_est))) {
 
       none_lookup <- none_est |>
-        dplyr::select(dplyr::all_of(c(primary_col, "csb_none_mean")))
-      if ("csb_none_lower" %in% names(none_est)) {
-        none_lookup$csb_none_lower <- none_est$csb_none_lower
+        dplyr::select(dplyr::all_of(c(primary_col, none_mean_col)))
+      if (none_lower_col %in% names(none_est)) {
+        none_lookup[[none_lower_col]] <- none_est[[none_lower_col]]
       }
-      if ("csb_none_upper" %in% names(none_est)) {
-        none_lookup$csb_none_upper <- none_est$csb_none_upper
+      if (none_upper_col %in% names(none_est)) {
+        none_lookup[[none_upper_col]] <- none_est[[none_upper_col]]
       }
 
       any_est <- any_est |>
         dplyr::left_join(none_lookup, by = primary_col, suffix = c("", ".none"))
 
-      if ("csb_any_mean" %in% names(any_est)) {
-        any_est$csb_any_mean <- pmin(
-          pmax(multiplier - any_est$csb_none_mean, 0), multiplier
+      if (any_mean_col %in% names(any_est)) {
+        any_est[[any_mean_col]] <- pmin(
+          pmax(multiplier - any_est[[none_mean_col]], 0), multiplier
         )
       }
       # Lower bound of any = multiplier - upper bound of none (and vice
       # versa), so swap when both are available. Guard against missing
       # columns.
-      if ("csb_any_lower" %in% names(any_est) &&
-          "csb_none_upper" %in% names(any_est)) {
-        any_est$csb_any_lower <- pmin(
-          pmax(multiplier - any_est$csb_none_upper, 0), multiplier
+      if (any_lower_col %in% names(any_est) &&
+          none_upper_col %in% names(any_est)) {
+        any_est[[any_lower_col]] <- pmin(
+          pmax(multiplier - any_est[[none_upper_col]], 0), multiplier
         )
       }
-      if ("csb_any_upper" %in% names(any_est) &&
-          "csb_none_lower" %in% names(any_est)) {
-        any_est$csb_any_upper <- pmin(
-          pmax(multiplier - any_est$csb_none_lower, 0), multiplier
+      if (any_upper_col %in% names(any_est) &&
+          none_lower_col %in% names(any_est)) {
+        any_est[[any_upper_col]] <- pmin(
+          pmax(multiplier - any_est[[none_lower_col]], 0), multiplier
         )
       }
 
       drop_cols <- intersect(
-        c("csb_none_mean", "csb_none_lower", "csb_none_upper"),
+        c(none_mean_col, none_lower_col, none_upper_col),
         names(any_est)
       )
       if (length(drop_cols) > 0) {
         any_est <- dplyr::select(any_est, -dplyr::all_of(drop_cols))
       }
 
-      mbg_estimates[["csb_any"]] <- any_est
+      mbg_estimates[[any_name]] <- any_est
     }
   }
 
@@ -2907,7 +3092,8 @@ run_mbg_pipeline <- function(
   adm3_sf = NULL,
   aggregation_level = "adm2",
   cluster_interview_months = NULL,
-  csb_priority_method = "all"
+  csb_priority_method = "all",
+  custom_csb_indicator = NULL
 ) {
   base_sf <- if (aggregation_level == "adm3") adm3_sf else adm2_sf
   primary_col <- if (aggregation_level == "adm3") "adm3" else "adm2"
@@ -2946,6 +3132,40 @@ run_mbg_pipeline <- function(
       )
     }
     mbg_estimates <- .normalize_csb_mbg_estimates(mbg_estimates, primary_col)
+  }
+
+  # ---- Normalize custom CSB partition (always mutually exclusive) ----
+  #
+  # The custom partition <name>_dhis / <name>_nondhis / <name>_untreat is
+  # constructed at the child level so cluster-level counts always satisfy
+  # dhis + nondhis + untreat == N. As with the built-in CSB partition,
+  # independent MBG models do not preserve this constraint after spatial
+  # smoothing and population-weighted aggregation, so rescale to 100%.
+  if (!is.null(custom_csb_indicator)) {
+    custom_codes <- .custom_csb_indicator_names(custom_csb_indicator)
+    if (all(custom_codes %in% names(mbg_estimates))) {
+      cli::cli_alert_info(
+        paste0(
+          "Rescaling custom CSB partition {.val {custom_codes}} to sum ",
+          "to 100% per {.val {primary_col}}."
+        )
+      )
+      mbg_estimates <- .normalize_csb_mbg_estimates(
+        mbg_estimates,
+        primary_col,
+        sector_names = custom_codes,
+        any_name = NULL
+      )
+    } else if (any(custom_codes %in% names(mbg_estimates))) {
+      missing_custom <- setdiff(custom_codes, names(mbg_estimates))
+      cli::cli_alert_warning(
+        paste0(
+          "Custom CSB partition rescaling requires all three derived ",
+          "indicators ({.val {custom_codes}}). Missing: ",
+          "{.val {missing_custom}}. Custom normalisation skipped."
+        )
+      )
+    }
   }
 
   # ---- Resolve admin column names in shapefile ----
@@ -3254,6 +3474,22 @@ run_mbg_pipeline <- function(
       denominator_description
     ) |>
     dplyr::distinct(indicator_code, .keep_all = TRUE)
+
+  # Bind on runtime metadata for custom CSB indicators (kept out of the
+  # public dictionary API but labeled in pipeline output).
+  if (!is.null(custom_csb_indicator)) {
+    custom_dict <- .custom_csb_dictionary_rows(custom_csb_indicator) |>
+      dplyr::select(
+        indicator_code,
+        indicator = indicator_title,
+        numerator_description,
+        denominator_description
+      )
+    if (nrow(custom_dict) > 0) {
+      dict <- dplyr::bind_rows(dict, custom_dict) |>
+        dplyr::distinct(indicator_code, .keep_all = TRUE)
+    }
+  }
 
   .join_dict <- function(df) {
     dplyr::left_join(df, dict, by = "indicator_code")

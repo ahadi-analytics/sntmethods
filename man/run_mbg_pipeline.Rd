@@ -32,6 +32,7 @@ run_mbg_pipeline(
   save_rasters = TRUE,
   cache = TRUE,
   csb_priority_method = c("all", "first", "public", "private"),
+  custom_csb_indicator = NULL,
   verbose = TRUE,
   debug = FALSE
 )
@@ -162,6 +163,29 @@ classify as public; otherwise private if any private; otherwise none.
 classify as private; otherwise public if any public; otherwise none.
 }
 With non-"all" values, csb_public + csb_private + csb_none sums to 100\%.}
+
+\item{custom_csb_indicator}{Optional named list defining a user-specified,
+mutually-exclusive care-seeking partition fitted in addition to the
+built-in CSB family. When supplied, three derived indicators are
+produced: \code{<name>_dhis} (sought care at any user-listed DHIS
+source), \code{<name>_nondhis} (sought care at any user-listed
+non-DHIS source and not at any DHIS source), and \code{<name>_untreat}
+(did not seek care at any user-listed source). The list must have
+four character fields:
+\itemize{
+\item \code{name}: A short alphanumeric prefix used to build the
+three derived indicator codes (e.g. \code{"foo"} -> \code{foo_dhis},
+\code{foo_nondhis}, \code{foo_untreat}).
+\item \code{dhis_locs}: Character vector of h32 label substrings
+(case-insensitive) that map to the DHIS bucket.
+\item \code{nondhis_locs}: Character vector for the non-DHIS bucket.
+\item \code{untreat_locs}: Character vector for the untreated bucket.
+}
+To activate the custom partition in pipeline output, include the
+\code{name} (or any of the three derived codes) in \code{indicators}.
+The custom triple is always mutually exclusive at the child level
+(priority dhis > nondhis > untreat); admin-level estimates are
+rescaled to sum to 100\% per admin unit. Default: NULL (disabled).}
 
 \item{verbose}{Logical. If TRUE, prints detailed progress. Default: TRUE.}
 
