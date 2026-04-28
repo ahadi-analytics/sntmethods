@@ -50,6 +50,19 @@
 #'   in data.
 #' @param join_nearest Logical; if TRUE, assigns clusters outside polygons
 #'   to nearest admin unit.
+#' @param custom_csb_indicator Optional named list defining a user-specified,
+#'   mutually-exclusive care-seeking partition fitted in addition to the
+#'   built-in CSB indicators. When supplied, three derived indicators are
+#'   produced: \code{<name>_dhis} (sought care at any user-listed DHIS
+#'   source), \code{<name>_nondhis} (sought care at any user-listed
+#'   non-DHIS source and not at any DHIS source), and \code{<name>_untreat}
+#'   (did not seek care at any user-listed source). The list must have
+#'   four character fields: \code{name} (alphanumeric prefix matching
+#'   pattern \code{^csb_[a-z0-9_]+$}), \code{dhis_locs},
+#'   \code{nondhis_locs}, and \code{untreat_locs} (each a character vector
+#'   of h32 label substrings, case-insensitive). The custom triple is
+#'   always mutually exclusive at the child level (priority
+#'   \code{dhis > nondhis > untreat}). Default: NULL (disabled).
 #'
 #' @return Tibble with CSB estimates by administrative level, with
 #'   confidence intervals and sample sizes.
@@ -113,7 +126,8 @@ calc_csb_dhs_core <- function(
   ),
   shapefile = NULL,
   admin_level = NULL,
-  join_nearest = TRUE
+  join_nearest = TRUE,
+  custom_csb_indicator = NULL
 ) {
   csb_priority_method <- match.arg(csb_priority_method)
   # ---- 1. Input validation ---------------------------------------------------
@@ -124,6 +138,26 @@ calc_csb_dhs_core <- function(
 
   if (nrow(dhs_kr) == 0) {
     cli::cli_abort("`dhs_kr` is empty.")
+  }
+
+  # Validate custom_csb_indicator (if supplied) and pre-build the
+  # label-to-bucket classification from the *raw* dhs_kr (haven labels
+  # are still intact at this stage; .prepare_csb_data() zaps them later).
+  custom_csb_classification <- NULL
+  if (!is.null(custom_csb_indicator)) {
+    custom_csb_indicator <- .validate_custom_csb_indicator_spec(
+      custom_csb_indicator
+    )
+    custom_csb_classification <- .build_custom_csb_classification(
+      dhs_kr, custom_csb_indicator
+    )
+    custom_codes <- .custom_csb_indicator_names(custom_csb_indicator)
+    cli::cli_alert_info(
+      paste0(
+        "Custom CSB partition active: prefix {.val ",
+        "{custom_csb_indicator$name}} -> {.val {custom_codes}}"
+      )
+    )
   }
 
   # Check required survey variables
@@ -227,6 +261,21 @@ calc_csb_dhs_core <- function(
       csb_trained_provider   = csb_trained
     )
 
+  # Classify into custom CSB triple if requested. Adds three mutually
+  # exclusive 0/1 columns named <prefix>_dhis / _nondhis / _untreat, derived
+  # directly from raw h32 columns and the per-survey label classification
+  # built earlier (haven labels were available at that point).
+  if (!is.null(custom_csb_indicator)) {
+    h32_cols <- grep("^h32[a-z0-9]+$", names(kr_fever), value = TRUE)
+    h32_cols <- setdiff(h32_cols, c("h32y", "h32z"))
+    kr_fever <- .classify_custom_csb_from_h32(
+      data = kr_fever,
+      h32_cols = h32_cols,
+      classification = custom_csb_classification,
+      prefix = custom_csb_indicator$name
+    )
+  }
+
   cli::cli_alert_success(
     "Under 5 with fever: {format(nrow(kr_fever), big.mark = ',')} children"
   )
@@ -292,6 +341,12 @@ calc_csb_dhs_core <- function(
   options(survey.lonely.psu = "adjust")
 
   dict <- .csb_conditions()
+
+  # Append per-survey custom CSB conditions so the standard computation
+  # loop emits the three derived indicators alongside the built-ins.
+  if (!is.null(custom_csb_indicator)) {
+    dict <- c(dict, .custom_csb_dhs_conditions(custom_csb_indicator))
+  }
 
   meta_cols <- tibble::tibble(
     survey_id    = survey_meta$survey_id,
@@ -547,6 +602,69 @@ calc_csb_dhs_core <- function(
 }
 
 
+#' Build per-survey indicator conditions for a custom CSB partition
+#'
+#' Mirrors the shape of `.csb_conditions()` so the resulting list can be
+#' concatenated with the built-in dict and consumed by the standard
+#' `.compute_csb_indicator()` loop. Each derived sub-indicator
+#' (`<name>_dhis`, `<name>_nondhis`, `<name>_untreat`) is mapped to the
+#' 0/1 column added by `.classify_custom_csb_from_h32()`.
+#'
+#' @param custom_csb_indicator A validated user spec list.
+#' @return A list of three condition specs.
+#' @noRd
+.custom_csb_dhs_conditions <- function(custom_csb_indicator) {
+  spec <- custom_csb_indicator
+  prefix <- spec$name
+  denom <- "Under 5 with fever"
+
+  list(
+    list(
+      indicator      = toupper(paste0(prefix, "_DHIS")),
+      indicator_code = paste0(prefix, "_dhis"),
+      indicator_title = paste0(
+        "Custom care seeking (DHIS sources) [", prefix,
+        "] among under 5 with fever"
+      ),
+      denom_code     = "feb_u5",
+      outcome_var    = paste0(prefix, "_dhis"),
+      num_desc       = "Sought care at user-listed DHIS sources",
+      denom_desc     = denom
+    ),
+    list(
+      indicator      = toupper(paste0(prefix, "_NONDHIS")),
+      indicator_code = paste0(prefix, "_nondhis"),
+      indicator_title = paste0(
+        "Custom care seeking (non-DHIS sources) [", prefix,
+        "] among under 5 with fever"
+      ),
+      denom_code     = "feb_u5",
+      outcome_var    = paste0(prefix, "_nondhis"),
+      num_desc       = paste0(
+        "Sought care at user-listed non-DHIS sources ",
+        "(and not at any DHIS source)"
+      ),
+      denom_desc     = denom
+    ),
+    list(
+      indicator      = toupper(paste0(prefix, "_UNTREAT")),
+      indicator_code = paste0(prefix, "_untreat"),
+      indicator_title = paste0(
+        "Custom no/untreated care seeking [", prefix,
+        "] among under 5 with fever"
+      ),
+      denom_code     = "feb_u5",
+      outcome_var    = paste0(prefix, "_untreat"),
+      num_desc       = paste0(
+        "Did not seek care at any user-listed DHIS or ",
+        "non-DHIS source"
+      ),
+      denom_desc     = denom
+    )
+  )
+}
+
+
 #' CSB Indicator Dictionary
 #'
 #' Returns the full dictionary of CSB indicators with metadata.
@@ -791,6 +909,7 @@ calc_csb_dhs <- function(
   ),
   csb_priority_method = c("all", "first", "public", "private"),
   source_config = NULL,
+  custom_csb_indicator = NULL,
   region_var = NULL,
   gps_data = NULL,
   gps_vars = list(
@@ -810,6 +929,7 @@ calc_csb_dhs <- function(
     survey_vars = survey_vars,
     csb_priority_method = csb_priority_method,
     source_config = source_config,
+    custom_csb_indicator = custom_csb_indicator,
     region_var = region_var,
     gps_data = gps_data,
     gps_vars = gps_vars,

@@ -15,7 +15,8 @@ calc_csb_dhs_core(
   gps_vars = list(cluster = "DHSCLUST", lat = "LATNUM", lon = "LONGNUM"),
   shapefile = NULL,
   admin_level = NULL,
-  join_nearest = TRUE
+  join_nearest = TRUE,
+  custom_csb_indicator = NULL
 )
 }
 \arguments{
@@ -72,6 +73,20 @@ in data.}
 
 \item{join_nearest}{Logical; if TRUE, assigns clusters outside polygons
 to nearest admin unit.}
+
+\item{custom_csb_indicator}{Optional named list defining a user-specified,
+mutually-exclusive care-seeking partition fitted in addition to the
+built-in CSB indicators. When supplied, three derived indicators are
+produced: \code{<name>_dhis} (sought care at any user-listed DHIS
+source), \code{<name>_nondhis} (sought care at any user-listed
+non-DHIS source and not at any DHIS source), and \code{<name>_untreat}
+(did not seek care at any user-listed source). The list must have
+four character fields: \code{name} (alphanumeric prefix matching
+pattern \code{^csb_[a-z0-9_]+$}), \code{dhis_locs},
+\code{nondhis_locs}, and \code{untreat_locs} (each a character vector
+of h32 label substrings, case-insensitive). The custom triple is
+always mutually exclusive at the child level (priority
+\code{dhis > nondhis > untreat}). Default: NULL (disabled).}
 }
 \value{
 Tibble with CSB estimates by administrative level, with
