@@ -110,9 +110,13 @@
 #' target age group, and base units for a given indicator name.
 #'
 #' @param ind Character scalar indicator name.
+#' @param custom_csb_indicator Optional validated `custom_csb_indicator`
+#'   spec list. When non-NULL, derived custom CSB codes
+#'   (`<name>_dhis`, `<name>_nondhis`, `<name>_untreat`) are recognized
+#'   with the same KR/U5 metadata as the built-in CSB family.
 #' @return A named list with: recode, category, cascade, age, base_unit.
 #' @noRd
-.mbg_indicator_meta <- function(ind) {
+.mbg_indicator_meta <- function(ind, custom_csb_indicator = NULL) {
   na_chr <- NA_character_
   na_int <- NA_integer_
 
@@ -269,6 +273,18 @@
   )
 
   m <- meta[[ind]]
+
+  # Runtime custom CSB indicators (KR / U5, like built-in CSB family)
+  if (is.null(m) && !is.null(custom_csb_indicator)) {
+    custom_codes <- .custom_csb_indicator_names(custom_csb_indicator)
+    if (ind %in% custom_codes) {
+      m <- list(
+        recode = "KR", category = "Malaria", cascade = 1L,
+        age = "0-59 months", pop_type = "u5"
+      )
+    }
+  }
+
   if (is.null(m)) {
     m <- list(
       recode = na_chr, category = na_chr, cascade = na_int, age = na_chr,
@@ -290,9 +306,12 @@
 #' (e.g., `"itn"`, `"pfpr"`), returns the dominant pop_type for that family.
 #'
 #' @param ind Character indicator code or category name.
+#' @param custom_csb_indicator Optional validated `custom_csb_indicator`
+#'   spec list. When non-NULL, derived custom CSB codes resolve to
+#'   pop_type `"u5"`.
 #' @return Character scalar: `"u5"`, `"wra"`, or `"all"`.
 #' @noRd
-.mbg_indicator_pop_type <- function(ind) {
+.mbg_indicator_pop_type <- function(ind, custom_csb_indicator = NULL) {
   # Category-level defaults (when dispatching a whole family)
   category_pop <- c(
     pfpr = "u5", itn = "all", irs = "all", anc = "wra",
@@ -304,7 +323,7 @@
   if (ind %in% names(category_pop)) return(category_pop[[ind]])
 
   # Individual indicator lookup from meta
-  .mbg_indicator_meta(ind)$pop_type
+  .mbg_indicator_meta(ind, custom_csb_indicator = custom_csb_indicator)$pop_type
 }
 
 
@@ -454,9 +473,13 @@
 #' Built from `.mbg_indicator_meta()` keys (the single source of truth) plus
 #' category-level shorthand names used for dispatch.
 #'
+#' @param custom_csb_indicator Optional validated `custom_csb_indicator`
+#'   spec list. When non-NULL, the three derived custom CSB codes
+#'   (`<name>_dhis`, `<name>_nondhis`, `<name>_untreat`) are appended to
+#'   the result.
 #' @return Character vector of all valid indicator names.
 #' @noRd
-.valid_mbg_indicators <- function() {
+.valid_mbg_indicators <- function(custom_csb_indicator = NULL) {
   # Category-level dispatch keys (run all sub-indicators for that family)
   categories <- c(
     "pfpr", "itn", "irs", "anc", "csb", "act", "anemia", "iptp", "epi",
@@ -533,7 +556,73 @@
     "eff_cm_any", "eff_cm_public"
   )
 
-  unique(c(categories, individual_codes))
+  custom_codes <- if (!is.null(custom_csb_indicator)) {
+    .custom_csb_indicator_names(custom_csb_indicator)
+  } else {
+    character(0)
+  }
+
+  unique(c(categories, individual_codes, custom_codes))
+}
+
+
+#' Build temporary dictionary rows for runtime custom CSB indicators
+#'
+#' Builds a tibble with the same metadata columns as
+#' \code{dhs_dictionary()} (`indicator_code`, `indicator_title`,
+#' `numerator_description`, `denominator_description`) for the three
+#' derived custom CSB codes. The pipeline binds these rows to the static
+#' \code{dhs_dictionary()} before joining indicator metadata onto the final
+#' MBG output, so custom indicators are not exposed in the public
+#' dictionary API but still get fully labeled in pipeline outputs.
+#'
+#' @param custom_csb_indicator A validated user spec.
+#' @return A tibble with one row per derived custom CSB code, or an empty
+#'   tibble (with the expected columns) when `custom_csb_indicator` is NULL.
+#' @noRd
+.custom_csb_dictionary_rows <- function(custom_csb_indicator) {
+  cols <- c(
+    "indicator_code", "indicator_title",
+    "numerator_description", "denominator_description"
+  )
+  empty <- tibble::tibble(
+    indicator_code = character(0),
+    indicator_title = character(0),
+    numerator_description = character(0),
+    denominator_description = character(0)
+  )
+  if (is.null(custom_csb_indicator)) return(empty)
+
+  prefix <- custom_csb_indicator$name
+  denom_desc <- "Under 5 with fever"
+  pretty_prefix <- prefix
+  tibble::tibble(
+    indicator_code = c(
+      paste0(prefix, "_dhis"),
+      paste0(prefix, "_nondhis"),
+      paste0(prefix, "_untreat")
+    ),
+    indicator_title = c(
+      paste0(
+        "Custom care seeking (DHIS sources) [", pretty_prefix,
+        "] among under 5 with fever"
+      ),
+      paste0(
+        "Custom care seeking (non-DHIS sources) [", pretty_prefix,
+        "] among under 5 with fever"
+      ),
+      paste0(
+        "Custom no/untreated care seeking [", pretty_prefix,
+        "] among under 5 with fever"
+      )
+    ),
+    numerator_description = c(
+      "Sought care at user-listed DHIS sources",
+      "Sought care at user-listed non-DHIS sources (and not at any DHIS source)",
+      "Did not seek care at any user-listed DHIS or non-DHIS source"
+    ),
+    denominator_description = rep(denom_desc, 3L)
+  )
 }
 
 
