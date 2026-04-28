@@ -3321,7 +3321,9 @@ run_mbg_pipeline <- function(
 
     # Population-based numerator/denominator (every district gets values)
     if (has_pop) {
-      multiplier <- .mbg_indicator_multiplier(ind_name)
+      multiplier <- .mbg_indicator_multiplier(
+        ind_name, custom_csb_indicator = custom_csb_indicator
+      )
       ind_df <- ind_df |>
         dplyr::mutate(
           denominator = as.integer(round(.data[[pop_col]])),

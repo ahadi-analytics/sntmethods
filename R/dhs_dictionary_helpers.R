@@ -274,10 +274,14 @@
 
   m <- meta[[ind]]
 
-  # Runtime custom CSB indicators (KR / U5, like built-in CSB family)
+  # Runtime custom CSB indicators (KR / U5, like built-in CSB family).
+  # Recognise both the three derived sub-codes (`<name>_dhis`, `_nondhis`,
+  # `_untreat`) and the user-supplied meta name itself (e.g. "csb_eff"),
+  # which is used as a category-level dispatch key in run_mbg_pipeline().
   if (is.null(m) && !is.null(custom_csb_indicator)) {
     custom_codes <- .custom_csb_indicator_names(custom_csb_indicator)
-    if (ind %in% custom_codes) {
+    custom_meta_name <- custom_csb_indicator$name
+    if (ind %in% custom_codes || identical(ind, custom_meta_name)) {
       m <- list(
         recode = "KR", category = "Malaria", cascade = 1L,
         age = "0-59 months", pop_type = "u5"
@@ -334,10 +338,13 @@
 #' 100 for everything else (percentage).
 #'
 #' @param ind Character indicator code.
+#' @param custom_csb_indicator Optional validated `custom_csb_indicator`
+#'   spec list. When non-NULL, derived custom CSB codes resolve via the
+#'   same lookup as the built-in CSB family.
 #' @return Numeric scalar: 1000 or 100.
 #' @noRd
-.mbg_indicator_multiplier <- function(ind) {
-  meta <- .mbg_indicator_meta(ind)
+.mbg_indicator_multiplier <- function(ind, custom_csb_indicator = NULL) {
+  meta <- .mbg_indicator_meta(ind, custom_csb_indicator = custom_csb_indicator)
   if (identical(meta$base_unit, "per 1000 live births")) 1000 else 100
 }
 
@@ -562,7 +569,19 @@
     character(0)
   }
 
-  unique(c(categories, individual_codes, custom_codes))
+  # Also accept the user-supplied meta name (e.g. "csb_eff") as a valid
+  # category-level dispatch key. This lets callers pass a single token to
+  # run all three derived sub-indicators (`<name>_dhis`, `<name>_nondhis`,
+  # `<name>_untreat`) instead of enumerating them by hand. The dispatcher
+  # in .process_indicator_category() already detects this case via
+  # is_custom_csb_meta and runs the full partition.
+  custom_meta_name <- if (!is.null(custom_csb_indicator)) {
+    custom_csb_indicator$name
+  } else {
+    character(0)
+  }
+
+  unique(c(categories, individual_codes, custom_codes, custom_meta_name))
 }
 
 

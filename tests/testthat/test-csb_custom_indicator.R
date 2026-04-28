@@ -202,6 +202,58 @@ test_that(".valid_mbg_indicators appends derived custom CSB codes", {
   expect_true(all(c("csb_eff_dhis", "csb_eff_nondhis", "csb_eff_untreat") %in% with_custom))
 })
 
+test_that(".valid_mbg_indicators also accepts the user-supplied meta name", {
+  # Users should be able to pass the meta name (e.g. "csb_eff") as a
+  # category-level dispatch token to run all three derived sub-indicators
+  # in one call. This is what makes the custom partition show up in the
+  # final Excel output without enumerating each sub-code.
+  spec <- sntmethods:::.validate_custom_csb_indicator_spec(.mock_spec())
+  with_custom <- sntmethods:::.valid_mbg_indicators(custom_csb_indicator = spec)
+  expect_true("csb_eff" %in% with_custom)
+  # Without spec the meta name is not valid
+  expect_false("csb_eff" %in% sntmethods:::.valid_mbg_indicators())
+})
+
+test_that(".mbg_indicator_meta resolves the custom meta name to KR/u5", {
+  spec <- sntmethods:::.validate_custom_csb_indicator_spec(.mock_spec())
+  meta <- sntmethods:::.mbg_indicator_meta(
+    "csb_eff", custom_csb_indicator = spec
+  )
+  expect_equal(meta$recode, "KR")
+  expect_equal(meta$pop_type, "u5")
+  expect_equal(meta$age, "0-59 months")
+})
+
+test_that(".mbg_indicator_pop_type returns 'u5' for the custom meta name", {
+  spec <- sntmethods:::.validate_custom_csb_indicator_spec(.mock_spec())
+  expect_equal(
+    sntmethods:::.mbg_indicator_pop_type(
+      "csb_eff", custom_csb_indicator = spec
+    ),
+    "u5"
+  )
+})
+
+test_that(".mbg_indicator_multiplier accepts and threads custom spec", {
+  spec <- sntmethods:::.validate_custom_csb_indicator_spec(.mock_spec())
+  # Custom CSB sub-codes use proportion (0-1) base unit -> multiplier 100.
+  expect_equal(
+    sntmethods:::.mbg_indicator_multiplier(
+      "csb_eff_dhis", custom_csb_indicator = spec
+    ),
+    100
+  )
+  expect_equal(
+    sntmethods:::.mbg_indicator_multiplier(
+      "csb_eff", custom_csb_indicator = spec
+    ),
+    100
+  )
+  # Backwards-compatible default (no spec) still works for built-ins.
+  expect_equal(sntmethods:::.mbg_indicator_multiplier("csb_any"), 100)
+  expect_equal(sntmethods:::.mbg_indicator_multiplier("u5mr"), 1000)
+})
+
 test_that(".mbg_indicator_pop_type recognises custom CSB codes as 'u5'", {
   spec <- sntmethods:::.validate_custom_csb_indicator_spec(.mock_spec())
   expect_equal(
