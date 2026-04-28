@@ -357,10 +357,15 @@
 #' (single source of truth) so MBG output matches DHS output exactly.
 #'
 #' @param ind Character indicator code (e.g., "act", "pfpr_rdt").
+#' @param custom_csb_indicator Optional validated `custom_csb_indicator`
+#'   spec list. When non-NULL, derived custom CSB codes
+#'   (`<name>_dhis`, `<name>_nondhis`, `<name>_untreat`) and the meta
+#'   name resolve to the same KR/U5 metadata block emitted by
+#'   `.custom_csb_dictionary_rows()`.
 #' @return Named list with `indicator`, `numerator_description`,
 #'   `denominator_description`, `denominator_code`.
 #' @noRd
-.mbg_indicator_label <- function(ind) {
+.mbg_indicator_label <- function(ind, custom_csb_indicator = NULL) {
   # Look up detailed metadata from DHS conditions functions
   detail <- .dhs_indicator_lookup()[[ind]]
 
@@ -373,9 +378,28 @@
     ))
   }
 
+  # Custom CSB indicators are not in the static lookup -- pull metadata
+  # from the runtime dictionary helper so labels stay consistent with
+  # the rows bound onto the final pipeline output.
+  if (!is.null(custom_csb_indicator)) {
+    custom_codes <- .custom_csb_indicator_names(custom_csb_indicator)
+    if (ind %in% custom_codes) {
+      rows <- .custom_csb_dictionary_rows(custom_csb_indicator)
+      row <- rows[rows$indicator_code == ind, , drop = FALSE]
+      if (nrow(row) == 1L) {
+        return(list(
+          indicator               = row$indicator_title,
+          numerator_description   = row$numerator_description,
+          denominator_description = row$denominator_description,
+          denominator_code        = row$denominator_code
+        ))
+      }
+    }
+  }
+
   # Fall back to meta-based generic labels for indicators without
   # a _conditions() entry (e.g. derived / combined indicators)
-  meta <- .mbg_indicator_meta(ind)
+  meta <- .mbg_indicator_meta(ind, custom_csb_indicator = custom_csb_indicator)
   indicator_name <- gsub("_", " ", ind)
 
   denom_map <- list(
