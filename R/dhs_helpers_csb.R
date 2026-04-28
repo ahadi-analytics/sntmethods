@@ -121,7 +121,22 @@
       had_fever = suppressWarnings(as.numeric(as.character(.data[[survey_vars$fever]])))
     )
 
-  # Diagnostic: check fever values after coercion
+  # Sanitize fever: only 0/1 (and 1/2 for some surveys) are valid yes/no
+  # responses. DHS codes 8 ("don't know") and 9 ("missing") and any other
+  # stray value should be treated as NA so they don't leak through to the
+  # fever subset below or to fever-coding auto-detection.
+  invalid_fever_mask <- !is.na(kr$had_fever) &
+    !(kr$had_fever %in% c(0, 1, 2))
+  n_invalid_fever <- sum(invalid_fever_mask)
+  if (n_invalid_fever > 0) {
+    invalid_vals <- sort(unique(kr$had_fever[invalid_fever_mask]))
+    cli::cli_alert_info(
+      "Fever variable ({.var {survey_vars$fever}}): coercing {format(n_invalid_fever, big.mark = ',')} row{?s} with values {paste(invalid_vals, collapse = ', ')} to NA."
+    )
+    kr$had_fever[invalid_fever_mask] <- NA_real_
+  }
+
+  # Diagnostic: check fever values after coercion + sanitization
   unique_fever_coerced <- unique(kr$had_fever[!is.na(kr$had_fever)])
 
   if (length(unique_fever_coerced) > 0) {
@@ -140,6 +155,30 @@
         survey_weight = .data[[survey_vars$weight]] / 1e6,
         stratum_id = .data[[survey_vars$stratum]]
       )
+  }
+
+  # Drop rows that cannot enter the survey design at all. svydesign() aborts
+  # with "missing values in `id'" if any cluster id is NA; the same holds
+  # for the stratum id and weight when include_survey_vars = TRUE. These
+  # rows would also be silently excluded by survey:::svydesign() anyway,
+  # so dropping them up front gives a useful audit log instead of a crash.
+  design_drop_mask <- is.na(kr$cluster_id)
+  if (include_survey_vars) {
+    design_drop_mask <- design_drop_mask |
+      is.na(kr$survey_weight) |
+      is.na(kr$stratum_id)
+  }
+  n_design_drop <- sum(design_drop_mask)
+  if (n_design_drop > 0) {
+    cli::cli_alert_info(
+      "Dropped {format(n_design_drop, big.mark = ',')} row{?s} with NA in cluster{?/, stratum, or weight} (survey-design columns)."
+    )
+    kr <- kr[!design_drop_mask, , drop = FALSE]
+  }
+  if (nrow(kr) == 0) {
+    cli::cli_abort(
+      "All rows have NA in survey-design columns; nothing to estimate."
+    )
   }
 
   # Check alive variable if present
