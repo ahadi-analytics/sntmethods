@@ -493,3 +493,65 @@ test_that("calc_csb_custom_mbg returns three cluster data.tables on mock data", 
     d$samplesize
   )
 })
+
+
+# ---- .activate_custom_csb_indicators() -----------------------------------
+
+test_that(".activate_custom_csb_indicators is a no-op when spec is NULL", {
+  out <- sntmethods:::.activate_custom_csb_indicators(
+    indicators = c("pfpr", "csb"),
+    custom_csb_indicator = NULL
+  )
+  expect_equal(out, c("pfpr", "csb"))
+})
+
+test_that(".activate_custom_csb_indicators auto-adds the meta name when absent", {
+  spec <- sntmethods:::.validate_custom_csb_indicator_spec(list(
+    name = "csb_eff",
+    dhis_locs = "h32a",
+    nondhis_locs = "h32k",
+    untreat_locs = "h32x"
+  ))
+  expect_message(
+    out <- sntmethods:::.activate_custom_csb_indicators(
+      indicators = c("pfpr", "csb"),
+      custom_csb_indicator = spec
+    ),
+    regexp = "csb_eff"
+  )
+  expect_true("csb_eff" %in% out)
+  # Existing indicators preserved
+  expect_true(all(c("pfpr", "csb") %in% out))
+})
+
+test_that(".activate_custom_csb_indicators is a no-op when meta name already listed", {
+  spec <- sntmethods:::.validate_custom_csb_indicator_spec(list(
+    name = "csb_eff",
+    dhis_locs = "h32a",
+    nondhis_locs = "h32k",
+    untreat_locs = "h32x"
+  ))
+  expect_silent(
+    out <- sntmethods:::.activate_custom_csb_indicators(
+      indicators = c("pfpr", "csb_eff"),
+      custom_csb_indicator = spec
+    )
+  )
+  expect_equal(out, c("pfpr", "csb_eff"))
+})
+
+test_that(".activate_custom_csb_indicators is a no-op when any sub-code already listed", {
+  spec <- sntmethods:::.validate_custom_csb_indicator_spec(list(
+    name = "csb_eff",
+    dhis_locs = "h32a",
+    nondhis_locs = "h32k",
+    untreat_locs = "h32x"
+  ))
+  expect_silent(
+    out <- sntmethods:::.activate_custom_csb_indicators(
+      indicators = c("pfpr", "csb_eff_dhis"),
+      custom_csb_indicator = spec
+    )
+  )
+  expect_equal(out, c("pfpr", "csb_eff_dhis"))
+})

@@ -144,11 +144,13 @@ NULL
 #'     \item \code{untreat_locs}: Character vector for the untreated bucket
 #'       (same dual-style semantics as \code{dhis_locs}).
 #'   }
-#'   To activate the custom partition in pipeline output, include the
-#'   \code{name} (or any of the three derived codes) in \code{indicators}.
-#'   The custom triple is always mutually exclusive at the child level
-#'   (priority dhis > nondhis > untreat); admin-level estimates are
-#'   rescaled to sum to 100% per admin unit. Default: NULL (disabled).
+#'   When \code{custom_csb_indicator} is supplied, the partition is
+#'   activated automatically: the \code{name} is added to
+#'   \code{indicators} unless it (or one of the three derived codes) is
+#'   already listed. The custom triple is always mutually exclusive at
+#'   the child level (priority dhis > nondhis > untreat); admin-level
+#'   estimates are rescaled to sum to 100% per admin unit.
+#'   Default: NULL (disabled).
 #' @param verbose Logical. If TRUE, prints detailed progress. Default: TRUE.
 #' @param debug Logical. If TRUE, prints additional
 #'   diagnostic messages for troubleshooting.
@@ -359,6 +361,20 @@ run_mbg_pipeline <- function(
       indicators <- unique(c(indicators, new_deps))
     }
   }
+
+  # ---- Auto-activate custom CSB partition ----
+  #
+  # If the user supplied `custom_csb_indicator` but did not list either
+  # the meta name (e.g. "csb_eff") or any of the three derived sub-codes
+  # (`<name>_dhis`, `<name>_nondhis`, `<name>_untreat`) in `indicators`,
+  # the per-survey loop never iterates over the custom partition and the
+  # derived indicators silently disappear from cluster data, MBG
+  # estimates, rasters and Excel output. Auto-prepend the meta name so
+  # the partition is always exercised when the spec is supplied. Mirrors
+  # the eff_cm dependency expansion above.
+  indicators <- .activate_custom_csb_indicators(
+    indicators, custom_csb_indicator
+  )
 
   # Validate DHS parquet path exists
   if (!fs::dir_exists(path_dhs_parquet)) {
@@ -1245,6 +1261,34 @@ run_mbg_pipeline <- function(
   cli::cli_alert_success("Pipeline complete!")
 
   results
+}
+
+
+#' Auto-activate Custom CSB Partition in `indicators`
+#'
+#' Ensures the user-supplied `custom_csb_indicator` partition is
+#' actually exercised by the per-survey loop. When the spec is supplied
+#' but neither the meta name nor any of the three derived sub-codes
+#' appears in `indicators`, the meta name is appended (and an info
+#' message is emitted) so cluster data, MBG estimates, rasters and
+#' Excel rows are produced for the custom partition.
+#'
+#' @param indicators Character vector of indicator codes / category
+#'   tokens passed to `run_mbg_pipeline()`.
+#' @param custom_csb_indicator Validated custom CSB spec (or NULL).
+#' @return Possibly-extended character vector of indicators.
+#' @noRd
+.activate_custom_csb_indicators <- function(indicators,
+                                            custom_csb_indicator) {
+  if (is.null(custom_csb_indicator)) return(indicators)
+  custom_meta  <- custom_csb_indicator$name
+  custom_codes <- .custom_csb_indicator_names(custom_csb_indicator)
+  custom_tokens <- c(custom_meta, custom_codes)
+  if (any(custom_tokens %in% indicators)) return(indicators)
+  cli::cli_alert_info(
+    "Adding {.val {custom_meta}} to {.arg indicators} (required by {.arg custom_csb_indicator})"
+  )
+  unique(c(indicators, custom_meta))
 }
 
 
