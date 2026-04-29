@@ -1034,13 +1034,26 @@
     return(data)
   }
 
-  # Coerce h32 columns to numeric (defensive; .prepare_csb_data already
-  # zaps labels but this function may be called directly in tests).
+  # Coerce h32 columns to plain numeric (defensive; .prepare_csb_data
+  # already zaps labels, but this function may be called directly in
+  # tests OR on a KR frame that still carries haven_labelled attributes.
+  # `pivot_longer()` over labelled columns can produce a `haven_labelled`
+  # value column whose `== 1` comparison silently misbehaves, so we zap
+  # labels explicitly before any reshape.
   for (col in h32_cols) {
-    data[[col]] <- suppressWarnings(as.numeric(as.character(data[[col]])))
+    x <- data[[col]]
+    if (inherits(x, "haven_labelled")) {
+      x <- haven::zap_labels(x)
+    }
+    data[[col]] <- suppressWarnings(as.numeric(as.character(x)))
   }
 
-  data$.csb_custom_row_id <- dplyr::row_number(data)
+  # IMPORTANT: use seq_len(nrow(data)) — `dplyr::row_number(data)` on a
+  # data frame ranks the first column's values, NOT row positions, which
+  # produces duplicate `.csb_custom_row_id`s and causes the downstream
+  # left_join to broadcast positives across many children (everyone
+  # ended up in `_dhis`). See regression test below.
+  data$.csb_custom_row_id <- seq_len(nrow(data))
 
   long <- data |>
     dplyr::select(.csb_custom_row_id, dplyr::all_of(h32_cols)) |>

@@ -263,6 +263,74 @@ test_that("classify assigns mutually exclusive partition with dhis priority", {
   )
 })
 
+test_that("classify works when first h32 column has many ties (regression: row_number bug)", {
+  # Regression for the .classify_custom_csb_from_h32() row_number(data) bug:
+  # `dplyr::row_number(data)` on a data frame ranks the first column's
+  # values rather than returning row positions. When the first h32 column
+  # has many ties (e.g. mostly zeros, as in GH 2022 where h32a is positive
+  # in only ~10% of febrile children), the resulting `.csb_custom_row_id`
+  # had duplicates, the long-form left_join broadcast `dhis` positives
+  # across many rows, and every child ended up classified as `_dhis`.
+  classification <- tibble::tibble(
+    variable = c("h32a", "h32j", "h32y"),
+    csb_custom = c("dhis", "nondhis", "untreat")
+  )
+  # 10 children. h32a positive only on rows 1, 5 (ties on 0). h32j positive
+  # only on rows 2, 6. h32y positive on rows 3, 7. Rows 4, 8, 9, 10 = no
+  # positive slot -> residual untreat.
+  df <- data.frame(
+    h32a = c(1, 0, 0, 0, 1, 0, 0, 0, 0, 0),
+    h32j = c(0, 1, 0, 0, 0, 1, 0, 0, 0, 0),
+    h32y = c(0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+  )
+  out <- sntmethods:::.classify_custom_csb_from_h32(
+    data           = df,
+    h32_cols       = c("h32a", "h32j", "h32y"),
+    classification = classification,
+    prefix         = "csb_eff"
+  )
+  expect_equal(out$csb_eff_dhis,    c(1, 0, 0, 0, 1, 0, 0, 0, 0, 0))
+  expect_equal(out$csb_eff_nondhis, c(0, 1, 0, 0, 0, 1, 0, 0, 0, 0))
+  # Rows 3, 7 have h32y == 1, rows 4, 8, 9, 10 fall through residual.
+  expect_equal(out$csb_eff_untreat, c(0, 0, 1, 1, 0, 0, 1, 1, 1, 1))
+  # Mutually exclusive partition: each child in exactly one bucket
+  expect_equal(
+    out$csb_eff_dhis + out$csb_eff_nondhis + out$csb_eff_untreat,
+    rep(1L, nrow(out))
+  )
+  # Counts: 2 dhis, 2 nondhis, 6 untreat (must NOT be 10 dhis)
+  expect_equal(sum(out$csb_eff_dhis),    2L)
+  expect_equal(sum(out$csb_eff_nondhis), 2L)
+  expect_equal(sum(out$csb_eff_untreat), 6L)
+})
+
+test_that("classify handles haven_labelled h32 columns correctly", {
+  # Regression: KR data carries haven_labelled attributes; pivot_longer
+  # over labelled columns can break the `visited == 1` comparison and
+  # mis-classify children. The helper must zap labels defensively.
+  skip_if_not_installed("haven")
+  classification <- tibble::tibble(
+    variable = c("h32a", "h32j", "h32y"),
+    csb_custom = c("dhis", "nondhis", "untreat")
+  )
+  df <- data.frame(
+    h32a = c(1, 0, 0, 0, 0),
+    h32j = c(0, 1, 0, 0, 0),
+    h32y = c(0, 0, 1, 0, 0)
+  )
+  # Decorate as haven_labelled (mimics dhs_read output)
+  df$h32a <- haven::labelled(df$h32a, c("No" = 0, "Yes" = 1))
+  df$h32j <- haven::labelled(df$h32j, c("No" = 0, "Yes" = 1))
+  df$h32y <- haven::labelled(df$h32y, c("No" = 0, "Yes" = 1))
+  out <- sntmethods:::.classify_custom_csb_from_h32(
+    data = df, h32_cols = c("h32a", "h32j", "h32y"),
+    classification = classification, prefix = "csb_eff"
+  )
+  expect_equal(out$csb_eff_dhis,    c(1, 0, 0, 0, 0))
+  expect_equal(out$csb_eff_nondhis, c(0, 1, 0, 0, 0))
+  expect_equal(out$csb_eff_untreat, c(0, 0, 1, 1, 1))
+})
+
 test_that("classify treats children with no positive slot as untreat", {
   classification <- tibble::tibble(
     variable = c("h32a", "h32j"),
