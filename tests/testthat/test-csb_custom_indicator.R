@@ -128,13 +128,108 @@ test_that("classification builder maps every observed h32 label", {
   )
 })
 
-test_that("classification builder errors on unmapped labels", {
+test_that("classification builder skips unmapped labels with info (no abort)", {
   bad <- .mock_spec()
-  # Drop "Other" so h32x is unmapped
+  # Drop "Other" so h32x is unmapped: should NOT abort, should just be skipped
   bad$untreat_locs <- character(0)
-  expect_error(
-    sntmethods:::.build_custom_csb_classification(.mock_kr_with_labels(), bad),
-    regexp = "does not classify"
+  cls <- expect_no_error(
+    sntmethods:::.build_custom_csb_classification(.mock_kr_with_labels(), bad)
+  )
+  # h32x is dropped from the classification (will fall through to residual
+  # untreat in .classify_custom_csb_from_h32 if a child only has h32x = 1)
+  expect_false("h32x" %in% cls$variable)
+  expect_setequal(cls$variable, c("h32a", "h32j", "h32n"))
+})
+
+test_that("force_keep_vars retains h32 columns whose label starts with 'NA -'", {
+  kr <- .mock_kr_with_labels()
+  # Simulate a country-specific placeholder label on h32i
+  kr$h32i <- c(1, 0, 0, 0, 0)
+  attr(kr$h32i, "label") <- "NA - country specific"
+
+  # Without force_keep, h32i is dropped (starts with NA -)
+  obs0 <- sntmethods:::.extract_custom_csb_h32_labels(kr)
+  expect_false("h32i" %in% obs0$variable)
+
+  # With force_keep_vars, h32i is retained even with NA- label
+  obs1 <- sntmethods:::.extract_custom_csb_h32_labels(kr, force_keep_vars = "h32i")
+  expect_true("h32i" %in% obs1$variable)
+  i_row <- obs1[obs1$variable == "h32i", , drop = FALSE]
+  expect_equal(i_row$raw_label, "")
+  expect_true(is.na(i_row$label_norm))
+})
+
+test_that(".build_custom_csb_classification routes NA-labeled h32 var by name", {
+  kr <- .mock_kr_with_labels()
+  # Add an h32i column with a country-specific 'NA -' placeholder label,
+  # but route it explicitly via dhis_locs by variable name.
+  kr$h32i <- c(1, 0, 0, 0, 0)
+  attr(kr$h32i, "label") <- "NA - country specific"
+
+  spec <- .mock_spec()
+  spec$dhis_locs <- c(spec$dhis_locs, "h32i")
+
+  cls <- sntmethods:::.build_custom_csb_classification(kr, spec)
+  expect_true("h32i" %in% cls$variable)
+  expect_equal(cls$csb_custom[cls$variable == "h32i"], "dhis")
+})
+
+test_that(".zero_fill_custom_csb_cluster_data with NULL returns empty schema", {
+  out <- sntmethods:::.zero_fill_custom_csb_cluster_data(NULL)
+  expect_s3_class(out, "tbl_df")
+  expect_equal(nrow(out), 0L)
+  expect_true(all(c("indicator", "n", "p") %in% names(out)))
+})
+
+test_that(".zero_fill_custom_csb_cluster_data zeroes indicator/p in sibling", {
+  sib <- tibble::tibble(
+    cluster = c(1L, 2L, 3L),
+    indicator = c(5L, 7L, 2L),
+    n = c(10L, 12L, 8L),
+    p = c(0.5, 0.58, 0.25)
+  )
+  out <- sntmethods:::.zero_fill_custom_csb_cluster_data(sib)
+  expect_equal(nrow(out), 3L)
+  expect_equal(out$cluster, sib$cluster)
+  expect_equal(out$n, sib$n)
+  expect_true(all(out$indicator == 0L))
+  expect_true(all(out$p == 0))
+})
+
+test_that(".zero_fill_custom_csb_adm_estimates produces correct schema", {
+  skip_if_not_installed("sf")
+  primary_sf <- sf::st_sf(
+    adm2 = c("A", "B"),
+    adm1 = c("R1", "R1"),
+    geometry = sf::st_sfc(
+      sf::st_polygon(list(rbind(c(0, 0), c(1, 0), c(1, 1), c(0, 0)))),
+      sf::st_polygon(list(rbind(c(2, 2), c(3, 2), c(3, 3), c(2, 2))))
+    )
+  )
+  out <- sntmethods:::.zero_fill_custom_csb_adm_estimates(
+    "csb_eff_untreat", primary_sf, pop_rast = NULL
+  )
+  expect_equal(nrow(out), 2L)
+  expect_true(all(c("csb_eff_untreat_mean", "csb_eff_untreat_lower",
+                    "csb_eff_untreat_upper", "csb_eff_untreat_pop") %in%
+                    names(out)))
+  expect_true(all(out$csb_eff_untreat_mean == 0))
+  expect_true(all(out$csb_eff_untreat_lower == 0))
+  expect_true(all(out$csb_eff_untreat_upper == 0))
+  expect_true(all(is.na(out$csb_eff_untreat_pop)))
+})
+
+test_that(".zero_fill_custom_csb_adm_estimates returns NULL on empty primary_sf", {
+  skip_if_not_installed("sf")
+  empty_sf <- sf::st_sf(
+    adm2 = character(0),
+    geometry = sf::st_sfc()
+  )
+  expect_null(
+    sntmethods:::.zero_fill_custom_csb_adm_estimates("csb_eff_dhis", empty_sf)
+  )
+  expect_null(
+    sntmethods:::.zero_fill_custom_csb_adm_estimates("csb_eff_dhis", NULL)
   )
 })
 

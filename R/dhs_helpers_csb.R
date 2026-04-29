@@ -825,16 +825,30 @@
 #' slot whose label is `NA - ...` (DHS country-specific placeholder for
 #' unused slots). Labels must be read **before** any zap/coercion.
 #'
+#' Variable names listed in `force_keep_vars` are always kept even when
+#' their label is empty or starts with `"NA -"`, because the caller is
+#' explicitly routing those columns by variable name (the resulting row
+#' will carry `raw_label = ""` / `label_norm = NA_character_` which is
+#' fine: var-name matching wins over label matching downstream).
+#'
 #' @param dhs_kr DHS Children's Recode with haven labels intact.
+#' @param force_keep_vars Optional character vector of h32 variable names
+#'   that must be retained regardless of label content (e.g. user-listed
+#'   slots with country-specific `NA -` placeholders).
 #' @return Tibble with columns `variable`, `raw_label`, `label_norm`. Rows
-#'   are returned only for slots that have a usable scalar character label.
+#'   are returned only for slots that have a usable scalar character label
+#'   OR appear in `force_keep_vars`.
 #' @noRd
-.extract_custom_csb_h32_labels <- function(dhs_kr) {
+.extract_custom_csb_h32_labels <- function(dhs_kr,
+                                           force_keep_vars = character(0)) {
   if (!is.data.frame(dhs_kr)) {
     cli::cli_abort("`dhs_kr` must be a data.frame or tibble.")
   }
   available_h32 <- grep("^h32[a-z0-9]+$", names(dhs_kr), value = TRUE)
   meta_vars <- c("h32y", "h32z")
+  # `force_keep_vars` may include h32y/h32z if the caller really wants
+  # them in their custom partition; honour the explicit user listing.
+  meta_vars <- setdiff(meta_vars, force_keep_vars)
   available_h32 <- setdiff(available_h32, meta_vars)
   if (length(available_h32) == 0) {
     return(tibble::tibble(
@@ -847,13 +861,21 @@
   rows <- list()
   for (v in available_h32) {
     lbl <- attr(dhs_kr[[v]], "label")
-    if (is.null(lbl) || !is.character(lbl) || length(lbl) != 1L) next
-    if (is.na(lbl) || !nzchar(lbl)) next
-    if (grepl("^NA\\s*-", lbl)) next
+    forced <- v %in% force_keep_vars
+    has_lbl <- is.character(lbl) && length(lbl) == 1L &&
+      !is.na(lbl) && nzchar(lbl) && !grepl("^NA\\s*-", lbl)
+    if (!has_lbl && !forced) next
+
+    raw <- if (has_lbl) lbl else ""
+    norm <- if (has_lbl) {
+      .normalize_custom_csb_label(lbl)
+    } else {
+      NA_character_
+    }
     rows[[length(rows) + 1L]] <- tibble::tibble(
       variable = v,
-      raw_label = lbl,
-      label_norm = .normalize_custom_csb_label(lbl)
+      raw_label = raw,
+      label_norm = norm
     )
   }
 
@@ -893,7 +915,12 @@
   vars_nondhis <- attr(spec, "vars_nondhis") %||% character(0)
   vars_untreat <- attr(spec, "vars_untreat") %||% character(0)
 
-  observed <- .extract_custom_csb_h32_labels(dhs_kr)
+  # Pass explicit var-name listings so country-specific "NA -" placeholders
+  # are still kept when the user has actively routed them by variable name.
+  observed <- .extract_custom_csb_h32_labels(
+    dhs_kr,
+    force_keep_vars = unique(c(vars_dhis, vars_nondhis, vars_untreat))
+  )
   if (nrow(observed) == 0) {
     cli::cli_warn(
       "No usable h32 labels found in {.arg dhs_kr}; custom CSB indicator will be empty."
@@ -924,13 +951,18 @@
     msgs <- sprintf(
       "%s: %s",
       unmapped$variable,
-      unmapped$raw_label
+      ifelse(nzchar(unmapped$raw_label), unmapped$raw_label, "<no label>")
     )
-    cli::cli_abort(c(
-      "{.arg custom_csb_indicator} does not classify {nrow(unmapped)} observed h32 label{?s}:",
-      stats::setNames(msgs, rep("x", length(msgs))),
-      "i" = "Add each variable name (e.g. {.code h32a}) or label to one of {.field dhis_locs}, {.field nondhis_locs}, or {.field untreat_locs}."
+    # Non-fatal: any child whose only positive h32 source falls in an
+    # unmapped slot will be classified as `untreat` via the residual rule
+    # in .classify_custom_csb_from_h32(). This keeps the pipeline running
+    # for surveys that include extra country-specific h32 slots the user
+    # did not enumerate.
+    cli::cli_alert_info(c(
+      "Custom CSB: {nrow(unmapped)} h32 column{?s} not listed in any of {.field dhis_locs}, {.field nondhis_locs}, {.field untreat_locs} (skipped):",
+      stats::setNames(msgs, rep("*", length(msgs)))
     ))
+    observed <- observed[!is.na(observed$csb_custom), , drop = FALSE]
   }
 
   # Informational: list extra user-supplied entries not present in this survey

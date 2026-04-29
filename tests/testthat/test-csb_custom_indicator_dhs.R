@@ -396,7 +396,7 @@ test_that("var name takes precedence over a conflicting label match", {
   )
 })
 
-test_that("unmapped h32 column with neither var name nor label still errors", {
+test_that("unmapped h32 column with neither var name nor label is dropped (no error)", {
   spec <- list(
     name = "csb_eff",
     dhis_locs    = c("h32a"),
@@ -418,8 +418,12 @@ test_that("unmapped h32 column with neither var name nor label still errors", {
   attr(kr$h32x, "label") <- "Other"
   attr(kr$h32q, "label") <- "Some new place"
 
-  expect_error(
-    sntmethods:::.build_custom_csb_classification(kr, spec),
-    regexp = "does not classify"
+  # Behavior change: unmapped columns are now dropped with an info message
+  # instead of aborting. The pipeline continues so all three custom
+  # sub-indicators can still be produced for the survey.
+  cls <- expect_no_error(
+    sntmethods:::.build_custom_csb_classification(kr, spec)
   )
+  expect_false("h32q" %in% cls$variable)
+  expect_setequal(cls$variable, c("h32a", "h32j", "h32x"))
 })

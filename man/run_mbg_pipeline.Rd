@@ -187,11 +187,13 @@ is referenced both ways.
 \item \code{untreat_locs}: Character vector for the untreated bucket
 (same dual-style semantics as \code{dhis_locs}).
 }
-To activate the custom partition in pipeline output, include the
-\code{name} (or any of the three derived codes) in \code{indicators}.
-The custom triple is always mutually exclusive at the child level
-(priority dhis > nondhis > untreat); admin-level estimates are
-rescaled to sum to 100\% per admin unit. Default: NULL (disabled).}
+When \code{custom_csb_indicator} is supplied, the partition is
+activated automatically: the \code{name} is added to
+\code{indicators} unless it (or one of the three derived codes) is
+already listed. The custom triple is always mutually exclusive at
+the child level (priority dhis > nondhis > untreat); admin-level
+estimates are rescaled to sum to 100\% per admin unit.
+Default: NULL (disabled).}
 
 \item{verbose}{Logical. If TRUE, prints detailed progress. Default: TRUE.}
 

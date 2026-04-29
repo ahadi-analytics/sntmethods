@@ -1292,6 +1292,77 @@ run_mbg_pipeline <- function(
 }
 
 
+#' Synthesize a zero-filled cluster_data row set for a custom CSB sub-indicator
+#'
+#' When MBG was skipped for a custom CSB sub-indicator (e.g. zero numerator
+#' across all clusters, or fewer than 5 clusters), the indicator would
+#' otherwise be absent from `cluster_data` / `mbg_estimates` / rasters and
+#' therefore from the Excel summary. This helper guarantees that every
+#' `<name>_dhis|_nondhis|_untreat` sub-indicator the user defined reaches
+#' the downstream outputs, even when the value is structurally zero.
+#'
+#' The synthesized cluster_data carries the same column schema as the
+#' real `calc_csb_custom_mbg()` output (`indicator`, `n`, `p`, plus
+#' any cluster identifiers present in a sibling sub-indicator) but with
+#' `indicator = 0` and `p = 0`. If no sibling sub-indicator is available
+#' to copy a cluster scaffold from, an empty 0-row tibble is returned so
+#' the downstream MBG run is skipped gracefully (a synthesized
+#' `mbg_estimates` row is added separately).
+#'
+#' @param sibling_dt One of the populated sibling sub-indicator cluster
+#'   data tables (used to copy cluster ids / weights). May be NULL.
+#' @return Tibble with the same columns as `sibling_dt` and zero numerator.
+#' @noRd
+.zero_fill_custom_csb_cluster_data <- function(sibling_dt) {
+  if (is.null(sibling_dt) || nrow(sibling_dt) == 0) {
+    return(tibble::tibble(indicator = integer(0), n = integer(0), p = numeric(0)))
+  }
+  out <- sibling_dt
+  if ("indicator" %in% names(out)) out$indicator <- 0L
+  if ("p" %in% names(out)) out$p <- 0
+  out
+}
+
+
+#' Synthesize zero-filled adm_estimates for a custom CSB sub-indicator
+#'
+#' Mirrors the schema produced by `.run_single_mbg()`: a non-sf data frame
+#' with admin attribute columns plus `<ind>_mean`, `<ind>_lower`,
+#' `<ind>_upper`, `<ind>_pop`. mean/lower/upper are filled with 0.
+#'
+#' @param indicator_name Character.
+#' @param primary_sf sf object whose attributes seed the admin rows.
+#' @param pop_rast Optional terra raster used to compute `<ind>_pop`.
+#' @return Data frame.
+#' @noRd
+.zero_fill_custom_csb_adm_estimates <- function(indicator_name,
+                                                primary_sf,
+                                                pop_rast = NULL) {
+  if (is.null(primary_sf) || nrow(primary_sf) == 0) {
+    return(NULL)
+  }
+  base <- sf::st_drop_geometry(primary_sf)
+  mean_col  <- paste0(indicator_name, "_mean")
+  lower_col <- paste0(indicator_name, "_lower")
+  upper_col <- paste0(indicator_name, "_upper")
+  pop_col   <- paste0(indicator_name, "_pop")
+  pop_values <- if (!is.null(pop_rast)) {
+    tryCatch({
+      vals <- terra::extract(pop_rast, primary_sf, fun = sum, na.rm = TRUE)[[2]]
+      vals[is.na(vals) | vals <= 0] <- NA_real_
+      vals
+    }, error = function(e) rep(NA_real_, nrow(base)))
+  } else {
+    rep(NA_real_, nrow(base))
+  }
+  base[[mean_col]]  <- 0
+  base[[lower_col]] <- 0
+  base[[upper_col]] <- 0
+  base[[pop_col]]   <- pop_values
+  base
+}
+
+
 #' Expected Sub-indicator Count per Category
 #'
 #' Returns the number of sub-indicators produced when a category is processed.
@@ -1491,14 +1562,47 @@ run_mbg_pipeline <- function(
       list()
     })
 
+    # Determine which sub-indicator names this dispatch is responsible for
+    # so we can guarantee all of them appear in the outputs (zero-filled
+    # if necessary). For meta-name dispatch this is all three custom codes;
+    # for direct sub-indicator dispatch it is just that single code.
+    expected_names <- if (is_custom_csb_meta) custom_codes else category
+
+    primary_sf_local <- if (identical(aggregation_level, "adm3")) {
+      adm3_sf
+    } else {
+      adm2_sf
+    }
+
     if (length(cluster_data) == 0) {
-      if (is.null(results$skipped)) {
-        results$skipped <- "No data returned from custom CSB calculation"
+      # Custom partition produced nothing for this survey: still emit
+      # zero-filled cluster_data + mbg_estimates so all three sub-indicators
+      # appear in the Excel/raster outputs.
+      cli::cli_alert_info(
+        "Custom CSB: no data from calc_csb_custom_mbg(); zero-filling {.val {expected_names}}"
+      )
+      for (nm in expected_names) {
+        results$cluster_data[[nm]]  <- .zero_fill_custom_csb_cluster_data(NULL)
+        results$mbg_estimates[[nm]] <- .zero_fill_custom_csb_adm_estimates(
+          nm, primary_sf_local, pop_for_indicator
+        )
+        if (is.function(progress_callback)) progress_callback(nm)
       }
       return(results)
     }
     for (name in names(cluster_data)) {
       results$cluster_data[[name]] <- cluster_data[[name]]
+    }
+
+    # Pick a sibling cluster_data table to scaffold zero-fills (any
+    # populated sub-indicator works because they share the same cluster
+    # frame; only the indicator/p columns differ).
+    sibling_dt <- NULL
+    for (nm in names(cluster_data)) {
+      if (!is.null(cluster_data[[nm]]) && nrow(cluster_data[[nm]]) > 0) {
+        sibling_dt <- cluster_data[[nm]]
+        break
+      }
     }
 
     # Run MBG (mirrors built-in path) using shared logic below; jump to end
@@ -1511,7 +1615,10 @@ run_mbg_pipeline <- function(
         n_clusters <- if (!is.null(dt)) nrow(dt) else 0L
         if (n_clusters < 5) {
           cli::cli_alert_warning(
-            "Skipping MBG for {.val {ind_name}}: only {n_clusters} cluster(s) (need >= 5)"
+            "Skipping MBG for {.val {ind_name}}: only {n_clusters} cluster(s) (need >= 5); zero-filling outputs"
+          )
+          results$mbg_estimates[[ind_name]] <- .zero_fill_custom_csb_adm_estimates(
+            ind_name, primary_sf_local, pop_for_indicator
           )
           if (is.function(progress_callback)) progress_callback(ind_name)
           next
@@ -1519,7 +1626,10 @@ run_mbg_pipeline <- function(
         total_numerator <- if (!is.null(dt)) sum(dt$indicator, na.rm = TRUE) else 0
         if (total_numerator == 0) {
           cli::cli_alert_warning(
-            "Skipping MBG for {.val {ind_name}}: numerator is 0 across all clusters"
+            "Skipping MBG for {.val {ind_name}}: numerator is 0 across all clusters; zero-filling outputs"
+          )
+          results$mbg_estimates[[ind_name]] <- .zero_fill_custom_csb_adm_estimates(
+            ind_name, primary_sf_local, pop_for_indicator
           )
           if (is.function(progress_callback)) progress_callback(ind_name)
           next
@@ -1550,8 +1660,30 @@ run_mbg_pipeline <- function(
           if (save_rasters && !is.null(mbg_result$raster_path)) {
             results$raster_paths[[ind_name]] <- mbg_result$raster_path
           }
+        } else {
+          # MBG failed entirely: still emit a zero-filled estimate so the
+          # sub-indicator appears in the Excel summary.
+          results$mbg_estimates[[ind_name]] <- .zero_fill_custom_csb_adm_estimates(
+            ind_name, primary_sf_local, pop_for_indicator
+          )
         }
         if (is.function(progress_callback)) progress_callback(ind_name)
+      }
+    }
+
+    # Final safety net: synthesize cluster_data + mbg_estimates for any
+    # custom sub-indicator that did not appear in the calc output at all
+    # (e.g. one of the three buckets had no h32 columns mapped to it for
+    # the current survey). This guarantees all three custom sub-indicators
+    # always reach Excel/raster downstream.
+    for (nm in expected_names) {
+      if (is.null(results$cluster_data[[nm]])) {
+        results$cluster_data[[nm]] <- .zero_fill_custom_csb_cluster_data(sibling_dt)
+      }
+      if (is.null(results$mbg_estimates[[nm]])) {
+        results$mbg_estimates[[nm]] <- .zero_fill_custom_csb_adm_estimates(
+          nm, primary_sf_local, pop_for_indicator
+        )
       }
     }
 
