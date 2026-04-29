@@ -605,45 +605,14 @@ run_mbg_pipeline <- function(
 
   # Determine which DHS file types we need based on requested indicators.
   # Individual indicator codes (e.g. "use_itn", "pfpr_rdt_u5") are resolved
-
   # via .mbg_indicator_meta() which derives file types from the recode field.
   # Category shorthand names (e.g. "itn", "pfpr") are not in the dictionary
   # so they use a static map. Note: u5mr uses BR in the pipeline but the
   # dictionary says KR, so the category map is authoritative for categories.
-  file_types_needed <- c("GE")  # Always need GPS
-
-  category_file_types <- list(
-    pfpr = "PR",
-    itn = c("HR", "PR"),
-    irs = "HR",
-    anc = "IR",
-    csb = "KR",
-    act = "KR",
-    anemia = "PR",
-    iptp = "IR",
-    epi = "KR",
-    u5mr = "BR",
-    smc = "KR",
-    fever = "KR",
-    antimalarial = "KR",
-    eff_cm = "KR"
+  file_types_needed <- .compute_file_types_needed(
+    indicators           = indicators,
+    custom_csb_indicator = custom_csb_indicator
   )
-
-  for (ind in indicators) {
-    if (ind %in% names(category_file_types)) {
-      file_types_needed <- c(file_types_needed, category_file_types[[ind]])
-    } else {
-      # Individual indicator code -- resolve via DHS indicator dictionary
-      meta <- .mbg_indicator_meta(ind)
-      if (!is.na(meta$recode)) {
-        # Parse recode field: "HR/PR" -> c("HR", "PR"), "KR+PR" -> c("KR", "PR")
-        ft <- unlist(strsplit(meta$recode, "[/+]"))
-        file_types_needed <- c(file_types_needed, ft)
-      }
-    }
-  }
-
-  file_types_needed <- unique(file_types_needed)
 
   types_str <- paste(file_types_needed, collapse = ", ")
   cli::cli_alert_info("Required file types: {types_str}")
@@ -1261,6 +1230,71 @@ run_mbg_pipeline <- function(
   cli::cli_alert_success("Pipeline complete!")
 
   results
+}
+
+
+#' Compute the DHS file types needed for the requested indicator set
+#'
+#' Resolves the union of DHS module recodes (GE, KR, IR, HR, PR, BR)
+#' required to satisfy the indicator categories and individual codes
+#' supplied to `run_mbg_pipeline()`. GE is always included because every
+#' MBG run needs cluster GPS. When `custom_csb_indicator` is supplied,
+#' KR is forced on the load list because the partition operates on
+#' `h32*` care-seeking columns from the Children's Recode and the user's
+#' meta name (e.g. `"csb_eff"`) is not registered in either the static
+#' category-to-recode map or the DHS indicator dictionary.
+#'
+#' @param indicators Character vector of indicator codes / category
+#'   tokens passed to `run_mbg_pipeline()`.
+#' @param custom_csb_indicator Validated custom CSB spec (or NULL).
+#' @return Unique character vector of DHS file types.
+#' @noRd
+.compute_file_types_needed <- function(indicators,
+                                       custom_csb_indicator = NULL) {
+  file_types_needed <- c("GE")  # Always need GPS
+
+  category_file_types <- list(
+    pfpr = "PR",
+    itn = c("HR", "PR"),
+    irs = "HR",
+    anc = "IR",
+    csb = "KR",
+    act = "KR",
+    anemia = "PR",
+    iptp = "IR",
+    epi = "KR",
+    u5mr = "BR",
+    smc = "KR",
+    fever = "KR",
+    antimalarial = "KR",
+    eff_cm = "KR"
+  )
+
+  for (ind in indicators) {
+    if (ind %in% names(category_file_types)) {
+      file_types_needed <- c(file_types_needed, category_file_types[[ind]])
+    } else {
+      # Individual indicator code -- resolve via DHS indicator dictionary
+      meta <- .mbg_indicator_meta(ind)
+      if (!is.na(meta$recode)) {
+        # Parse recode field: "HR/PR" -> c("HR", "PR"), "KR+PR" -> c("KR", "PR")
+        ft <- unlist(strsplit(meta$recode, "[/+]"))
+        file_types_needed <- c(file_types_needed, ft)
+      }
+    }
+  }
+
+  # custom_csb_indicator always partitions h32* care-seeking columns from
+  # the KR (Children's Recode) module. The user-defined indicator name
+  # (e.g. "csb_eff") is not in category_file_types and the DHS dictionary
+  # has no entry for user names, so KR would otherwise be omitted from
+  # the load list when no built-in CSB/KR indicator is also requested.
+  # Force KR whenever a custom CSB partition is supplied.
+  if (!is.null(custom_csb_indicator)) {
+    file_types_needed <- c(file_types_needed, "KR")
+  }
+
+  unique(file_types_needed)
 }
 
 

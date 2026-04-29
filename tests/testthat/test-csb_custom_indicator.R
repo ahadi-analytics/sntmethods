@@ -718,3 +718,58 @@ test_that(".activate_custom_csb_indicators is a no-op when any sub-code already 
   )
   expect_equal(out, c("pfpr", "csb_eff_dhis"))
 })
+
+# .compute_file_types_needed -------------------------------------------------
+
+test_that(".compute_file_types_needed includes GE plus category recodes", {
+  out <- sntmethods:::.compute_file_types_needed(
+    indicators = c("pfpr", "itn"),
+    custom_csb_indicator = NULL
+  )
+  expect_true("GE" %in% out)
+  expect_true("PR" %in% out)
+  expect_true("HR" %in% out)
+  expect_false("KR" %in% out)
+})
+
+test_that(".compute_file_types_needed forces KR when custom_csb_indicator is set", {
+  spec <- sntmethods:::.validate_custom_csb_indicator_spec(list(
+    name         = "csb_eff",
+    dhis_locs    = "h32a",
+    nondhis_locs = "h32k",
+    untreat_locs = "h32x"
+  ))
+  # Without ITN being CSB/KR-related and without an explicit CSB category,
+  # KR would be missing pre-fix. With the spec, KR must appear.
+  out <- sntmethods:::.compute_file_types_needed(
+    indicators = c("itn"),
+    custom_csb_indicator = spec
+  )
+  expect_true("KR" %in% out)
+  expect_true("GE" %in% out)
+  expect_true("HR" %in% out)
+  expect_true("PR" %in% out)
+})
+
+test_that(".compute_file_types_needed omits KR when custom_csb_indicator is NULL and no KR indicator listed", {
+  out <- sntmethods:::.compute_file_types_needed(
+    indicators = c("itn", "irs"),
+    custom_csb_indicator = NULL
+  )
+  expect_false("KR" %in% out)
+})
+
+test_that(".compute_file_types_needed returns deduplicated file types", {
+  spec <- sntmethods:::.validate_custom_csb_indicator_spec(list(
+    name         = "csb_eff",
+    dhis_locs    = "h32a",
+    nondhis_locs = "h32k",
+    untreat_locs = "h32x"
+  ))
+  # csb already implies KR, custom_csb_indicator also implies KR -> only one KR
+  out <- sntmethods:::.compute_file_types_needed(
+    indicators = c("csb"),
+    custom_csb_indicator = spec
+  )
+  expect_equal(sum(out == "KR"), 1L)
+})
