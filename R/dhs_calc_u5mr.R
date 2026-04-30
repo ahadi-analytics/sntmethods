@@ -101,24 +101,22 @@ calc_u5mr_dhs_core <- function(
   age_death_var <- survey_vars$age_at_death %||% "b7"
 
   if (!age_death_var %in% names(dhs_kr)) {
-    cli::cli_abort(
+    cli::cli_warn(
       c(
-        "Required mortality variable {.var {age_death_var}} not found in KR recode.",
+        "Mortality variable {.var {age_death_var}} not found in KR recode; \\
+        U5MR cannot be estimated - skipping.",
         "i" = paste0(
-          "U5MR estimation requires the age-at-death variable ",
-          "(standard DHS code {.val b7}), which is already imputed in ",
-          "standard DHS recode files using the Croft (1991) hot-deck procedure."
-        ),
-        "x" = paste0(
-          "Synthetic imputation of death ages from a hardcoded distribution is ",
-          "non-reproducible and methodologically unsound; it has been removed."
+          "U5MR requires the age-at-death variable (standard DHS code ",
+          "{.val b7}), which is present in standard DHS recode files but ",
+          "typically absent from Malaria Indicator Surveys (MIS)."
         ),
         "*" = paste0(
-          "Please use a standard DHS KR recode file, or pass the correct ",
-          "variable name via {.arg survey_vars$age_at_death}."
+          "Use a standard DHS KR recode file, or pass the correct variable ",
+          "name via {.arg survey_vars$age_at_death}."
         )
       )
     )
+    return(NULL)
   }
 
   # Guard: if age_at_death column exists but is entirely NA, skip
@@ -616,6 +614,26 @@ calc_u5mr_dhs <- function(
   }
   if (nrow(dhs_kr) == 0) {
     cli::cli_abort("`dhs_kr` is empty.")
+  }
+
+  # Pre-flight check for age-at-death variable.
+  # MIS surveys typically lack b7; rather than aborting and breaking a
+  # multi-survey loop, warn and return NULL so the caller can skip cleanly.
+  age_death_var <- survey_vars$age_at_death %||% "b7"
+  if (!age_death_var %in% names(dhs_kr) ||
+      all(is.na(dhs_kr[[age_death_var]]))) {
+    cli::cli_warn(
+      c(
+        "Age-at-death variable {.var {age_death_var}} not available; \\
+        U5MR cannot be estimated - skipping.",
+        "i" = paste0(
+          "U5MR requires the standard DHS variable {.val b7}, which is ",
+          "typically present in standard DHS recodes but absent from ",
+          "Malaria Indicator Surveys (MIS)."
+        )
+      )
+    )
+    return(NULL)
   }
 
   # ---- 2. Extract survey metadata ----

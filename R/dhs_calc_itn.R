@@ -317,6 +317,14 @@ calc_itn_dhs <- function(
     geo_src <- "gps"
 
     admin_lvls <- attr(household_data, "admin_levels") %||% character(0)
+    # Drop adm0 from hierarchy: meta_cols$adm0 already carries the country.
+    admin_lvls <- setdiff(admin_lvls, "adm0")
+    if ("adm0" %in% names(household_data)) {
+      household_data <- dplyr::select(household_data, -dplyr::any_of("adm0"))
+    }
+    if ("adm0" %in% names(person_data)) {
+      person_data <- dplyr::select(person_data, -dplyr::any_of("adm0"))
+    }
     for (lvl in admin_lvls) {
       admin_hierarchy <- c(admin_hierarchy, list(
         list(group_var = lvl, level_name = lvl)

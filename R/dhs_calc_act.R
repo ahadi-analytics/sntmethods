@@ -503,6 +503,11 @@ calc_act_dhs <- function(
 
     # Build hierarchy from all admin levels attached by spatial join
     admin_lvls <- attr(kr_fever, "admin_levels") %||% character(0)
+    # Drop adm0 from hierarchy: meta_cols$adm0 already carries the country.
+    admin_lvls <- setdiff(admin_lvls, "adm0")
+    if ("adm0" %in% names(kr_fever)) {
+      kr_fever <- dplyr::select(kr_fever, -dplyr::any_of("adm0"))
+    }
     for (lvl in admin_lvls) {
       admin_hierarchy <- c(admin_hierarchy, list(
         list(group_var = lvl, level_name = lvl)
