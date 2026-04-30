@@ -172,193 +172,47 @@ pfpr_sf <- sf::st_transform(pfpr_sf, crs_master)
 adm2_vect <- terra::vect(adm2_sf)
 
 ## ---------------------------------------------------------------------------##
-# Alternative: build pfpr_dt with the package's MBG cluster-prep helper -------
+# 6) Fit MBG model ------------------------------------------------------------
 ## ---------------------------------------------------------------------------##
-# `prep_pfpr_mbg()` runs the same per-cluster aggregation that we do manually
-# in section 6 below, but uses the package's dictionary-driven pipeline and
-# returns the cluster-level input table (cluster_id, indicator, samplesize,
-# x, y) ready for MBG. Either form below produces an identical `pfpr_dt`.
+# `fit_mbg_indicator()` is the all-in-one wrapper around mbg::MbgModelRunner.
+# It takes the cluster table + population raster + any subset of admin
+# shapefiles, fits the model and returns a comprehensive list:
+#   - $cluster_data
+#   - $cell_predictions (mean / lower / upper SpatRasters + draws)
+#   - $admin (long-format tibble per admin level)
+#   - $model_runner, $id_raster, $aggregation_tables
+#   - $saved_files, $cache_files, $inputs
 #
-# --- Form A: explicit (test_type + age range + DHS variable mapping) -------
-pfpr_dt <- sntmethods::prep_pfpr_mbg(
-  dhs_pr      = pr,
-  gps_data    = ge,
-  indicator   = "mic",      # microscopy-based PfPR
-  age_min     = 24,         # PfPR2-10 lower bound (months)
-  age_max     = 119,        # PfPR2-10 upper bound (months)
-  survey_vars = list(
-    cluster = "hv001",
-    age     = "hc1",
-    present = "hv103",
-    mother  = "hv042",
-    rdt     = "hml35",
-    mic     = "hml32"
-  ),
-  gps_vars = list(
-    cluster = "DHSCLUST",
-    lat     = "LATNUM",
-    lon     = "LONGNUM"
-  )
-) |> data.table::as.data.table()
-
-# --- Form B: concise (registered dictionary code; defaults for all vars) ---
-# pfpr_dt <- sntmethods::prep_pfpr_mbg(
-#   dhs_pr    = pr,
-#   gps_data  = ge,
-#   indicator = "pfpr_mic_2_10"   # 24-119 months, microscopy
-# )
-
-## ---------------------------------------------------------------------------##
-# Alternative all-in-one: fit_mbg_indicator() --------------------------------
-## ---------------------------------------------------------------------------##
-# `fit_mbg_indicator()` is a generic, low-level wrapper around mbg::
-# MbgModelRunner. It takes the cluster table + population raster + any
-# subset of admin shapefiles and returns a comprehensive list:
-#   - $cluster_data, $cell_predictions (mean/lower/upper SpatRasters),
-#   - $admin (long-format tibble per admin level), $model_runner,
-#   - $id_raster, $aggregation_tables, $saved_files, $cache_files,
-#   - $inputs (all parameters echoed back).
-#
-# country_iso3 / survey_year / source_label are optional annotations.
-# When NULL they are dropped from filenames and written as NA in
-# the admin tibble. When output_dir is NULL nothing is written to disk.
-# When cache_dir is set, the prediction matrix is cached so re-runs skip
-# the (expensive) INLA fit.
-#
-# Sections 6-8 below are the manual equivalent of this single call.
+# country_iso3 / survey_year / source_label are optional annotations used
+# in filenames and the admin tibble. When `output_dir` is NULL nothing is
+# written to disk. When `cache_dir` is set, the prediction matrix is cached
+# so re-runs skip the (expensive) INLA fit.
 #
 fit <- sntmethods::fit_mbg_indicator(
-  cluster_data        = pfpr_dt,
-  indicator_name      = "pfpr_mic_2_10",
-  population_raster   = pop_rast,
-  adm1_sf             = adm1_sf,
-  adm2_sf             = adm2_sf,
-  primary_level       = "adm2",
-  output_levels       = c("adm1", "adm2")
-  # country_iso3        = country_iso3,
-  # survey_year         = survey_year,
-  # source_label        = survey_type,
-  # output_dir          = path_output,            # set NULL for no disk writes
-  # cache_dir           = fs::path(path_output, "cache")
-)
-
-# fit$cell_predictions$mean   # mean PfPR2-10 SpatRaster
-# fit$admin$adm2              # long-format adm2 tibble
-# fit$saved_files             # paths to written rasters / qs2 / xlsx
-
-## ---------------------------------------------------------------------------##
-# 6) Prepare MBG inputs -------------------------------------------------------
-## ---------------------------------------------------------------------------##
-
-cli::cli_h2("Building MBG inputs")
-
-# build ID raster
-id_raster <- mbg::build_id_raster(
-  polygons = adm2_vect,
-  template_raster = pop_rast
-)
-
-# intercept-only model (pure spatial smoothing)
-covariates <- list(
-  intercept = terra::setValues(id_raster, 1)
-)
-
-# build aggregation table
-agg_file <- fs::path(
-  path_output,
-  glue::glue("{country_iso3}_aggregation_table_adm2.parquet")
-)
-
-if (fs::file_exists(agg_file)) {
-  aggregation_table <- arrow::read_parquet(agg_file)
-} else {
-  aggregation_table <- mbg::build_aggregation_table(
-    polygons = adm2_vect,
-    id_raster = id_raster,
-    polygon_id_field = "adm2",
-    verbose = TRUE
-  )
-  arrow::write_parquet(aggregation_table, sink = agg_file)
-}
-
-## ---------------------------------------------------------------------------##
-# 7) Run MBG model ------------------------------------------------------------
-## ---------------------------------------------------------------------------##
-
-cli::cli_h2("Running MBG model")
-
-model_runner <- mbg::MbgModelRunner$new(
-  input_data = pfpr_dt,
-  id_raster = id_raster,
-  covariate_rasters = covariates,
-  aggregation_table = aggregation_table,
-  aggregation_levels = list(adm2 = c("adm2", "adm1", "adm0")),
+  cluster_data      = pfpr_dt,
+  indicator_name    = "pfpr_mic_2_10",
   population_raster = pop_rast,
-  verbose = FALSE
+  adm1_sf           = adm1_sf,
+  adm2_sf           = adm2_sf,
+  primary_level     = "adm2",
+  output_levels     = c("adm1", "adm2"),
+  country_iso3      = country_iso3,
+  survey_year       = survey_year,
+  source_label      = survey_type,
+  output_dir        = path_output,
+  cache_dir         = fs::path(path_output, "cache")
 )
 
-model_runner$run_mbg_pipeline()
+cell_preds <- fit$cell_predictions
 
 ## ---------------------------------------------------------------------------##
-# 8) Save outputs -------------------------------------------------------------
-## ---------------------------------------------------------------------------##
-
-cli::cli_h2("Saving outputs")
-
-cell_preds <- model_runner$grid_cell_predictions
-
-# save prediction rasters
-terra::writeRaster(
-  cell_preds$cell_pred_mean,
-  fs::path(path_output, glue::glue("{country_iso3}_pfpr2_10_mbg_mean.tif")),
-  overwrite = TRUE
-)
-
-terra::writeRaster(
-  cell_preds$cell_pred_lower,
-  fs::path(path_output, glue::glue("{country_iso3}_pfpr2_10_mbg_lower.tif")),
-  overwrite = TRUE
-)
-
-terra::writeRaster(
-  cell_preds$cell_pred_upper,
-  fs::path(path_output, glue::glue("{country_iso3}_pfpr2_10_mbg_upper.tif")),
-  overwrite = TRUE
-)
-
-# ADM2 summaries
-adm2_summary <- adm2_sf |>
-  dplyr::mutate(
-    pfpr_mean = terra::extract(
-      cell_preds$cell_pred_mean, adm2_sf, fun = mean, na.rm = TRUE
-    )[[2]],
-    pfpr_lower = terra::extract(
-      cell_preds$cell_pred_lower, adm2_sf, fun = mean, na.rm = TRUE
-    )[[2]],
-    pfpr_upper = terra::extract(
-      cell_preds$cell_pred_upper, adm2_sf, fun = mean, na.rm = TRUE
-    )[[2]],
-    pfpr_width = pfpr_upper - pfpr_lower
-  )
-
-sntutils::write_snt_data(
-  obj = list(
-    adm2_summary = adm2_summary |> sf::st_drop_geometry(),
-    cluster_data = pfpr_cluster
-  ),
-  data_name = glue::glue("{country_iso3}_pfpr2_10_mbg_dhs_{survey_year}"),
-  path = path_output,
-  file_formats = c("qs2", "xlsx")
-)
-
-## ---------------------------------------------------------------------------##
-# 9) Visualizations -----------------------------------------------------------
+# 7) Visualizations -----------------------------------------------------------
 ## ---------------------------------------------------------------------------##
 
 cli::cli_h2("Creating visualizations")
 
 # mean PfPR raster map
-r_mean <- cell_preds$cell_pred_mean * 100
+r_mean <- cell_preds$mean * 100
 
 map_mean <- tmap::tm_shape(r_mean) +
   tmap::tm_raster(
@@ -379,7 +233,7 @@ map_mean <- tmap::tm_shape(r_mean) +
   )
 
 # uncertainty width (percentage points)
-r_unc <- (cell_preds$cell_pred_upper - cell_preds$cell_pred_lower) * 100
+r_unc <- (cell_preds$upper - cell_preds$lower) * 100
 
 map_unc <- tmap::tm_shape(r_unc) +
   tmap::tm_raster(
