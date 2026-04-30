@@ -23,7 +23,6 @@ fit_mbg_indicator(
   id_field = "shapeID",
   indicator_title = NULL,
   indicator_unit_scale = 100,
-  country_iso3 = NULL,
   survey_year = NULL,
   source_label = NULL,
   output_dir = NULL,
@@ -95,15 +94,6 @@ title-cased version of \code{indicator_name}.}
 computing admin-level point estimates and CIs from the smoothed
 probability surface. Default \code{100} (i.e. percentages).}
 
-\item{country_iso3}{Optional ISO3 country code. If supplied,
-uppercased, included in pipeline-style filenames and echoed onto
-the admin tibble; \code{country_iso2} and \code{dhs_code} are then
-resolved automatically via \code{countrycode}. If \code{NULL}, the
-function attempts to reverse-geocode the median cluster coordinate
-(against \code{adm0_sf} when supplied, otherwise against
-\code{rnaturalearth}) and resolve all three codes from there.
-Default \code{NULL}.}
-
 \item{survey_year}{Optional integer survey year. Default \code{NULL}.}
 
 \item{source_label}{Optional character data source label
@@ -156,12 +146,11 @@ one per \code{output_levels} entry, with columns \code{
       indicator, indicator_title, admin_level, admin_id, admin_name,
       mean, lower, upper, population, country_iso3, country_iso2,
       dhs_code, survey_year, source_label}. \code{country_iso3} /
-\code{country_iso2} / \code{dhs_code} are populated either from
-a user-supplied \code{country_iso3} (resolved via
-\code{countrycode}) or by reverse-geocoding the median cluster
-coordinate against \code{adm0_sf} (or \code{rnaturalearth} if
-not supplied). They fall back to \code{NA} when neither lookup
-succeeds.}
+\code{country_iso2} / \code{dhs_code} are derived by
+reverse-geocoding the median cluster coordinate against
+\code{adm0_sf} (or \code{rnaturalearth} as a fallback) and
+resolved via \code{countrycode}. They fall back to \code{NA}
+when the lookup fails.}
 \item{\code{model_runner}}{The fitted \code{MbgModelRunner}
 object, or \code{NULL} if loaded from cache.}
 \item{\code{id_raster}}{The pixel-id raster used by
@@ -188,11 +177,14 @@ parameter the function received).
 }
 \details{
 This function is intentionally generic and is not tied to DHS. The
-optional \code{country_iso3}, \code{survey_year} and \code{source_label}
-arguments are pure annotations: when supplied they are echoed onto the
-admin tibble and used to build pipeline-style filenames; when
-\code{NULL} they are dropped from filenames and written as \code{NA} in
-the admin tibble.
+country (\code{country_iso3} / \code{country_iso2} / \code{dhs_code})
+is always derived automatically from the median cluster coordinate
+via \code{adm0_sf} (when supplied) or \code{rnaturalearth::ne_countries()}
+as a fallback, then resolved through \code{countrycode}. The optional
+\code{survey_year} and \code{source_label} arguments are pure
+annotations: when supplied they are echoed onto the admin tibble and
+used to build pipeline-style filenames; when \code{NULL} they are
+dropped from filenames and written as \code{NA} in the admin tibble.
 
 If \code{output_dir} is \code{NULL} (the default) nothing is written to
 disk -- everything is returned in memory in the result list. Set
@@ -228,11 +220,11 @@ fit2 <- fit_mbg_indicator(
   adm1_sf = adm1, adm2_sf = adm2, adm3_sf = adm3,
   primary_level     = "adm3",
   output_levels     = c("adm1", "adm2", "adm3"),
-  country_iso3      = "TGO",
   survey_year       = 2017,
   source_label      = "MIS",
   output_dir        = "outputs/mbg_fit"
 )
+# country_iso3 / country_iso2 / dhs_code are derived from cluster coords.
 }
 
 }

@@ -262,7 +262,7 @@ test_that("fit_mbg_indicator is exported with the documented arguments", {
     "covariates", "pixel_size", "n_samples", "seed",
     "cluster_cols", "id_field",
     "indicator_title", "indicator_unit_scale",
-    "country_iso3", "survey_year", "source_label",
+    "survey_year", "source_label",
     "output_dir", "cache_dir", "use_cache", "overwrite",
     "return_draws", "verbose"
   )
@@ -274,11 +274,15 @@ test_that("fit_mbg_indicator is exported with the documented arguments", {
 
 test_that("optional metadata defaults are NULL", {
   fmls <- formals(fit_mbg_indicator)
-  expect_null(eval(fmls$country_iso3))
   expect_null(eval(fmls$survey_year))
   expect_null(eval(fmls$source_label))
   expect_null(eval(fmls$output_dir))
   expect_null(eval(fmls$cache_dir))
+})
+
+test_that("country_iso3 is no longer a parameter", {
+  fmls <- names(formals(fit_mbg_indicator))
+  expect_false("country_iso3" %in% fmls)
 })
 
 # ---- Additional bug-sweep tests --------------------------------------------

@@ -183,10 +183,11 @@ adm2_vect <- terra::vect(adm2_sf)
 #   - $model_runner, $id_raster, $aggregation_tables
 #   - $saved_files, $cache_files, $inputs
 #
-# country_iso3 / survey_year / source_label are optional annotations used
-# in filenames and the admin tibble. When `output_dir` is NULL nothing is
-# written to disk. When `cache_dir` is set, the prediction matrix is cached
-# so re-runs skip the (expensive) INLA fit.
+# survey_year / source_label are optional annotations used in filenames
+# and the admin tibble. country_iso3 / country_iso2 / dhs_code are derived
+# automatically from the median cluster coordinate. When `output_dir` is
+# NULL nothing is written to disk. When `cache_dir` is set, the prediction
+# matrix is cached so re-runs skip the (expensive) INLA fit.
 #
 fit <- sntmethods::fit_mbg_indicator(
   cluster_data      = pfpr_dt,
@@ -196,7 +197,6 @@ fit <- sntmethods::fit_mbg_indicator(
   adm2_sf           = adm2_sf,
   primary_level     = "adm2",
   output_levels     = c("adm1", "adm2"),
-  country_iso3      = country_iso3,
   survey_year       = survey_year,
   source_label      = survey_type,
   output_dir        = path_output,

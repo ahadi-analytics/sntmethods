@@ -10,11 +10,14 @@
 #' parameter the function received).
 #'
 #' This function is intentionally generic and is not tied to DHS. The
-#' optional \code{country_iso3}, \code{survey_year} and \code{source_label}
-#' arguments are pure annotations: when supplied they are echoed onto the
-#' admin tibble and used to build pipeline-style filenames; when
-#' \code{NULL} they are dropped from filenames and written as \code{NA} in
-#' the admin tibble.
+#' country (\code{country_iso3} / \code{country_iso2} / \code{dhs_code})
+#' is always derived automatically from the median cluster coordinate
+#' via \code{adm0_sf} (when supplied) or \code{rnaturalearth::ne_countries()}
+#' as a fallback, then resolved through \code{countrycode}. The optional
+#' \code{survey_year} and \code{source_label} arguments are pure
+#' annotations: when supplied they are echoed onto the admin tibble and
+#' used to build pipeline-style filenames; when \code{NULL} they are
+#' dropped from filenames and written as \code{NA} in the admin tibble.
 #'
 #' If \code{output_dir} is \code{NULL} (the default) nothing is written to
 #' disk -- everything is returned in memory in the result list. Set
@@ -75,14 +78,6 @@
 #' @param indicator_unit_scale Numeric. Scaling factor applied when
 #'   computing admin-level point estimates and CIs from the smoothed
 #'   probability surface. Default \code{100} (i.e. percentages).
-#' @param country_iso3 Optional ISO3 country code. If supplied,
-#'   uppercased, included in pipeline-style filenames and echoed onto
-#'   the admin tibble; \code{country_iso2} and \code{dhs_code} are then
-#'   resolved automatically via \code{countrycode}. If \code{NULL}, the
-#'   function attempts to reverse-geocode the median cluster coordinate
-#'   (against \code{adm0_sf} when supplied, otherwise against
-#'   \code{rnaturalearth}) and resolve all three codes from there.
-#'   Default \code{NULL}.
 #' @param survey_year Optional integer survey year. Default \code{NULL}.
 #' @param source_label Optional character data source label
 #'   (\code{"DHS"}, \code{"MIS"}, \code{"routine"}, \ldots). Generic
@@ -126,12 +121,11 @@
 #'       indicator, indicator_title, admin_level, admin_id, admin_name,
 #'       mean, lower, upper, population, country_iso3, country_iso2,
 #'       dhs_code, survey_year, source_label}. \code{country_iso3} /
-#'       \code{country_iso2} / \code{dhs_code} are populated either from
-#'       a user-supplied \code{country_iso3} (resolved via
-#'       \code{countrycode}) or by reverse-geocoding the median cluster
-#'       coordinate against \code{adm0_sf} (or \code{rnaturalearth} if
-#'       not supplied). They fall back to \code{NA} when neither lookup
-#'       succeeds.}
+#'       \code{country_iso2} / \code{dhs_code} are derived by
+#'       reverse-geocoding the median cluster coordinate against
+#'       \code{adm0_sf} (or \code{rnaturalearth} as a fallback) and
+#'       resolved via \code{countrycode}. They fall back to \code{NA}
+#'       when the lookup fails.}
 #'     \item{\code{model_runner}}{The fitted \code{MbgModelRunner}
 #'       object, or \code{NULL} if loaded from cache.}
 #'     \item{\code{id_raster}}{The pixel-id raster used by
@@ -166,11 +160,11 @@
 #'   adm1_sf = adm1, adm2_sf = adm2, adm3_sf = adm3,
 #'   primary_level     = "adm3",
 #'   output_levels     = c("adm1", "adm2", "adm3"),
-#'   country_iso3      = "TGO",
 #'   survey_year       = 2017,
 #'   source_label      = "MIS",
 #'   output_dir        = "outputs/mbg_fit"
 #' )
+#' # country_iso3 / country_iso2 / dhs_code are derived from cluster coords.
 #' }
 #'
 #' @export
@@ -198,7 +192,6 @@ fit_mbg_indicator <- function(
   id_field = "shapeID",
   indicator_title = NULL,
   indicator_unit_scale = 100,
-  country_iso3 = NULL,
   survey_year = NULL,
   source_label = NULL,
   output_dir = NULL,
@@ -316,10 +309,9 @@ fit_mbg_indicator <- function(
     cli::cli_abort("None of the requested {.arg output_levels} have a shapefile supplied.")
   }
 
-  # Optional metadata. iso2 / DHS code are populated either from the
-  # user-supplied iso3 (via countrycode) or, when no iso3 is given, by
-  # reverse-geocoding the median cluster coordinate -- see step 1b below.
-  iso3_norm <- if (is.null(country_iso3) || !nzchar(country_iso3)) NULL else toupper(country_iso3)
+  # Optional metadata. iso3 / iso2 / DHS code are derived from the
+  # median cluster coordinate in step 1b below (after cluster cleaning).
+  iso3_norm <- NULL
   iso2_norm <- NULL
   dhs_norm  <- NULL
   year_norm <- if (is.null(survey_year)) NULL else as.integer(survey_year)
@@ -390,12 +382,11 @@ fit_mbg_indicator <- function(
 
   ## ---- 1b) Derive country metadata (iso3 / iso2 / DHS) from coords ---------
   #
-  # When the caller does not supply country_iso3, attempt to reverse-geocode
-  # the median cluster coordinate to a country. Median is robust to a
-  # handful of mis-located GE clusters that DHS recodes occasionally
-  # contain. Lookup prefers an explicit adm0_sf when supplied; otherwise
-  # falls back to rnaturalearth. iso2 and the DHS 2-letter country code
-  # are then resolved via countrycode.
+  # Reverse-geocode the median cluster coordinate to a country. Median is
+  # robust to a handful of mis-located GE clusters that DHS recodes
+  # occasionally contain. Lookup prefers an explicit adm0_sf when
+  # supplied; otherwise falls back to rnaturalearth. iso2 and the DHS
+  # 2-letter country code are then resolved via countrycode.
   .derive_country_from_coords <- function(x, y, adm0_sf = NULL) {
     if (!requireNamespace("countrycode", quietly = TRUE)) return(list())
     med_x <- stats::median(x, na.rm = TRUE)
@@ -449,26 +440,22 @@ fit_mbg_indicator <- function(
     list(iso3 = iso3, iso2 = iso2, dhs = dhs)
   }
 
-  if (is.null(iso3_norm)) {
-    derived <- .derive_country_from_coords(cd$x, cd$y, adm0_sf)
-    if (length(derived) > 0) {
-      iso3_norm <- toupper(derived$iso3)
-      iso2_norm <- if (!is.na(derived$iso2)) toupper(derived$iso2) else NULL
-      dhs_norm  <- if (!is.na(derived$dhs))  toupper(derived$dhs)  else NULL
-      if (isTRUE(verbose)) {
-        cli::cli_alert_info(
-          "Derived country from cluster coords: iso3 = {.val {iso3_norm}}, \\
-          iso2 = {.val {iso2_norm %||% NA}}, dhs = {.val {dhs_norm %||% NA}}"
-        )
-      }
+  derived <- .derive_country_from_coords(cd$x, cd$y, adm0_sf)
+  if (length(derived) > 0) {
+    iso3_norm <- toupper(derived$iso3)
+    iso2_norm <- if (!is.na(derived$iso2)) toupper(derived$iso2) else NULL
+    dhs_norm  <- if (!is.na(derived$dhs))  toupper(derived$dhs)  else NULL
+    if (isTRUE(verbose)) {
+      cli::cli_alert_info(
+        "Derived country from cluster coords: iso3 = {.val {iso3_norm}}, \\
+        iso2 = {.val {iso2_norm %||% NA}}, dhs = {.val {dhs_norm %||% NA}}"
+      )
     }
-  } else if (requireNamespace("countrycode", quietly = TRUE)) {
-    i2 <- suppressWarnings(countrycode::countrycode(
-      iso3_norm, origin = "iso3c", destination = "iso2c"))
-    dh <- suppressWarnings(countrycode::countrycode(
-      iso3_norm, origin = "iso3c", destination = "dhs"))
-    if (!is.na(i2)) iso2_norm <- toupper(i2)
-    if (!is.na(dh)) dhs_norm  <- toupper(dh)
+  } else if (isTRUE(verbose)) {
+    cli::cli_alert_warning(
+      "Could not derive country from cluster coordinates; iso3 / iso2 / \\
+      dhs_code will be {.val NA}."
+    )
   }
 
   ## ---- 2) Output / cache directories ---------------------------------------
