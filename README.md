@@ -132,13 +132,8 @@ Every `calc_*_dhs()` function returns a long-format list of tibbles (`adm0`, `ad
 ### Data dictionaries
 
 ```r
-# Machine-readable dictionaries for any indicator domain (17 available)
-itn_dictionary()
-act_dictionary()
-pfpr_dictionary()
-epi_dictionary()
-csb_dictionary()
-dhs_dictionary()          # unified dictionary across all domains
+# Unified, machine-readable dictionary covering every DHS indicator domain
+dhs_dictionary()
 ```
 
 ### Malaria incidence from routine data
@@ -211,11 +206,10 @@ Age-specific population rasters can be supplied for more accurate denominators: 
 | Pattern | Purpose | Example |
 |---------|---------|---------|
 | `calc_*_dhs()` | Survey-weighted DHS estimates (long format) | `calc_itn_dhs()` |
-| `calc_*_dhs_core()` | Survey-weighted estimates (wide format) | `calc_pfpr_dhs_core()` |
 | `calc_*_mbg()` | Run MBG model for indicator family | `calc_itn_mbg()` |
 | `prep_*_mbg()` | Prepare cluster-level data for MBG | `prep_itn_mbg()` |
-| `*_dictionary()` | Data dictionary for indicator family | `itn_dictionary()` |
-| `aggregate_*_admin()` | Aggregate rasters to admin boundaries | `aggregate_pfpr_admin()` |
+| `dhs_dictionary()` | Unified dictionary across all DHS domains | `dhs_dictionary()` |
+| `fit_mbg_indicator()` | All-in-one MBG fit + admin aggregation | `fit_mbg_indicator()` |
 | `run_mbg_pipeline()` | Full MBG pipeline (all indicators) | `run_mbg_pipeline()` |
 | `calc_incidence()` | Routine data incidence (N0-N5 cascade) | `calc_incidence()` |
 | `calc_tpr()` | Test positivity rate with fallbacks | `calc_tpr()` |
