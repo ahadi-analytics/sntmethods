@@ -23,8 +23,14 @@
 #' @param dhs_pr DHS Person Records dataset (data.frame or tibble).
 #' @param gps_data DHS GPS dataset with cluster coordinates.
 #' @param indicators Character vector of indicator codes to calculate.
-#'   Available codes: \code{"pfpr_rdt"}, \code{"pfpr_mic"} (6-59 months),
-#'   \code{"pfpr_rdt_u5"}, \code{"pfpr_mic_u5"} (0-59 months).
+#'   Available codes (\code{<test>} = \code{rdt} or \code{mic}):
+#'   \itemize{
+#'     \item \code{"pfpr_<test>"}: 6-59 months (standard DHS PfPR)
+#'     \item \code{"pfpr_<test>_u5"}: 0-59 months
+#'     \item \code{"pfpr_<test>_5_10"}: 60-119 months
+#'     \item \code{"pfpr_<test>_u10"}: 0-119 months
+#'     \item \code{"pfpr_<test>_2_10"}: 24-119 months (PfPR2-10 reference)
+#'   }
 #'   Default: all indicators from the dictionary.
 #' @param test_type \strong{Deprecated}. Character. Use \code{indicators}
 #'   instead. When provided, translated to indicator codes for backward
@@ -108,10 +114,15 @@ calc_pfpr_mbg <- function(
   dict_names <- vapply(dict, `[[`, character(1), "name")
 
   if (!is.null(test_type) || !is.null(age_groups)) {
-    # Legacy backward-compat: translate test_type + age_groups to codes
-    cli::cli_alert_warning(
-      "{.arg test_type}/{.arg age_groups} are deprecated; use {.arg indicators} with specific codes instead"
-    )
+    # Legacy backward-compat: translate test_type + age_groups to codes.
+    # Suppress the deprecation warning when called internally from
+    # prep_pfpr_mbg(), which exposes the legacy form as a documented API.
+    suppress_warn <- isTRUE(getOption("sntmethods.pfpr_mbg.suppress_legacy_warn"))
+    if (!suppress_warn) {
+      cli::cli_alert_warning(
+        "{.arg test_type}/{.arg age_groups} are deprecated; use {.arg indicators} with specific codes instead"
+      )
+    }
     indicators <- .pfpr_legacy_to_codes(test_type, age_groups)
   }
 
@@ -250,9 +261,10 @@ calc_pfpr_mbg <- function(
 #'
 #' Age groups:
 #' \itemize{
-#'   \item \code{u5}: 6-59 months
-#'   \item \code{5_10}: 60-120 months
-#'   \item \code{u10}: 6-119 months
+#'   \item (unsuffixed): 6-59 months (standard DHS PfPR)
+#'   \item \code{u5}: 0-59 months
+#'   \item \code{5_10}: 60-119 months
+#'   \item \code{u10}: 0-119 months
 #'   \item \code{2_10}: 24-119 months (standard PfPR reference range)
 #' }
 #'
@@ -262,18 +274,41 @@ calc_pfpr_mbg <- function(
 #'
 #' @noRd
 .pfpr_mbg_dictionary <- function() {
-  dict <- list(
-    # Standard PfPR (6-59 months, matching DHS pfpr_rdt / pfpr_mic)
-    list(name = "pfpr_rdt", test_type = "rdt", test_col = "rdt_res",
-         pos_value = 1, valid_values = c(0, 1), age_min = 6, age_max = 59),
-    list(name = "pfpr_mic", test_type = "mic", test_col = "mic_res",
-         pos_value = 1, valid_values = c(0, 1, 6), age_min = 6, age_max = 59),
-    # U5 variants (0-59 months)
-    list(name = "pfpr_rdt_u5", test_type = "rdt", test_col = "rdt_res",
-         pos_value = 1, valid_values = c(0, 1), age_min = 0, age_max = 59),
-    list(name = "pfpr_mic_u5", test_type = "mic", test_col = "mic_res",
-         pos_value = 1, valid_values = c(0, 1, 6), age_min = 0, age_max = 59)
+  # Canonical age windows (months), matching .pfpr_conditions() in
+  # dhs_calc_pfpr.R so MBG and survey-weighted indicators stay aligned.
+  age_windows <- list(
+    list(suffix = "",      age_min = 6,  age_max = 59),  # standard 6-59
+    list(suffix = "u5",    age_min = 0,  age_max = 59),  # 0-59 (DHS u5)
+    list(suffix = "5_10",  age_min = 60, age_max = 119), # 60-119
+    list(suffix = "u10",   age_min = 0,  age_max = 119), # 0-119
+    list(suffix = "2_10",  age_min = 24, age_max = 119)  # 24-119 (PfPR2-10)
   )
+
+  test_specs <- list(
+    rdt = list(test_col = "rdt_res", pos_value = 1, valid_values = c(0, 1)),
+    mic = list(test_col = "mic_res", pos_value = 1, valid_values = c(0, 1, 6))
+  )
+
+  dict <- list()
+  for (tt in names(test_specs)) {
+    ts <- test_specs[[tt]]
+    for (aw in age_windows) {
+      name <- if (nzchar(aw$suffix)) {
+        paste0("pfpr_", tt, "_", aw$suffix)
+      } else {
+        paste0("pfpr_", tt)
+      }
+      dict[[length(dict) + 1L]] <- list(
+        name         = name,
+        test_type    = tt,
+        test_col     = ts$test_col,
+        pos_value    = ts$pos_value,
+        valid_values = ts$valid_values,
+        age_min      = aw$age_min,
+        age_max      = aw$age_max
+      )
+    }
+  }
 
   dict
 }
@@ -298,44 +333,74 @@ calc_pfpr_mbg <- function(
   test_type <- test_type %||% "both"
   test_type <- match.arg(test_type, c("rdt", "mic", "both", "either"))
 
+  # Build a lookup of (test_type, age_min, age_max) -> registered code from
+  # the canonical dictionary, so legacy translation can only emit codes that
+  # actually exist. This prevents silent fabrication of unregistered names
+  # like `pfpr_mic_24_119`.
+  dict <- .pfpr_mbg_dictionary()
+  dict_keys <- vapply(dict, function(d) {
+    paste(d$test_type, d$age_min, d$age_max, sep = "_")
+  }, character(1))
+  dict_names <- vapply(dict, `[[`, character(1), "name")
+  dict_lookup <- stats::setNames(dict_names, dict_keys)
+
+  # Default age groups mirror the canonical .pfpr_conditions() ranges
   if (is.null(age_groups)) {
     age_groups <- list(
-      u5 = c(6, 59),
-      `5_10` = c(60, 120),
-      u10 = c(6, 119),
+      u5     = c(0, 59),
+      `5_10` = c(60, 119),
+      u10    = c(0, 119),
       `2_10` = c(24, 119)
     )
   }
 
-  # Map test_type to test prefixes
+  # Map test_type to test prefixes (drop "either" - not in MBG dictionary)
   test_prefixes <- switch(test_type,
     rdt    = "rdt",
     mic    = "mic",
-    either = "either",
-    both   = c("rdt", "mic", "either")
+    either = character(0),
+    both   = c("rdt", "mic")
   )
 
-  age_names <- names(age_groups)
+  if (test_type == "either") {
+    cli::cli_alert_warning(
+      "{.val either} is not supported by the MBG dictionary; ignoring."
+    )
+  }
 
   codes <- character(0)
+  unmapped <- character(0)
 
-  # Include standard (unsuffixed) indicators for rdt/mic when using
-  # default age groups that include the 2-10 range (24-119 months)
-  has_default_2_10 <- any(vapply(age_groups, function(x) {
-    length(x) == 2 && x[1] == 24 && x[2] == 119
+  # Include the unsuffixed standard code (6-59 months) when the user's age
+  # set includes that range, so callers asking for the default ranges still
+  # get the canonical pfpr_rdt / pfpr_mic indicators.
+  has_default_6_59 <- any(vapply(age_groups, function(x) {
+    length(x) == 2 && x[1] == 6 && x[2] == 59
   }, logical(1)))
 
   for (tp in test_prefixes) {
-    # Add standard code (e.g., pfpr_rdt, pfpr_mic) when 2-10 range is present
-    if (has_default_2_10 && tp %in% c("rdt", "mic")) {
-      codes <- c(codes, paste0("pfpr_", tp))
+    if (has_default_6_59) {
+      key <- paste(tp, 6, 59, sep = "_")
+      if (!is.na(dict_lookup[key])) codes <- c(codes, unname(dict_lookup[key]))
     }
-    for (an in age_names) {
-      codes <- c(codes, paste0("pfpr_", tp, "_", an))
+    for (ag in age_groups) {
+      if (length(ag) != 2) next
+      key <- paste(tp, ag[1], ag[2], sep = "_")
+      if (!is.na(dict_lookup[key])) {
+        codes <- c(codes, unname(dict_lookup[key]))
+      } else {
+        unmapped <- c(unmapped, paste0("pfpr_", tp, " ", ag[1], "-", ag[2]))
+      }
     }
   }
 
-  codes
+  if (length(unmapped) > 0) {
+    cli::cli_alert_warning(
+      "Skipping legacy combinations not in MBG dictionary: {.val {unique(unmapped)}}"
+    )
+  }
+
+  unique(codes)
 }
 
 
@@ -581,8 +646,12 @@ prep_pfpr_mbg <- function(
       gps_vars = gps_vars
     )
   } else if (indicator %in% c("rdt", "mic")) {
-    # Legacy style: translate test_type + age range to indicator code
+    # Legacy style: translate test_type + age range to indicator code.
+    # `prep_pfpr_mbg()` documents this form as supported, so suppress the
+    # deprecation warning that calc_pfpr_mbg() would otherwise emit.
     age_label <- paste0(age_min, "_", age_max)
+    old_opt <- options(sntmethods.pfpr_mbg.suppress_legacy_warn = TRUE)
+    on.exit(options(old_opt), add = TRUE)
     result <- calc_pfpr_mbg(
       dhs_pr = dhs_pr,
       gps_data = gps_data,

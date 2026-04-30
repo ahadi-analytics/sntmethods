@@ -22,7 +22,14 @@ test_type <- "mic"
 age_min_months <- 24
 age_max_months <- 119
 
-paths <- sntutils::setup_project_paths()
+paths <- sntutils::setup_project_paths(
+  base_path = here::here(
+    "/Users/mohamedyusuf/Library/CloudStorage",
+    "OneDrive-SharedLibraries-AppliedHealthAnalyticsforDeliveryandInnovationInc",
+    "Burundi SNT 2025 - 2025_SNT/bdi-snt-2025"
+  )
+)
+
 path_dhs_parquet <- here::here(ahadi_path(), "01_data/parquet")
 path_output <- here::here(paths$pfpr_est, "processed")
 
@@ -62,8 +69,9 @@ adm2_sf <- shp_list$adm2
 
 # load population raster
 pop_rast <- terra::rast(here::here(
-  paths$pop_worldpop, "raw",
-  glue::glue("{country_iso3}_ppp_{survey_year}_1km_Aggregated_UNadj.tif")
+  paths$pop_worldpop,
+  "raw",
+  glue::glue("{country_iso3}_pop_{survey_year}_CN_1km_UA_v1.tif")
 ))
 
 ## ---------------------------------------------------------------------------##
@@ -150,6 +158,43 @@ adm2_sf <- sf::st_transform(adm2_sf, crs_master)
 pfpr_sf <- sf::st_transform(pfpr_sf, crs_master)
 
 adm2_vect <- terra::vect(adm2_sf)
+
+## ---------------------------------------------------------------------------##
+# Alternative: build pfpr_dt with the package's MBG cluster-prep helper -------
+## ---------------------------------------------------------------------------##
+# `prep_pfpr_mbg()` runs the same per-cluster aggregation that we do manually
+# in section 6 below, but uses the package's dictionary-driven pipeline and
+# returns the cluster-level input table (cluster_id, indicator, samplesize,
+# x, y) ready for MBG. Either form below produces an identical `pfpr_dt`.
+#
+# --- Form A: explicit (test_type + age range + DHS variable mapping) -------
+pfpr_dt <- sntmethods::prep_pfpr_mbg(
+  dhs_pr      = pr,
+  gps_data    = ge,
+  indicator   = "mic",      # microscopy-based PfPR (matches script intent)
+  age_min     = 24,         # PfPR2-10 lower bound (months)
+  age_max     = 119,        # PfPR2-10 upper bound (months)
+  survey_vars = list(
+    cluster = "hv001",
+    age     = "hc1",
+    present = "hv103",
+    mother  = "hv042",
+    rdt     = "hml35",
+    mic     = "hml32"
+  ),
+  gps_vars = list(
+    cluster = "DHSCLUST",
+    lat     = "LATNUM",
+    lon     = "LONGNUM"
+  )
+)
+
+# --- Form B: concise (registered dictionary code; defaults for all vars) ---
+# pfpr_dt <- sntmethods::prep_pfpr_mbg(
+#   dhs_pr    = pr,
+#   gps_data  = ge,
+#   indicator = "pfpr_mic_2_10"   # 24-119 months, microscopy
+# )
 
 ## ---------------------------------------------------------------------------##
 # 6) Prepare MBG inputs -------------------------------------------------------

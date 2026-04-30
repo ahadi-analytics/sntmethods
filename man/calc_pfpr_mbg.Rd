@@ -21,8 +21,14 @@ calc_pfpr_mbg(
 \item{gps_data}{DHS GPS dataset with cluster coordinates.}
 
 \item{indicators}{Character vector of indicator codes to calculate.
-Available codes: \code{"pfpr_rdt"}, \code{"pfpr_mic"} (6-59 months),
-\code{"pfpr_rdt_u5"}, \code{"pfpr_mic_u5"} (0-59 months).
+Available codes (\code{<test>} = \code{rdt} or \code{mic}):
+\itemize{
+\item \code{"pfpr_<test>"}: 6-59 months (standard DHS PfPR)
+\item \code{"pfpr_<test>_u5"}: 0-59 months
+\item \code{"pfpr_<test>_5_10"}: 60-119 months
+\item \code{"pfpr_<test>_u10"}: 0-119 months
+\item \code{"pfpr_<test>_2_10"}: 24-119 months (PfPR2-10 reference)
+}
 Default: all indicators from the dictionary.}
 
 \item{test_type}{\strong{Deprecated}. Character. Use \code{indicators}
