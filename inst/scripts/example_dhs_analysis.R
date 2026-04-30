@@ -15,7 +15,8 @@ path_dhs_parquet <- here::here(sntmethods::ahadi_path(), "01_data/parquet")
 
 paths <-
   sntutils::setup_project_paths(
-    base_path = Sys.getenv("AHADI_ONEDRIVE_PROJECT"),
+base_path = "/Users/mohamedyusuf/Library/CloudStorage/OneDrive-SharedLibraries-AppliedHealthAnalyticsforDeliveryandInnovationInc/Togo SNT 2025 - 2025_SNT/tgo-snt-2025",
+    # base_path = Sys.getenv("AHADI_ONEDRIVE_PROJECT"),
     quiet = TRUE
   )
 
@@ -43,8 +44,11 @@ survey_years_mis <- sntmethods::dhs_read(
   survey_type = "MIS",
   country_code = country_iso2
 ) |>
+  dplyr::filter(DHSYEAR == 2017) |>
   dplyr::pull(DHSYEAR) |>
   unique()
+
+devtools::load_all()
 
 ## ---------------------------------------------------------------------------##
 # 2) Read DHS + MIS data for all years -----------------------------------------

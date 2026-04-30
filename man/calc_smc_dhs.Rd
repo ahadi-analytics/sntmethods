@@ -9,6 +9,11 @@ calc_smc_dhs(
   survey_vars = list(cluster = "v021", weight = "v005", stratum = "v022", age = "hw1",
     smc_primary = "hml43", smc_alt = "ml13g"),
   region_var = NULL,
+  gps_data = NULL,
+  gps_vars = list(cluster = "DHSCLUST", lat = "LATNUM", lon = "LONGNUM"),
+  shapefile = NULL,
+  admin_level = NULL,
+  join_nearest = TRUE,
   ci_method = "logit"
 )
 }
@@ -18,6 +23,16 @@ calc_smc_dhs(
 \item{survey_vars}{Named list mapping DHS variable names.}
 
 \item{region_var}{Optional column name to use as grouping variable.}
+
+\item{gps_data}{Optional DHS GPS dataset.}
+
+\item{gps_vars}{Named list for GPS variables.}
+
+\item{shapefile}{Optional sf object with administrative boundaries.}
+
+\item{admin_level}{Character vector of admin columns.}
+
+\item{join_nearest}{Logical.}
 
 \item{ci_method}{Method for confidence intervals. Default: "logit".}
 }

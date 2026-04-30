@@ -415,8 +415,13 @@ calc_severe_anemia_dhs <- function(
     mother = "hv042"
   ),
   altitude_adjusted = TRUE,
-  region_var = NULL,
-  ci_method = "logit"
+  region_var        = NULL,
+  gps_data          = NULL,
+  gps_vars          = list(cluster = "DHSCLUST", lat = "LATNUM", lon = "LONGNUM"),
+  shapefile         = NULL,
+  admin_level       = NULL,
+  join_nearest      = TRUE,
+  ci_method         = "logit"
 ) {
   # ---- 1. Extract survey metadata (PR data = hv-prefix) ----
   survey_meta <- .extract_survey_meta_hv(dhs_pr)
@@ -459,77 +464,20 @@ calc_severe_anemia_dhs <- function(
     "Children 6-59 months with valid Hb: {format(nrow(pr), big.mark = ',')} children"
   )
 
-  # ---- 4. Resolve region labels ----
-  group_var <- NULL
-  geo_src <- NA_character_
-
-  # Determine which region variable to use
-  effective_region_var <- region_var
-  if (is.null(effective_region_var)) {
-    # Default to survey_vars$adm1 if available
-    adm1_var <- survey_vars$adm1 %||% "hv024"
-    if (adm1_var %in% names(dhs_pr)) {
-      effective_region_var <- adm1_var
-    }
-  }
-
-  if (!is.null(effective_region_var)) {
-    if (!effective_region_var %in% names(dhs_pr)) {
-      cli::cli_abort(
-        "Column {.var {effective_region_var}} not found in `dhs_pr`."
-      )
-    }
-    # Build lookup from full dataset, then apply to filtered subset
-    resolved_all <- .resolve_region_labels(
-      dhs_pr[[effective_region_var]], effective_region_var
-    )
-    raw_all <- as.character(as.vector(
-      haven::zap_labels(dhs_pr[[effective_region_var]])
-    ))
-    lookup <- stats::setNames(resolved_all, raw_all)
-    pr_raw <- as.character(pr[[effective_region_var]])
-    pr$region <- unname(lookup[pr_raw])
-    group_var <- "region"
-    geo_src <- "survey"
-  }
-
-  # ---- 5. Get conditions ----
-  conditions <- .severe_anemia_conditions()
-
-  # ---- 6. Compute national results ----
-  national_results <- purrr::map_dfr(conditions, function(cond) {
-    .compute_dhs_indicator_generic(
-      data = pr,
-      condition = cond,
-      group_var = NULL,
-      ci_method = ci_method
-    )
-  })
-
-  # ---- 7. Compute regional results ----
-  regional_results <- tibble::tibble()
-  if (!is.null(group_var)) {
-    regional_results <- purrr::map_dfr(conditions, function(cond) {
-      .compute_dhs_indicator_generic(
-        data = pr,
-        condition = cond,
-        group_var = group_var,
-        subnational_level = "adm1",
-        ci_method = ci_method
-      )
-    })
-    # Keep only regional rows
-    regional_results <- regional_results |>
-      dplyr::filter(level != "adm0")
-  }
-
-  # ---- 8. Assemble output ----
-  .assemble_dhs_output(
-    national_results = national_results,
-    regional_results = regional_results,
-    survey_meta = survey_meta,
-    geo_source = geo_src,
-    admin_col = "adm1"
+  # ---- 4. Compute indicators across admin levels ----
+  .compute_dhs_indicators_with_admin(
+    data               = pr,
+    conditions         = .severe_anemia_conditions(),
+    dhs_data           = dhs_pr,
+    survey_meta        = survey_meta,
+    region_var         = region_var,
+    default_region_var = survey_vars$adm1 %||% "hv024",
+    gps_data           = gps_data,
+    gps_vars           = gps_vars,
+    shapefile          = shapefile,
+    admin_level        = admin_level,
+    join_nearest       = join_nearest,
+    ci_method          = ci_method
   )
 }
 

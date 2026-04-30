@@ -9,6 +9,11 @@ calc_irs_dhs(
   survey_vars = list(cluster = "hv021", weight = "hv005", stratum = "hv022", irs =
     "hv253"),
   region_var = NULL,
+  gps_data = NULL,
+  gps_vars = list(cluster = "DHSCLUST", lat = "LATNUM", lon = "LONGNUM"),
+  shapefile = NULL,
+  admin_level = NULL,
+  join_nearest = TRUE,
   ci_method = "logit"
 )
 }
@@ -24,6 +29,17 @@ calc_irs_dhs(
 }}
 
 \item{region_var}{Optional column name to use as grouping variable.}
+
+\item{gps_data}{Optional DHS GPS dataset.}
+
+\item{gps_vars}{Named list for GPS variables.}
+
+\item{shapefile}{Optional sf object with administrative boundaries.}
+
+\item{admin_level}{Character vector of admin columns from shapefile.}
+
+\item{join_nearest}{Logical; if TRUE, assigns clusters outside polygons
+to nearest admin unit.}
 
 \item{ci_method}{Method for confidence intervals. Default: "logit".}
 }

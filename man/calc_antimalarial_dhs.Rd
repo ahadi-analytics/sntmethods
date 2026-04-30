@@ -9,6 +9,11 @@ calc_antimalarial_dhs(
   survey_vars = list(cluster = "v021", weight = "v005", stratum = "v022", age = "hw1",
     fever = "h22", alive = "b5"),
   region_var = NULL,
+  gps_data = NULL,
+  gps_vars = list(cluster = "DHSCLUST", lat = "LATNUM", lon = "LONGNUM"),
+  shapefile = NULL,
+  admin_level = NULL,
+  join_nearest = TRUE,
   ci_method = "logit"
 )
 }
@@ -26,6 +31,18 @@ calc_antimalarial_dhs(
 
 \item{region_var}{Optional column name in \code{dhs_kr} to use as grouping
 variable (e.g., "v024" for region).}
+
+\item{gps_data}{Optional DHS GPS dataset with cluster coordinates.}
+
+\item{gps_vars}{Named list for GPS variables (cluster, lat, lon).}
+
+\item{shapefile}{Optional sf object with administrative boundaries.}
+
+\item{admin_level}{Character vector of admin columns from shapefile
+(e.g., c("adm1", "adm2")).}
+
+\item{join_nearest}{Logical; if TRUE, assigns clusters outside polygons
+to nearest admin unit. Default: TRUE.}
 
 \item{ci_method}{Method for confidence intervals. Default: "logit".}
 }

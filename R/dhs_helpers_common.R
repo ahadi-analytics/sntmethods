@@ -273,6 +273,242 @@
 
 
 # =============================================================================
+# Shared GPS / admin-hierarchy orchestrator
+# =============================================================================
+
+#' Compute DHS indicators across an admin hierarchy
+#'
+#' Generic orchestrator used by all `calc_*_dhs()` wrappers that don't have
+#' bespoke logic. Handles the three-way branch (region_var / GPS+shapefile /
+#' default region fallback), runs `.compute_dhs_indicator_generic()` (or a
+#' caller-supplied compute function) at every admin level, and returns the
+#' standard `list(adm0, adm1, adm2, ...)` structure with parent admin columns
+#' joined onto deeper levels.
+#'
+#' @param data Prepared cluster-level tibble with `cluster_id`, `stratum_id`,
+#'   `survey_weight`, and outcome columns.
+#' @param conditions List of indicator-condition specs (see
+#'   `.compute_dhs_indicator_generic()`).
+#' @param dhs_data Original DHS frame; used to resolve region labels.
+#' @param survey_meta Output of `.extract_survey_meta*()`.
+#' @param region_var Optional region column name in `dhs_data`. If `NULL` and
+#'   GPS/shapefile are also `NULL`, falls back to `default_region_var`.
+#' @param default_region_var Region var to use when nothing else is supplied
+#'   (typically `"v024"` for KR/IR or `"hv024"` for HR/PR).
+#' @param gps_data Optional GE / GPS frame.
+#' @param gps_vars Named list with `cluster`, `lat`, `lon` keys mapping to
+#'   columns in `gps_data`.
+#' @param shapefile Optional `sf` object with `adm0`, `adm1`, ... polygons.
+#' @param admin_level Optional character vector of admin levels to keep
+#'   (e.g., `c("adm1", "adm2")`).
+#' @param join_nearest Logical; assign unmatched clusters to nearest polygon.
+#' @param ci_method CI method passed to `compute_fn`.
+#' @param compute_fn Function with signature
+#'   `(data, condition, group_var, subnational_level, ci_method)`.
+#'   Defaults to `.compute_dhs_indicator_generic`.
+#'
+#' @return Named list of tibbles: `adm0`, plus one tibble per resolved admin
+#'   level. Each subnational tibble carries parent admin columns when those
+#'   columns are available on `data` (so `adm2` rows include their `adm1`).
+#' @noRd
+.compute_dhs_indicators_with_admin <- function(
+  data,
+  conditions,
+  dhs_data,
+  survey_meta,
+  region_var = NULL,
+  default_region_var = NULL,
+  gps_data = NULL,
+  gps_vars = list(cluster = "DHSCLUST", lat = "LATNUM", lon = "LONGNUM"),
+  shapefile = NULL,
+  admin_level = NULL,
+  join_nearest = TRUE,
+  ci_method = "logit",
+  compute_fn = .compute_dhs_indicator_generic
+) {
+
+  admin_hierarchy <- list()
+  geo_src <- NA_character_
+
+  # Auto-fallback to default_region_var if neither region nor GPS provided
+  if (is.null(region_var) && (is.null(gps_data) || is.null(shapefile))) {
+    if (!is.null(default_region_var) &&
+        default_region_var %in% names(dhs_data)) {
+      region_var <- default_region_var
+      cli::cli_alert_info(
+        "No {.arg region_var}/{.arg gps_data}/{.arg shapefile} specified; \\
+        defaulting to {.var {default_region_var}} for adm1"
+      )
+    }
+  }
+
+  # Branch: region_var (single adm1) vs GPS+shapefile (multi-admin)
+  if (!is.null(region_var)) {
+    if (!region_var %in% names(dhs_data)) {
+      cli::cli_abort("Column {.var {region_var}} not found in DHS data.")
+    }
+
+    # Build lookup: raw value -> resolved label
+    resolved_all <- .resolve_region_labels(
+      dhs_data[[region_var]], region_var
+    )
+    raw_all <- as.character(
+      as.vector(haven::zap_labels(dhs_data[[region_var]]))
+    )
+    lookup <- stats::setNames(resolved_all, raw_all)
+
+    if (region_var %in% names(data)) {
+      data_raw <- as.character(data[[region_var]])
+      data$region <- unname(lookup[data_raw])
+    } else if (nrow(data) == nrow(dhs_data)) {
+      data$region <- resolved_all
+    } else {
+      # Fallback when region_var was dropped during prep and rows are subset:
+      # match via cluster_id if dhs_data carries the cluster col, else abort.
+      cli::cli_abort(
+        "Cannot map {.var {region_var}} onto prepared data; \\
+        please include it in {.arg survey_vars} or provide GPS data."
+      )
+    }
+
+    admin_hierarchy <- list(
+      list(group_var = "region", level_name = "adm1")
+    )
+    geo_src <- "survey"
+
+    cli::cli_alert_info(
+      "Grouping by {.var {region_var}}: \\
+      {paste(unique(data$region), collapse = ', ')}"
+    )
+
+  } else if (!is.null(gps_data) && !is.null(shapefile)) {
+    data <- .spatial_join_ge(
+      kr_fever     = data,
+      gps_data     = gps_data,
+      gps_vars     = gps_vars,
+      shapefile    = shapefile,
+      admin_level  = admin_level,
+      join_nearest = join_nearest
+    )
+    admin_lvls <- attr(data, "admin_levels") %||% character(0)
+    # Drop adm0 from hierarchy: national results are computed separately and
+    # `meta_cols$adm0` already carries the country label.
+    admin_lvls <- setdiff(admin_lvls, "adm0")
+    if ("adm0" %in% names(data)) {
+      data <- dplyr::select(data, -dplyr::any_of("adm0"))
+    }
+    for (lvl in admin_lvls) {
+      admin_hierarchy <- c(
+        admin_hierarchy,
+        list(list(group_var = lvl, level_name = lvl))
+      )
+    }
+    geo_src <- "gps"
+  }
+
+  # National (adm0)
+  national_results <- purrr::map_dfr(conditions, function(cond) {
+    compute_fn(
+      data      = data,
+      condition = cond,
+      group_var = NULL,
+      ci_method = ci_method
+    )
+  })
+
+  meta_cols <- tibble::tibble(
+    survey_id   = survey_meta$survey_id,
+    iso3        = survey_meta$iso3,
+    iso2        = survey_meta$iso2,
+    survey_type = survey_meta$survey_type,
+    survey_year = survey_meta$survey_year,
+    adm0        = survey_meta$country_upper
+  )
+
+  adm0_data <- national_results |>
+    dplyr::filter(level == "adm0") |>
+    dplyr::select(-level, -location)
+
+  adm0_tbl <- dplyr::bind_cols(
+    meta_cols[rep(1, nrow(adm0_data)), ],
+    tibble::tibble(type = "survey_weighted", geo_source = geo_src),
+    adm0_data
+  ) |> tibble::as_tibble()
+
+  out <- list(adm0 = adm0_tbl)
+
+  # Subnational tabs
+  all_level_names <- vapply(
+    admin_hierarchy, `[[`, character(1), "level_name"
+  )
+
+  for (i in seq_along(admin_hierarchy)) {
+    ah <- admin_hierarchy[[i]]
+    grp <- ah$group_var
+    lvl_name <- ah$level_name
+
+    sub_results <- purrr::map_dfr(conditions, function(cond) {
+      compute_fn(
+        data              = data,
+        condition         = cond,
+        group_var         = grp,
+        subnational_level = lvl_name,
+        ci_method         = ci_method
+      )
+    })
+
+    sub_results <- sub_results |> dplyr::filter(level != "adm0")
+    if (nrow(sub_results) == 0) next
+
+    sub_results <- sub_results |>
+      dplyr::mutate(!!lvl_name := toupper(location))
+
+    # Add parent admin columns (e.g., adm1 in the adm2 tab) when available
+    parent_levels <- all_level_names[seq_len(i - 1)]
+    parent_cols_in_data <- intersect(parent_levels, names(data))
+    if (length(parent_cols_in_data) > 0 && grp %in% names(data)) {
+      parent_lookup <- data |>
+        dplyr::select(dplyr::all_of(c(grp, parent_cols_in_data))) |>
+        dplyr::mutate(dplyr::across(
+          dplyr::everything(), ~toupper(as.character(.))
+        )) |>
+        dplyr::distinct()
+      sub_results <- sub_results |>
+        dplyr::left_join(
+          parent_lookup, by = stats::setNames(grp, lvl_name)
+        )
+    }
+
+    admin_cols <- intersect(
+      c(parent_cols_in_data, lvl_name), names(sub_results)
+    )
+
+    sub_tbl <- dplyr::bind_cols(
+      meta_cols[rep(1, nrow(sub_results)), ],
+      sub_results |>
+        dplyr::select(
+          dplyr::all_of(admin_cols), point, ci_l, ci_u,
+          numerator, denominator,
+          indicator, indicator_code,
+          numerator_description,
+          denominator_description, denominator_code
+        )
+    ) |>
+      dplyr::mutate(
+        type       = "survey_weighted",
+        geo_source = geo_src,
+        .after     = dplyr::all_of(lvl_name)
+      ) |>
+      tibble::as_tibble()
+
+    out[[lvl_name]] <- sub_tbl
+  }
+
+  out
+}
+
+
+# =============================================================================
 # Master DHS indicator dictionary
 # =============================================================================
 

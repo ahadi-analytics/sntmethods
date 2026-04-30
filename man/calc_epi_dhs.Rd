@@ -16,6 +16,11 @@ calc_epi_dhs(
     "h54", pneumo2 = "h55", pneumo3 = "h56", rota1 = "h57", rota2 = "h58", rota3 = "h59",
     ipv = "h60", hepb0 = "h50", yellowfever = "h61", any = "h10"),
   region_var = NULL,
+  gps_data = NULL,
+  gps_vars = list(cluster = "DHSCLUST", lat = "LATNUM", lon = "LONGNUM"),
+  shapefile = NULL,
+  admin_level = NULL,
+  join_nearest = TRUE,
   ci_method = "logit"
 )
 }

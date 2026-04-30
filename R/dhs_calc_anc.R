@@ -202,8 +202,13 @@ calc_anc_dhs <- function(
     anc_visits = "m14_1"
   ),
   birth_window_months = 24,
-  region_var = NULL,
-  ci_method = "logit"
+  region_var          = NULL,
+  gps_data            = NULL,
+  gps_vars            = list(cluster = "DHSCLUST", lat = "LATNUM", lon = "LONGNUM"),
+  shapefile           = NULL,
+  admin_level         = NULL,
+  join_nearest        = TRUE,
+  ci_method           = "logit"
 ) {
 
   # ---- 1. Extract survey metadata (IR data uses v-prefix) ----
@@ -221,59 +226,20 @@ calc_anc_dhs <- function(
     cli::cli_abort("No eligible ANC data after preparation.")
   }
 
-  # ---- 3. Resolve region labels if region_var provided ----
-  group_var <- NULL
-  if (!is.null(region_var)) {
-    if (!region_var %in% names(dhs_ir)) {
-      cli::cli_abort("Column {.var {region_var}} not found in `dhs_ir`.")
-    }
-    # .prepare_anc_data() mutates dhs_ir with dplyr::mutate then filters, so
-    # the original column is preserved (zapped of haven labels). Use it
-    # directly from the prepared data.
-    if (region_var %in% names(ir)) {
-      ir$region <- .resolve_region_labels(ir[[region_var]], region_var)
-    } else {
-      cli::cli_abort(
-        "Region variable {.var {region_var}} not preserved after data prep."
-      )
-    }
-    group_var <- "region"
-  }
-
-  # ---- 4. Get conditions ----
-  conditions <- .anc_conditions()
-
-  # ---- 5. Compute national results ----
-  national_results <- purrr::map_dfr(conditions, function(cond) {
-    .compute_dhs_indicator_generic(
-      data      = ir,
-      condition = cond,
-      group_var = NULL,
-      ci_method = ci_method
-    )
-  })
-
-  # ---- 6. Compute regional results ----
-  regional_results <- tibble::tibble()
-  if (!is.null(group_var)) {
-    regional_results <- purrr::map_dfr(conditions, function(cond) {
-      .compute_dhs_indicator_generic(
-        data              = ir,
-        condition         = cond,
-        group_var         = group_var,
-        subnational_level = "adm1",
-        ci_method         = ci_method
-      )
-    })
-  }
-
-  # ---- 7. Assemble standardized output ----
-  .assemble_dhs_output(
-    national_results = national_results,
-    regional_results = regional_results,
-    survey_meta      = survey_meta,
-    geo_source       = if (!is.null(group_var)) "survey" else NA_character_,
-    admin_col        = "adm1"
+  # ---- 3. Compute indicators across admin levels ----
+  .compute_dhs_indicators_with_admin(
+    data               = ir,
+    conditions         = .anc_conditions(),
+    dhs_data           = dhs_ir,
+    survey_meta        = survey_meta,
+    region_var         = region_var,
+    default_region_var = "v024",
+    gps_data           = gps_data,
+    gps_vars           = gps_vars,
+    shapefile          = shapefile,
+    admin_level        = admin_level,
+    join_nearest       = join_nearest,
+    ci_method          = ci_method
   )
 }
 

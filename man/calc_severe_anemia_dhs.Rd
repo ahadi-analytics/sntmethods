@@ -11,6 +11,11 @@ calc_severe_anemia_dhs(
     present = "hv103", mother = "hv042"),
   altitude_adjusted = TRUE,
   region_var = NULL,
+  gps_data = NULL,
+  gps_vars = list(cluster = "DHSCLUST", lat = "LATNUM", lon = "LONGNUM"),
+  shapefile = NULL,
+  admin_level = NULL,
+  join_nearest = TRUE,
   ci_method = "logit"
 )
 }

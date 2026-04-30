@@ -11,6 +11,11 @@ calc_iptp_dhs(
     "b19_01", sp_taken = "m49a_1", sp_doses = "ml1_1"),
   birth_window_months = 24,
   region_var = NULL,
+  gps_data = NULL,
+  gps_vars = list(cluster = "DHSCLUST", lat = "LATNUM", lon = "LONGNUM"),
+  shapefile = NULL,
+  admin_level = NULL,
+  join_nearest = TRUE,
   ci_method = "logit"
 )
 }

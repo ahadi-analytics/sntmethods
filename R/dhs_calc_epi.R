@@ -226,8 +226,13 @@ calc_epi_dhs <- function(
     ipv = "h60", hepb0 = "h50", yellowfever = "h61",
     any = "h10"
   ),
-  region_var = NULL,
-  ci_method = "logit"
+  region_var   = NULL,
+  gps_data     = NULL,
+  gps_vars     = list(cluster = "DHSCLUST", lat = "LATNUM", lon = "LONGNUM"),
+  shapefile    = NULL,
+  admin_level  = NULL,
+  join_nearest = TRUE,
+  ci_method    = "logit"
 ) {
   # ---- 1. Extract survey metadata ----
   survey_meta <- .extract_survey_meta(dhs_kr)
@@ -241,39 +246,11 @@ calc_epi_dhs <- function(
     include_survey_vars = TRUE
   )
 
-  # ---- 3. Resolve region labels ----
-  group_var <- NULL
-  geo_src <- NA_character_
-
-  if (!is.null(region_var)) {
-    if (!region_var %in% names(dhs_kr)) {
-      cli::cli_abort("Column {.var {region_var}} not found in `dhs_kr`.")
-    }
-    kr$region <- .resolve_region_labels(
-      dhs_kr[[region_var]], region_var
-    )
-    # Map to age-filtered subset if lengths differ
-    if (nrow(kr) != nrow(dhs_kr)) {
-      resolved_all <- .resolve_region_labels(
-        dhs_kr[[region_var]], region_var
-      )
-      raw_all <- as.character(
-        as.vector(haven::zap_labels(dhs_kr[[region_var]]))
-      )
-      lookup <- stats::setNames(resolved_all, raw_all)
-      kr_raw <- as.character(kr[[region_var]])
-      kr$region <- unname(lookup[kr_raw])
-    }
-    group_var <- "region"
-    geo_src <- "survey"
-  }
-
-  # ---- 4. Build conditions for available vaccines ----
+  # ---- 3. Build conditions for available vaccines ----
   all_conditions <- .epi_conditions()
 
   # Detect which vax_ columns are available in prepared data
   available_vax <- names(kr)[grepl("^vax_", names(kr))]
-  available_vax_names <- sub("^vax_", "", available_vax)
 
   # Filter conditions to available vaccines
   conditions <- all_conditions[vapply(
@@ -283,7 +260,6 @@ calc_epi_dhs <- function(
   )]
 
   # Further filter by user-requested indicators if provided
-
   if (!is.null(indicators)) {
     requested_codes <- paste0("epi_", indicators)
     conditions <- conditions[vapply(
@@ -297,40 +273,20 @@ calc_epi_dhs <- function(
     cli::cli_abort("No requested vaccine indicators found in prepared data.")
   }
 
-  # ---- 5. Compute national results ----
-  national_results <- purrr::map_dfr(conditions, function(cond) {
-    .compute_dhs_indicator_generic(
-      data = kr,
-      condition = cond,
-      group_var = NULL,
-      ci_method = ci_method
-    )
-  })
-
-  # ---- 6. Compute regional results ----
-  regional_results <- tibble::tibble()
-  if (!is.null(group_var)) {
-    regional_results <- purrr::map_dfr(conditions, function(cond) {
-      .compute_dhs_indicator_generic(
-        data = kr,
-        condition = cond,
-        group_var = group_var,
-        subnational_level = "adm1",
-        ci_method = ci_method
-      )
-    })
-    # Keep only regional rows
-    regional_results <- regional_results |>
-      dplyr::filter(level != "adm0")
-  }
-
-  # ---- 7. Assemble output ----
-  .assemble_dhs_output(
-    national_results = national_results,
-    regional_results = regional_results,
-    survey_meta = survey_meta,
-    geo_source = geo_src,
-    admin_col = "adm1"
+  # ---- 4. Compute indicators across admin levels ----
+  .compute_dhs_indicators_with_admin(
+    data               = kr,
+    conditions         = conditions,
+    dhs_data           = dhs_kr,
+    survey_meta        = survey_meta,
+    region_var         = region_var,
+    default_region_var = "v024",
+    gps_data           = gps_data,
+    gps_vars           = gps_vars,
+    shapefile          = shapefile,
+    admin_level        = admin_level,
+    join_nearest       = join_nearest,
+    ci_method          = ci_method
   )
 }
 

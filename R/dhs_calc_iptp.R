@@ -944,16 +944,19 @@ calc_iptp_dhs <- function(
     sp_doses = "ml1_1"
   ),
   birth_window_months = 24,
-  region_var = NULL,
-  ci_method = "logit"
+  region_var          = NULL,
+  gps_data            = NULL,
+  gps_vars            = list(cluster = "DHSCLUST", lat = "LATNUM", lon = "LONGNUM"),
+  shapefile           = NULL,
+  admin_level         = NULL,
+  join_nearest        = TRUE,
+  ci_method           = "logit"
 ) {
 
   # ---- 1. Extract survey metadata (IR data uses v-prefix) ----
   survey_meta <- .extract_survey_meta(dhs_ir)
 
   # ---- 2. Prepare data via existing helper ----
-  # .prepare_iptp_data() expects survey_vars with interview_date or
-  # interview_cmc key; it handles both via %||%.
   ir <- .prepare_iptp_data(
     dhs_ir = dhs_ir,
     survey_vars = survey_vars,
@@ -966,9 +969,6 @@ calc_iptp_dhs <- function(
   }
 
   # ---- 3. Create binary outcome variables for generic helper ----
-  # .prepare_iptp_data() creates: has_1plus, has_2plus, has_3plus, has_4plus,
-  # has_1only, has_2only, has_3only from sp_doses.
-  # Rename to match outcome_var names expected by conditions.
   ir <- ir |>
     dplyr::mutate(
       has_iptp_1plus = as.integer(has_1plus),
@@ -980,57 +980,20 @@ calc_iptp_dhs <- function(
       has_iptp_3only = as.integer(has_3only)
     )
 
-  # ---- 4. Resolve region labels if region_var provided ----
-  group_var <- NULL
-  if (!is.null(region_var)) {
-    if (!region_var %in% names(dhs_ir)) {
-      cli::cli_abort("Column {.var {region_var}} not found in `dhs_ir`.")
-    }
-    # .prepare_iptp_data preserves original columns after zap_labels
-    if (region_var %in% names(ir)) {
-      ir$region <- .resolve_region_labels(ir[[region_var]], region_var)
-    } else {
-      cli::cli_abort(
-        "Region variable {.var {region_var}} not preserved after data prep."
-      )
-    }
-    group_var <- "region"
-  }
-
-  # ---- 5. Get conditions ----
-  conditions <- .iptp_conditions()
-
-  # ---- 6. Compute national results ----
-  national_results <- purrr::map_dfr(conditions, function(cond) {
-    .compute_dhs_indicator_generic(
-      data      = ir,
-      condition = cond,
-      group_var = NULL,
-      ci_method = ci_method
-    )
-  })
-
-  # ---- 7. Compute regional results ----
-  regional_results <- tibble::tibble()
-  if (!is.null(group_var)) {
-    regional_results <- purrr::map_dfr(conditions, function(cond) {
-      .compute_dhs_indicator_generic(
-        data              = ir,
-        condition         = cond,
-        group_var         = group_var,
-        subnational_level = "adm1",
-        ci_method         = ci_method
-      )
-    })
-  }
-
-  # ---- 8. Assemble standardized output ----
-  .assemble_dhs_output(
-    national_results = national_results,
-    regional_results = regional_results,
-    survey_meta      = survey_meta,
-    geo_source       = if (!is.null(group_var)) "survey" else NA_character_,
-    admin_col        = "adm1"
+  # ---- 4. Compute indicators across admin levels ----
+  .compute_dhs_indicators_with_admin(
+    data               = ir,
+    conditions         = .iptp_conditions(),
+    dhs_data           = dhs_ir,
+    survey_meta        = survey_meta,
+    region_var         = region_var,
+    default_region_var = "v024",
+    gps_data           = gps_data,
+    gps_vars           = gps_vars,
+    shapefile          = shapefile,
+    admin_level        = admin_level,
+    join_nearest       = join_nearest,
+    ci_method          = ci_method
   )
 }
 
