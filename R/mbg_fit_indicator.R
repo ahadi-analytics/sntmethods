@@ -77,7 +77,12 @@
 #'   probability surface. Default \code{100} (i.e. percentages).
 #' @param country_iso3 Optional ISO3 country code. If supplied,
 #'   uppercased, included in pipeline-style filenames and echoed onto
-#'   the admin tibble. Default \code{NULL}.
+#'   the admin tibble; \code{country_iso2} and \code{dhs_code} are then
+#'   resolved automatically via \code{countrycode}. If \code{NULL}, the
+#'   function attempts to reverse-geocode the median cluster coordinate
+#'   (against \code{adm0_sf} when supplied, otherwise against
+#'   \code{rnaturalearth}) and resolve all three codes from there.
+#'   Default \code{NULL}.
 #' @param survey_year Optional integer survey year. Default \code{NULL}.
 #' @param source_label Optional character data source label
 #'   (\code{"DHS"}, \code{"MIS"}, \code{"routine"}, \ldots). Generic
@@ -118,9 +123,15 @@
 #'       \code{return_draws = TRUE}.}
 #'     \item{\code{admin}}{Named list of long-format \code{tibble}s,
 #'       one per \code{output_levels} entry, with columns \code{
-#'       indicator, admin_level, admin_id, admin_name, mean, lower,
-#'       upper, population, country_iso3, survey_year, source_label}
-#'       (last three may be \code{NA}).}
+#'       indicator, indicator_title, admin_level, admin_id, admin_name,
+#'       mean, lower, upper, population, country_iso3, country_iso2,
+#'       dhs_code, survey_year, source_label}. \code{country_iso3} /
+#'       \code{country_iso2} / \code{dhs_code} are populated either from
+#'       a user-supplied \code{country_iso3} (resolved via
+#'       \code{countrycode}) or by reverse-geocoding the median cluster
+#'       coordinate against \code{adm0_sf} (or \code{rnaturalearth} if
+#'       not supplied). They fall back to \code{NA} when neither lookup
+#'       succeeds.}
 #'     \item{\code{model_runner}}{The fitted \code{MbgModelRunner}
 #'       object, or \code{NULL} if loaded from cache.}
 #'     \item{\code{id_raster}}{The pixel-id raster used by
@@ -305,8 +316,12 @@ fit_mbg_indicator <- function(
     cli::cli_abort("None of the requested {.arg output_levels} have a shapefile supplied.")
   }
 
-  # Optional metadata
+  # Optional metadata. iso2 / DHS code are populated either from the
+  # user-supplied iso3 (via countrycode) or, when no iso3 is given, by
+  # reverse-geocoding the median cluster coordinate -- see step 1b below.
   iso3_norm <- if (is.null(country_iso3) || !nzchar(country_iso3)) NULL else toupper(country_iso3)
+  iso2_norm <- NULL
+  dhs_norm  <- NULL
   year_norm <- if (is.null(survey_year)) NULL else as.integer(survey_year)
   src_norm  <- if (is.null(source_label) || !nzchar(source_label)) NULL else as.character(source_label)
   ind_title <- if (is.null(indicator_title)) {
@@ -371,6 +386,89 @@ fit_mbg_indicator <- function(
   cd <- cd[keep, ]
   if (nrow(cd) == 0) {
     cli::cli_abort("After cleaning, {.arg cluster_data} has 0 usable rows.")
+  }
+
+  ## ---- 1b) Derive country metadata (iso3 / iso2 / DHS) from coords ---------
+  #
+  # When the caller does not supply country_iso3, attempt to reverse-geocode
+  # the median cluster coordinate to a country. Median is robust to a
+  # handful of mis-located GE clusters that DHS recodes occasionally
+  # contain. Lookup prefers an explicit adm0_sf when supplied; otherwise
+  # falls back to rnaturalearth. iso2 and the DHS 2-letter country code
+  # are then resolved via countrycode.
+  .derive_country_from_coords <- function(x, y, adm0_sf = NULL) {
+    if (!requireNamespace("countrycode", quietly = TRUE)) return(list())
+    med_x <- stats::median(x, na.rm = TRUE)
+    med_y <- stats::median(y, na.rm = TRUE)
+    if (!is.finite(med_x) || !is.finite(med_y) ||
+          med_x < -180 || med_x > 180 ||
+          med_y < -90  || med_y > 90) {
+      return(list())
+    }
+    pt <- sf::st_sfc(sf::st_point(c(med_x, med_y)), crs = 4326)
+    iso3 <- NA_character_
+    if (!is.null(adm0_sf)) {
+      a0 <- tryCatch(sf::st_transform(adm0_sf, 4326),
+                     error = function(e) adm0_sf)
+      hit <- tryCatch(
+        suppressMessages(sf::st_intersects(pt, a0, sparse = FALSE))[1, ],
+        error = function(e) logical(0)
+      )
+      if (length(hit) > 0 && any(hit)) {
+        iso_col <- intersect(
+          c("iso3", "ISO3", "ISO_A3", "ADM0_A3",
+            "shapeGroup", "GID_0", "iso_a3"),
+          names(a0)
+        )[1]
+        if (!is.na(iso_col)) {
+          iso3 <- as.character(a0[[iso_col]][which(hit)[1]])
+        }
+      }
+    }
+    if ((is.na(iso3) || !nzchar(iso3)) &&
+          requireNamespace("rnaturalearth", quietly = TRUE)) {
+      world <- tryCatch(
+        rnaturalearth::ne_countries(scale = "small", returnclass = "sf"),
+        error = function(e) NULL
+      )
+      if (!is.null(world)) {
+        hit <- tryCatch(
+          suppressMessages(sf::st_intersects(pt, world, sparse = FALSE))[1, ],
+          error = function(e) logical(0)
+        )
+        if (length(hit) > 0 && any(hit)) {
+          iso3 <- as.character(world$iso_a3[which(hit)[1]])
+        }
+      }
+    }
+    if (is.na(iso3) || !nzchar(iso3)) return(list())
+    iso2 <- suppressWarnings(countrycode::countrycode(
+      iso3, origin = "iso3c", destination = "iso2c"))
+    dhs  <- suppressWarnings(countrycode::countrycode(
+      iso3, origin = "iso3c", destination = "dhs"))
+    list(iso3 = iso3, iso2 = iso2, dhs = dhs)
+  }
+
+  if (is.null(iso3_norm)) {
+    derived <- .derive_country_from_coords(cd$x, cd$y, adm0_sf)
+    if (length(derived) > 0) {
+      iso3_norm <- toupper(derived$iso3)
+      iso2_norm <- if (!is.na(derived$iso2)) toupper(derived$iso2) else NULL
+      dhs_norm  <- if (!is.na(derived$dhs))  toupper(derived$dhs)  else NULL
+      if (isTRUE(verbose)) {
+        cli::cli_alert_info(
+          "Derived country from cluster coords: iso3 = {.val {iso3_norm}}, \\
+          iso2 = {.val {iso2_norm %||% NA}}, dhs = {.val {dhs_norm %||% NA}}"
+        )
+      }
+    }
+  } else if (requireNamespace("countrycode", quietly = TRUE)) {
+    i2 <- suppressWarnings(countrycode::countrycode(
+      iso3_norm, origin = "iso3c", destination = "iso2c"))
+    dh <- suppressWarnings(countrycode::countrycode(
+      iso3_norm, origin = "iso3c", destination = "dhs"))
+    if (!is.na(i2)) iso2_norm <- toupper(i2)
+    if (!is.na(dh)) dhs_norm  <- toupper(dh)
   }
 
   ## ---- 2) Output / cache directories ---------------------------------------
@@ -708,18 +806,20 @@ fit_mbg_indicator <- function(
     upper_vec <- .pop_weighted(cell_preds$upper) * multiplier
 
     admin_long[[lvl]] <- tibble::tibble(
-      indicator    = indicator_name,
+      indicator       = indicator_name,
       indicator_title = ind_title,
-      admin_level  = lvl,
-      admin_id     = as.character(id_vec),
-      admin_name   = as.character(nm_vec),
-      mean         = mean_vec,
-      lower        = lower_vec,
-      upper        = upper_vec,
-      population   = pop_vals,
-      country_iso3 = if (is.null(iso3_norm)) NA_character_ else iso3_norm,
-      survey_year  = if (is.null(year_norm)) NA_integer_  else year_norm,
-      source_label = if (is.null(src_norm))  NA_character_ else src_norm
+      admin_level     = lvl,
+      admin_id        = as.character(id_vec),
+      admin_name      = as.character(nm_vec),
+      mean            = mean_vec,
+      lower           = lower_vec,
+      upper           = upper_vec,
+      population      = pop_vals,
+      country_iso3    = if (is.null(iso3_norm)) NA_character_ else iso3_norm,
+      country_iso2    = if (is.null(iso2_norm)) NA_character_ else iso2_norm,
+      dhs_code        = if (is.null(dhs_norm))  NA_character_ else dhs_norm,
+      survey_year     = if (is.null(year_norm)) NA_integer_  else year_norm,
+      source_label    = if (is.null(src_norm))  NA_character_ else src_norm
     )
   }
 
@@ -832,6 +932,8 @@ fit_mbg_indicator <- function(
     id_field             = id_field,
     polygon_id_field     = polygon_id_field,
     country_iso3         = iso3_norm,
+    country_iso2         = iso2_norm,
+    dhs_code             = dhs_norm,
     survey_year          = year_norm,
     source_label         = src_norm,
     covariate_names      = names(covariates),

@@ -97,7 +97,12 @@ probability surface. Default \code{100} (i.e. percentages).}
 
 \item{country_iso3}{Optional ISO3 country code. If supplied,
 uppercased, included in pipeline-style filenames and echoed onto
-the admin tibble. Default \code{NULL}.}
+the admin tibble; \code{country_iso2} and \code{dhs_code} are then
+resolved automatically via \code{countrycode}. If \code{NULL}, the
+function attempts to reverse-geocode the median cluster coordinate
+(against \code{adm0_sf} when supplied, otherwise against
+\code{rnaturalearth}) and resolve all three codes from there.
+Default \code{NULL}.}
 
 \item{survey_year}{Optional integer survey year. Default \code{NULL}.}
 
@@ -148,9 +153,15 @@ optionally \code{draws} (the full posterior matrix) when
 \code{return_draws = TRUE}.}
 \item{\code{admin}}{Named list of long-format \code{tibble}s,
 one per \code{output_levels} entry, with columns \code{
-      indicator, admin_level, admin_id, admin_name, mean, lower,
-      upper, population, country_iso3, survey_year, source_label}
-(last three may be \code{NA}).}
+      indicator, indicator_title, admin_level, admin_id, admin_name,
+      mean, lower, upper, population, country_iso3, country_iso2,
+      dhs_code, survey_year, source_label}. \code{country_iso3} /
+\code{country_iso2} / \code{dhs_code} are populated either from
+a user-supplied \code{country_iso3} (resolved via
+\code{countrycode}) or by reverse-geocoding the median cluster
+coordinate against \code{adm0_sf} (or \code{rnaturalearth} if
+not supplied). They fall back to \code{NA} when neither lookup
+succeeds.}
 \item{\code{model_runner}}{The fitted \code{MbgModelRunner}
 object, or \code{NULL} if loaded from cache.}
 \item{\code{id_raster}}{The pixel-id raster used by
