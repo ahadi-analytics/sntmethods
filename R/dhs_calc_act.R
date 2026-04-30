@@ -1641,12 +1641,25 @@ act_dictionary <- function() {
   }
 
   cluster_admin_df <- sf::st_drop_geometry(cluster_admin)
+
+  # Drop any pre-existing admin columns from kr_fever so the join below
+  # doesn't suffix-rename them (e.g., adm1.x / adm1.y), which would leave
+  # `kr_fever[[col]]` as NULL in the uppercase loop.
+  existing_admin_cols <- intersect(admin_level, names(kr_fever))
+  if (length(existing_admin_cols) > 0) {
+    kr_fever <- dplyr::select(
+      kr_fever, -dplyr::all_of(existing_admin_cols)
+    )
+  }
+
   kr_fever <- kr_fever |>
     dplyr::left_join(cluster_admin_df, by = "cluster_id")
 
   # UPPERCASE all admin columns
   for (col in admin_level) {
-    kr_fever[[col]] <- toupper(as.character(kr_fever[[col]]))
+    if (col %in% names(kr_fever)) {
+      kr_fever[[col]] <- toupper(as.character(kr_fever[[col]]))
+    }
   }
 
   # Store the full admin hierarchy as attribute (e.g., c("adm1", "adm2"))
