@@ -79,3 +79,4 @@ am_results <- calc_antimalarial_dhs_core(
 \code{\link[=calc_act_dhs]{calc_act_dhs()}} for ACT-specific treatment (step 4),
 \code{\link[=calc_case_management_dhs]{calc_case_management_dhs()}} for the full cascade
 }
+\keyword{internal}

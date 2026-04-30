@@ -26,7 +26,7 @@
 #'   (each with _low, _upp), dhs_n_recent_births.
 #'
 #' @seealso [calc_anc_mbg()] for cluster-level MBG inputs
-#' @export
+#' @keywords internal
 calc_anc_dhs_core <- function(
   dhs_ir,
   survey_vars = list(
@@ -354,7 +354,7 @@ calc_anc_dhs <- function(
 #'
 #' @return Tibble with columns: indicator, indicator_code, indicator_title,
 #'   numerator_description, denominator_description, denominator_code.
-#' @export
+#' @keywords internal
 anc_dictionary <- function() {
   conds <- .anc_conditions()
   tibble::tibble(

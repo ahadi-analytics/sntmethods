@@ -111,7 +111,7 @@
 #' WHO. World Malaria Report. Geneva: World Health Organization.
 #' \url{https://www.who.int/teams/global-malaria-programme/reports}
 #'
-#' @export
+#' @keywords internal
 calc_csb_dhs_core <- function(
   dhs_kr,
   survey_vars = list(
@@ -681,10 +681,7 @@ calc_csb_dhs_core <- function(
 #' @return Tibble with columns: indicator, indicator_code, indicator_title,
 #'   numerator_description, denominator_description, denominator_code.
 #'
-#' @examples
-#' csb_dictionary()
-#'
-#' @export
+#' @keywords internal
 csb_dictionary <- function() {
   conds <- .csb_conditions()
   tibble::tibble(
@@ -959,7 +956,8 @@ calc_csb_dhs <- function(
 #'
 #' @return sf object with aggregated CSB by administrative level.
 #'
-#' @export
+#' @keywords internal
+#' @noRd
 aggregate_csb_admin <- function(
   csb_results,
   shapefile,

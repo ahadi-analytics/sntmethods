@@ -13,7 +13,4 @@ numerator_description, denominator_description, denominator_code.
 \description{
 Returns the full dictionary of antimalarial indicators with metadata.
 }
-\examples{
-antimalarial_dictionary()
-
-}
+\keyword{internal}

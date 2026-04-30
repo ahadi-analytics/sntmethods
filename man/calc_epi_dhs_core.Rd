@@ -61,3 +61,4 @@ DHS Children's Recode data.
 \seealso{
 \code{\link[=calc_epi_mbg]{calc_epi_mbg()}} for cluster-level MBG inputs
 }
+\keyword{internal}

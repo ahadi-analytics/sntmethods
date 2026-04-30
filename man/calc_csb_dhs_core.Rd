@@ -142,3 +142,4 @@ However, \code{dhs_csb_public + dhs_csb_private + dhs_csb_none} may exceed
 WHO. World Malaria Report. Geneva: World Health Organization.
 \url{https://www.who.int/teams/global-malaria-programme/reports}
 }
+\keyword{internal}

@@ -697,10 +697,7 @@ calc_act_dhs <- function(
 #'   denominator_description, denominator_code,
 #'   cascade_step, requires_csb, requires_am.
 #'
-#' @examples
-#' act_dictionary()
-#'
-#' @export
+#' @keywords internal
 act_dictionary <- function() {
   conds <- .act_conditions()
   tibble::tibble(

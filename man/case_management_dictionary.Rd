@@ -13,7 +13,4 @@ numerator_description, denominator_description, denominator_code.
 \description{
 Returns the dictionary of effective case management indicators.
 }
-\examples{
-case_management_dictionary()
-
-}
+\keyword{internal}

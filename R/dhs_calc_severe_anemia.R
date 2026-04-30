@@ -72,7 +72,7 @@
 #' #   altitude_adjusted = FALSE
 #' # )
 #'
-#' @export
+#' @keywords internal
 calc_severe_anemia_dhs_core <- function(
   dhs_pr,
   survey_vars = list(
@@ -620,10 +620,7 @@ calc_severe_anemia_dhs <- function(
 #' @return Tibble with columns: indicator, indicator_code, indicator_title,
 #'   numerator_description, denominator_description, denominator_code.
 #'
-#' @examples
-#' severe_anemia_dictionary()
-#'
-#' @export
+#' @keywords internal
 severe_anemia_dictionary <- function() {
   conds <- .severe_anemia_conditions()
   tibble::tibble(
@@ -655,7 +652,8 @@ severe_anemia_dictionary <- function() {
 #' @return SF object with aggregated severe anemia by administrative level,
 #'   including geometry for mapping.
 #'
-#' @export
+#' @keywords internal
+#' @noRd
 aggregate_severe_anemia_admin <- function(
   cluster_results,
   shapefile,

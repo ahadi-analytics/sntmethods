@@ -44,3 +44,4 @@ under 5 using survey-weighted methods.
 \seealso{
 \code{\link[=calc_smc_mbg]{calc_smc_mbg()}} for cluster-level MBG inputs
 }
+\keyword{internal}

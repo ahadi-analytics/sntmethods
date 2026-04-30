@@ -13,7 +13,4 @@ numerator_description, denominator_description, denominator_code.
 \description{
 Returns the full dictionary of wealth indicators with metadata.
 }
-\examples{
-wealth_dictionary()
-
-}
+\keyword{internal}

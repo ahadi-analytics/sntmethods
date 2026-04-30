@@ -32,7 +32,7 @@
 #' @return tibble with U5MR estimates by administrative level, with
 #'   confidence intervals and sample sizes.
 #'
-#' @export
+#' @keywords internal
 calc_u5mr_dhs_core <- function(
   dhs_kr,
   survey_vars = list(
@@ -537,10 +537,7 @@ calc_u5mr_dhs_core <- function(
 #' @return Tibble with columns: indicator, indicator_code, indicator_title,
 #'   numerator_description, denominator_description, denominator_code.
 #'
-#' @examples
-#' u5mr_dictionary()
-#'
-#' @export
+#' @keywords internal
 u5mr_dictionary <- function() {
   conds <- .u5mr_conditions()
   tibble::tibble(
@@ -876,7 +873,8 @@ calc_u5mr_dhs <- function(
 #'
 #' @return sf object with aggregated U5MR by administrative level.
 #'
-#' @export
+#' @keywords internal
+#' @noRd
 aggregate_u5mr_admin <- function(
   u5mr_results,
   shapefile,

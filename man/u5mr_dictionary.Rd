@@ -13,7 +13,4 @@ numerator_description, denominator_description, denominator_code.
 \description{
 Returns the dictionary of U5MR indicators with metadata.
 }
-\examples{
-u5mr_dictionary()
-
-}
+\keyword{internal}

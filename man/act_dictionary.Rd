@@ -17,7 +17,4 @@ Returns the full dictionary of ACT indicators with metadata.
 Each indicator measures the proportion of febrile U5 children receiving
 ACT within a specific subpopulation.
 }
-\examples{
-act_dictionary()
-
-}
+\keyword{internal}

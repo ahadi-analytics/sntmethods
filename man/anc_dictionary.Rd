@@ -14,3 +14,4 @@ numerator_description, denominator_description, denominator_code.
 Returns a tibble describing all ANC indicators computed by
 \code{\link{calc_anc_dhs}}.
 }
+\keyword{internal}

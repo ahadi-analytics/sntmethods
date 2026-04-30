@@ -197,7 +197,7 @@ join_dhs_coords <- function(
 #' #   )
 #' # )
 #'
-#' @export
+#' @keywords internal
 calc_pfpr_dhs_core <- function(
   dhs_pr,
   survey_vars = list(
@@ -898,10 +898,7 @@ calc_pfpr_dhs <- function(
 #'   outcome_var, numerator_description, denominator_description,
 #'   denominator_code, data_level.
 #'
-#' @examples
-#' pfpr_dictionary()
-#'
-#' @export
+#' @keywords internal
 pfpr_dictionary <- function() {
   conds <- .pfpr_conditions()
   tibble::tibble(
@@ -1258,7 +1255,8 @@ pfpr_dictionary <- function() {
 #' @return SF object with aggregated PfPR by administrative level, including
 #'   geometry for mapping.
 #'
-#' @export
+#' @keywords internal
+#' @noRd
 aggregate_pfpr_admin <- function(
   cluster_results,
   shapefile,

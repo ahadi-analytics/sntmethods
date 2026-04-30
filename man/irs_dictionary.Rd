@@ -16,7 +16,4 @@ measures the proportion of households sprayed with residual insecticide
 in the 12 months preceding the survey, derived from the DHS Household
 Recode (HR) variable hv253.
 }
-\examples{
-irs_dictionary()
-
-}
+\keyword{internal}

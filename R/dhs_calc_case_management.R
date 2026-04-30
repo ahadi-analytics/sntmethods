@@ -502,10 +502,7 @@ calc_case_management_dhs <- function(
 #' @return Tibble with columns: indicator, indicator_code, indicator_title,
 #'   numerator_description, denominator_description, denominator_code.
 #'
-#' @examples
-#' case_management_dictionary()
-#'
-#' @export
+#' @keywords internal
 case_management_dictionary <- function() {
   conds <- .case_management_conditions()
   tibble::tibble(

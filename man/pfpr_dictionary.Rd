@@ -14,7 +14,4 @@ denominator_code, data_level.
 \description{
 Returns the dictionary of PfPR indicators.
 }
-\examples{
-pfpr_dictionary()
-
-}
+\keyword{internal}

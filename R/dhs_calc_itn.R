@@ -913,10 +913,7 @@ calc_itn_dhs <- function(
 #'   data_level, numerator_description, denominator_description,
 #'   denominator_code.
 #'
-#' @examples
-#' itn_dictionary()
-#'
-#' @export
+#' @keywords internal
 itn_dictionary <- function() {
   conds <- .itn_conditions()
   tibble::tibble(

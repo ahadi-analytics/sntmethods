@@ -51,7 +51,7 @@
 #'
 #' @seealso [calc_act_dhs()] for ACT treatment (step 4),
 #'   [calc_case_management_dhs()] for the full cascade
-#' @export
+#' @keywords internal
 calc_malaria_dx_dhs_core <- function(
   dhs_kr,
   survey_vars = list(
@@ -490,10 +490,7 @@ calc_malaria_dx_dhs <- function(
 #' @return Tibble with columns: indicator, indicator_code, indicator_title,
 #'   numerator_description, denominator_description, denominator_code.
 #'
-#' @examples
-#' malaria_dx_dictionary()
-#'
-#' @export
+#' @keywords internal
 malaria_dx_dictionary <- function() {
   conds <- .malaria_dx_conditions()
   tibble::tibble(

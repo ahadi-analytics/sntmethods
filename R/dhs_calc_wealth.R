@@ -149,7 +149,7 @@ calculate_dhs_gini <- function(
 #' @return A tibble with wealth quintile distributions and Gini coefficients
 #'   by administrative unit or cluster.
 #'
-#' @export
+#' @keywords internal
 calc_wealth_dhs_core <- function(
   dhs_hr,
   survey_vars = list(
@@ -717,10 +717,7 @@ calc_wealth_dhs_core <- function(
 #' @return Tibble with columns: indicator, indicator_code, indicator_title,
 #'   numerator_description, denominator_description, denominator_code.
 #'
-#' @examples
-#' wealth_dictionary()
-#'
-#' @export
+#' @keywords internal
 wealth_dictionary <- function() {
   conds <- .wealth_conditions()
   tibble::tibble(
@@ -1049,7 +1046,8 @@ calc_wealth_dhs <- function(
 #' @return SF object with aggregated wealth indicators by administrative level,
 #'   including geometry for mapping.
 #'
-#' @export
+#' @keywords internal
+#' @noRd
 aggregate_wealth_admin <- function(
   cluster_results,
   shapefile,

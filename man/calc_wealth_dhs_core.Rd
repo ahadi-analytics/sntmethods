@@ -53,3 +53,4 @@ Core function that calculates wealth quintile distributions and Gini
 coefficients using DHS household data. When GPS data and shapefile are
 provided, performs spatial joins to aggregate at administrative levels.
 }
+\keyword{internal}

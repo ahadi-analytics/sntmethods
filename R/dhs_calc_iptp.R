@@ -42,7 +42,7 @@
 #'   existing administrative levels, including IPTp 1+, 2+, 3+ coverage
 #'   and confidence intervals.
 #'
-#' @export
+#' @keywords internal
 calc_iptp_dhs_core <- function(
   dhs_ir,
   survey_vars = list(
@@ -1133,7 +1133,7 @@ calc_iptp_dhs <- function(
 #'
 #' @return Tibble with columns: indicator, indicator_code, indicator_title,
 #'   numerator_description, denominator_description, denominator_code.
-#' @export
+#' @keywords internal
 iptp_dictionary <- function() {
   conds <- .iptp_conditions()
   tibble::tibble(
@@ -1159,7 +1159,8 @@ iptp_dictionary <- function() {
 #'
 #' @return sf object with aggregated IPTp indicators by administrative level.
 #'
-#' @export
+#' @keywords internal
+#' @noRd
 aggregate_iptp_admin <- function(
   iptp_results,
   shapefile,

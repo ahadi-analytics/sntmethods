@@ -69,3 +69,4 @@ results. Otherwise uses existing administrative variables in the data.
 \details{
 Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/iptp_dhs.yml}
 }
+\keyword{internal}

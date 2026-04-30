@@ -14,7 +14,4 @@ denominator_code.
 \description{
 Returns the full dictionary of ITN indicators with metadata.
 }
-\examples{
-itn_dictionary()
-
-}
+\keyword{internal}

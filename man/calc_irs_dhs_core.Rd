@@ -51,3 +51,4 @@ using survey-weighted methods from DHS Household Records data.
 \seealso{
 \code{\link[=calc_irs_mbg]{calc_irs_mbg()}} for cluster-level MBG inputs
 }
+\keyword{internal}

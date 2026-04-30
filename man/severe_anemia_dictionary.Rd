@@ -13,7 +13,4 @@ numerator_description, denominator_description, denominator_code.
 \description{
 Returns the full dictionary of severe anemia indicators with metadata.
 }
-\examples{
-severe_anemia_dictionary()
-
-}
+\keyword{internal}

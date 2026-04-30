@@ -51,9 +51,9 @@
 #' )
 #' }
 #'
-#' @seealso [calc_csb_dhs_core()] for care-seeking behavior (step 1),
+#' @seealso [calc_csb_dhs()] for care-seeking behavior (step 1),
 #'   [calc_case_management_dhs()] for the full cascade
-#' @export
+#' @keywords internal
 calc_fever_dhs_core <- function(
   dhs_kr,
   survey_vars = list(
@@ -488,10 +488,7 @@ calc_fever_dhs <- function(
 #' @return Tibble with columns: indicator, indicator_code, indicator_title,
 #'   numerator_description, denominator_description, denominator_code.
 #'
-#' @examples
-#' fever_dictionary()
-#'
-#' @export
+#' @keywords internal
 fever_dictionary <- function() {
   conds <- .fever_conditions()
   tibble::tibble(

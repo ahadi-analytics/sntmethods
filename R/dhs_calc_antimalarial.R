@@ -51,7 +51,7 @@
 #'
 #' @seealso [calc_act_dhs()] for ACT-specific treatment (step 4),
 #'   [calc_case_management_dhs()] for the full cascade
-#' @export
+#' @keywords internal
 calc_antimalarial_dhs_core <- function(
   dhs_kr,
   survey_vars = list(
@@ -615,10 +615,7 @@ calc_antimalarial_dhs <- function(
 #' @return Tibble with columns: indicator, indicator_code, indicator_title,
 #'   numerator_description, denominator_description, denominator_code.
 #'
-#' @examples
-#' antimalarial_dictionary()
-#'
-#' @export
+#' @keywords internal
 antimalarial_dictionary <- function() {
   conds <- .antimalarial_conditions()
   tibble::tibble(

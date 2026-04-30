@@ -13,7 +13,4 @@ numerator_description, denominator_description, denominator_code.
 \description{
 Returns the dictionary of fever indicators with metadata.
 }
-\examples{
-fever_dictionary()
-
-}
+\keyword{internal}

@@ -58,3 +58,4 @@ to each child record before calculating U5MR at the specified admin level.
 \details{
 Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/u5mr_dhs.yml}
 }
+\keyword{internal}

@@ -78,6 +78,7 @@ fever_results <- calc_fever_dhs_core(
 
 }
 \seealso{
-\code{\link[=calc_csb_dhs_core]{calc_csb_dhs_core()}} for care-seeking behavior (step 1),
+\code{\link[=calc_csb_dhs]{calc_csb_dhs()}} for care-seeking behavior (step 1),
 \code{\link[=calc_case_management_dhs]{calc_case_management_dhs()}} for the full cascade
 }
+\keyword{internal}

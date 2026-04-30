@@ -16,7 +16,4 @@ measures the proportion of children under 5 who received seasonal malaria
 chemoprevention during the malaria season, derived from DHS Children's
 Recode (KR) variables hml43 (primary) or ml13g (fallback).
 }
-\examples{
-smc_dictionary()
-
-}
+\keyword{internal}

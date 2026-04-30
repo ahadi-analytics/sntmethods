@@ -16,7 +16,7 @@
 #'   dhs_smc, dhs_smc_low, dhs_smc_upp, dhs_n_smc_eligible, dhs_n_smc_received.
 #'
 #' @seealso [calc_smc_mbg()] for cluster-level MBG inputs
-#' @export
+#' @keywords internal
 calc_smc_dhs_core <- function(
   dhs_kr,
   survey_vars = list(
@@ -303,10 +303,7 @@ calc_smc_dhs <- function(
 #' @return Tibble with columns: indicator, indicator_code, indicator_title,
 #'   numerator_description, denominator_description, denominator_code.
 #'
-#' @examples
-#' smc_dictionary()
-#'
-#' @export
+#' @keywords internal
 smc_dictionary <- function() {
   conds <- .smc_conditions()
   tibble::tibble(

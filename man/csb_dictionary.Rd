@@ -15,7 +15,4 @@ Returns the full dictionary of CSB indicators with metadata.
 Each indicator measures the proportion of febrile U5 children seeking
 care from a specific source type.
 }
-\examples{
-csb_dictionary()
-
-}
+\keyword{internal}

@@ -14,3 +14,4 @@ numerator_description, denominator_description, denominator_code.
 Returns a tibble describing all IPTp indicators computed by
 \code{\link{calc_iptp_dhs}}.
 }
+\keyword{internal}

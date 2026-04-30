@@ -23,7 +23,7 @@
 #'   `dhs_epi_<vaccine>_low`, `dhs_epi_<vaccine>_upp`. Plus `dhs_n_epi_eligible`.
 #'
 #' @seealso [calc_epi_mbg()] for cluster-level MBG inputs
-#' @export
+#' @keywords internal
 calc_epi_dhs_core <- function(
   dhs_kr,
   indicators = c("bcg", "dpt3", "measles1", "fully_vaccinated"),
@@ -648,10 +648,7 @@ calc_epi_dhs <- function(
 #' @return Tibble with columns: indicator, indicator_code, indicator_title,
 #'   numerator_description, denominator_description, denominator_code.
 #'
-#' @examples
-#' epi_dictionary()
-#'
-#' @export
+#' @keywords internal
 epi_dictionary <- function() {
   conds <- .epi_conditions()
   tibble::tibble(

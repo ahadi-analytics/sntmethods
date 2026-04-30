@@ -56,3 +56,4 @@ methods from DHS Individual Recode data.
 \seealso{
 \code{\link[=calc_anc_mbg]{calc_anc_mbg()}} for cluster-level MBG inputs
 }
+\keyword{internal}

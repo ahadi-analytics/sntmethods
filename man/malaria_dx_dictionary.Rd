@@ -14,7 +14,4 @@ numerator_description, denominator_description, denominator_code.
 Returns the dictionary of malaria diagnostic testing indicators with
 metadata.
 }
-\examples{
-malaria_dx_dictionary()
-
-}
+\keyword{internal}

@@ -23,7 +23,7 @@
 #'   dhs_irs, dhs_irs_low, dhs_irs_upp, dhs_n_households_irs, dhs_n_sprayed.
 #'
 #' @seealso [calc_irs_mbg()] for cluster-level MBG inputs
-#' @export
+#' @keywords internal
 calc_irs_dhs_core <- function(
   dhs_hr,
   survey_vars = list(
@@ -300,10 +300,7 @@ calc_irs_dhs <- function(
 #' @return Tibble with columns: indicator, indicator_code, indicator_title,
 #'   numerator_description, denominator_description, denominator_code.
 #'
-#' @examples
-#' irs_dictionary()
-#'
-#' @export
+#' @keywords internal
 irs_dictionary <- function() {
   conds <- .irs_conditions()
   tibble::tibble(

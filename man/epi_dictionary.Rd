@@ -15,7 +15,4 @@ Returns the dictionary of EPI (Expanded Programme on Immunization)
 indicators with metadata. Not all indicators will be available in every
 survey; availability depends on the DHS variables present in the dataset.
 }
-\examples{
-epi_dictionary()
-
-}
+\keyword{internal}
