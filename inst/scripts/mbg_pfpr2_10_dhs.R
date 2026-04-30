@@ -147,6 +147,18 @@ pfpr_cluster <- pfpr_cluster |>
 pfpr_sf <- pfpr_cluster |>
   sf::st_as_sf(coords = c("lon", "lat"), crs = 4326, remove = FALSE)
 
+# Pull cluster coordinates from pfpr_sf in one shot, so this block is
+# self-contained and can be re-run on its own.
+pfpr_coords <- sf::st_coordinates(pfpr_sf)
+
+pfpr_dt <- data.table::data.table(
+  cluster_id = pfpr_sf$cluster_id,
+  indicator  = pfpr_sf$n_positive,
+  samplesize = pfpr_sf$n_tested,
+  x = pfpr_coords[, 1],
+  y = pfpr_coords[, 2]
+)
+
 ## ---------------------------------------------------------------------------##
 # 5) Align CRS ----------------------------------------------------------------
 ## ---------------------------------------------------------------------------##
@@ -171,7 +183,7 @@ adm2_vect <- terra::vect(adm2_sf)
 pfpr_dt <- sntmethods::prep_pfpr_mbg(
   dhs_pr      = pr,
   gps_data    = ge,
-  indicator   = "mic",      # microscopy-based PfPR (matches script intent)
+  indicator   = "mic",      # microscopy-based PfPR
   age_min     = 24,         # PfPR2-10 lower bound (months)
   age_max     = 119,        # PfPR2-10 upper bound (months)
   survey_vars = list(
@@ -187,7 +199,7 @@ pfpr_dt <- sntmethods::prep_pfpr_mbg(
     lat     = "LATNUM",
     lon     = "LONGNUM"
   )
-)
+) |> data.table::as.data.table()
 
 # --- Form B: concise (registered dictionary code; defaults for all vars) ---
 # pfpr_dt <- sntmethods::prep_pfpr_mbg(
@@ -197,21 +209,48 @@ pfpr_dt <- sntmethods::prep_pfpr_mbg(
 # )
 
 ## ---------------------------------------------------------------------------##
+# Alternative all-in-one: fit_mbg_indicator() --------------------------------
+## ---------------------------------------------------------------------------##
+# `fit_mbg_indicator()` is a generic, low-level wrapper around mbg::
+# MbgModelRunner. It takes the cluster table + population raster + any
+# subset of admin shapefiles and returns a comprehensive list:
+#   - $cluster_data, $cell_predictions (mean/lower/upper SpatRasters),
+#   - $admin (long-format tibble per admin level), $model_runner,
+#   - $id_raster, $aggregation_tables, $saved_files, $cache_files,
+#   - $inputs (all parameters echoed back).
+#
+# country_iso3 / survey_year / source_label are optional annotations.
+# When NULL they are dropped from filenames and written as NA in
+# the admin tibble. When output_dir is NULL nothing is written to disk.
+# When cache_dir is set, the prediction matrix is cached so re-runs skip
+# the (expensive) INLA fit.
+#
+# Sections 6-8 below are the manual equivalent of this single call.
+#
+fit <- sntmethods::fit_mbg_indicator(
+  cluster_data        = pfpr_dt,
+  indicator_name      = "pfpr_mic_2_10",
+  population_raster   = pop_rast,
+  adm1_sf             = adm1_sf,
+  adm2_sf             = adm2_sf,
+  primary_level       = "adm2",
+  output_levels       = c("adm1", "adm2")
+  # country_iso3        = country_iso3,
+  # survey_year         = survey_year,
+  # source_label        = survey_type,
+  # output_dir          = path_output,            # set NULL for no disk writes
+  # cache_dir           = fs::path(path_output, "cache")
+)
+
+# fit$cell_predictions$mean   # mean PfPR2-10 SpatRaster
+# fit$admin$adm2              # long-format adm2 tibble
+# fit$saved_files             # paths to written rasters / qs2 / xlsx
+
+## ---------------------------------------------------------------------------##
 # 6) Prepare MBG inputs -------------------------------------------------------
 ## ---------------------------------------------------------------------------##
 
 cli::cli_h2("Building MBG inputs")
-
-coords <- sf::st_coordinates(pfpr_sf)
-
-pfpr_dt <- data.table::data.table(
-  cluster_id = pfpr_sf$cluster_id,
-  indicator = pfpr_sf$n_positive,
-  samplesize = pfpr_sf$n_tested,
-  x = coords[, 1],
-  y = coords[, 2]
-) |>
-  _[samplesize > 0]
 
 # build ID raster
 id_raster <- mbg::build_id_raster(
