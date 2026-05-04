@@ -9,14 +9,22 @@ cli::cli_h1("Process DHS Data")
 country_iso2 <- "TG"
 country_iso3 <- "tgo"
 
-admin_levels <- c("adm1", "adm2")
+# Restrict the design-based (survey-weighted) calc_*_dhs() outputs to
+# adm1 only. DHS / MIS sample designs are stratified by region and the
+# published weights (v005 / hv005) are constructed to be representative
+# at adm0 and adm1 (region). Going below that -- e.g. adm2 -- breaks
+# the design assumption: clusters per adm2 are sparse, weights are no
+# longer self-weighting within the stratum, and direct estimates carry
+# unstable variance / wide CIs that are not statistically defensible.
+# Sub-region estimates should be produced via the MBG pipeline
+# (fit_mbg_indicator) rather than direct survey aggregation.
+admin_levels <- c("adm1")
 
 path_dhs_parquet <- here::here(sntmethods::ahadi_path(), "01_data/parquet")
 
 paths <-
   sntutils::setup_project_paths(
-base_path = "/Users/mohamedyusuf/Library/CloudStorage/OneDrive-SharedLibraries-AppliedHealthAnalyticsforDeliveryandInnovationInc/Togo SNT 2025 - 2025_SNT/tgo-snt-2025",
-    # base_path = Sys.getenv("AHADI_ONEDRIVE_PROJECT"),
+    base_path = Sys.getenv("AHADI_ONEDRIVE_PROJECT"),
     quiet = TRUE
   )
 
@@ -36,15 +44,12 @@ survey_years_dhs <- sntmethods::dhs_read(
   dplyr::pull(DHSYEAR) |>
   unique()
 
-# survey_years_dhs <- survey_years_dhs[1]
-# survey_years_dhs <- NULL
 survey_years_mis <- sntmethods::dhs_read(
   path = path_dhs_parquet,
   file_type = "GE",
   survey_type = "MIS",
   country_code = country_iso2
 ) |>
-  dplyr::filter(DHSYEAR == 2017) |>
   dplyr::pull(DHSYEAR) |>
   unique()
 
@@ -332,13 +337,23 @@ all_survey_results <- purrr::imap(all_bundles, function(dhs, year_label) {
   calc_dhs_indicators(dhs, shp_admin, admin_levels)
 })
 
-# Combine across surveys: bind_rows within each admin level
+# Combine across surveys: bind_rows within each admin level. Drop rows
+# where the numerator is missing OR zero -- those are indicator/admin
+# slices the upstream calc was unable to compute (e.g. h22 missing in
+# early-DHS surveys) or where no events were observed, so they carry
+# no information and just inflate the table.
 dhs_output <- purrr::map(
   purrr::set_names(admin_levels),
   function(lvl) {
-    purrr::map_df(all_survey_results, function(survey_res) {
+    out <- purrr::map_df(all_survey_results, function(survey_res) {
       if (lvl %in% names(survey_res)) survey_res[[lvl]] else NULL
     })
+    if ("numerator" %in% names(out)) {
+      out <- dplyr::filter(
+        out, !is.na(.data$numerator) & .data$numerator != 0
+      )
+    }
+    out
   }
 )
 
