@@ -26,156 +26,400 @@
 
 
 # ==============================================================================
+# PACKAGE CHECKS
+# ==============================================================================
+
+#' Check that a required package is installed
+#' @keywords internal
+.check_pkg <- function(pkg, call_from = NULL) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    where <- if (!is.null(call_from)) glue::glue(" (called from {call_from})") else ""
+    cli::cli_abort(c(
+      "Required package {.pkg {pkg}} is not installed{where}.",
+      "i" = "Install with: {.code install.packages('{pkg}')}"
+    ))
+  }
+  invisible(TRUE)
+}
+
+#' Warn about missing optional packages without aborting
+#' @keywords internal
+.warn_pkg <- function(pkg) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    cli::cli_warn(c(
+      "Optional package {.pkg {pkg}} is not installed.",
+      "i" = "Some functionality may be unavailable.",
+      "i" = "Install with: {.code install.packages('{pkg}')}"
+    ))
+    return(FALSE)
+  }
+  TRUE
+}
+
+#' Upfront soft-check for all packages the pipeline may use
+#' @keywords internal
+.check_pipeline_deps <- function(steps) {
+  # Always required
+  for (pkg in c("dplyr", "purrr", "ggplot2", "glue", "cli",
+                "sntutils", "zoo", "scales", "viridisLite")) {
+    .check_pkg(pkg, "run_seasonality_pipeline")
+  }
+  # Step-specific optional packages — warn but don't abort yet;
+  # hard abort happens inside the step if the package is truly missing.
+  if (any(c("seasonality", "blocks", "smc_maps") %in% steps)) {
+    .warn_pkg("sf")
+    .warn_pkg("qs2")
+  }
+  if ("graphs" %in% steps || "case_rain_plots" %in% steps) {
+    .warn_pkg("lubridate")
+    .warn_pkg("tidyr")
+    .warn_pkg("cowplot")
+    .warn_pkg("patchwork")
+  }
+}
+
+
+# ==============================================================================
 # MASTER FUNCTION
 # ==============================================================================
 
 #' Run the Full Malaria Seasonality Analysis Pipeline
 #'
-#' Executes the complete seasonality analysis workflow in a single call,
-#' covering heatmap visualisation, rolling-window seasonality classification,
-#' 3m/4m/5m block concentration analysis, rainfall-vs-cases overlay graphs,
-#' SMC eligibility/timing maps, and crude cases vs rainfall dual-axis plots.
+#' @description
+#' A single-call pipeline that characterises malaria transmission seasonality
+#' for a given country using processed rainfall and DHIS2 case data.  It
+#' produces a complete set of publication-ready figures and versioned Excel/qs2
+#' tables covering six analytical steps:
 #'
-#' Each step is optional via \code{steps}. Steps that depend on earlier steps
-#' read results from memory when available, and fall back to reading saved
-#' files from disk when not.
+#' \enumerate{
+#'   \item \strong{Heatmap} — monthly distribution of rainfall or cases as a
+#'     percentage of the annual total, displayed as a district-by-time tile plot.
+#'   \item \strong{Seasonality classification} — rolling 4-month windows are
+#'     tested against an annual threshold to classify each district-year as
+#'     seasonal or not, producing binary and cumulative choropleth maps.
+#'   \item \strong{Block concentration analysis} — identifies the 2-, 3-, 4-,
+#'     and 5-month windows that capture the highest proportion of annual
+#'     rainfall or cases, summarised per district across all years.
+#'   \item \strong{Rolling overlay graphs} — per-province faceted line plots
+#'     overlaying rainfall and case seasonality percentages over time.
+#'   \item \strong{SMC eligibility and timing maps} — choropleth maps showing
+#'     the optimal SMC start month and coverage per district for each cycle
+#'     length, plus minimum-best-block summaries.
+#'   \item \strong{Cases vs rainfall plots} — dual-axis time-series plots
+#'     (both median seasonal profile and crude monthly series) of confirmed
+#'     cases against total rainfall, one faceted figure per province.
+#' }
 #'
-#' @param iso3 Character. ISO3 country code in lowercase (e.g. \code{"gha"}).
-#' @param adm0_name Character. Country display name for plot titles.
+#' Steps that depend on earlier steps read results from memory when available,
+#' and fall back to reading previously saved files from disk when not — so you
+#' can re-run individual steps without re-running the whole pipeline.
+#'
+#' @section Supplying paths (choose one of three options):
+#' The pipeline needs to know where to find processed rainfall, DHIS2, and
+#' shapefile data, and where to write outputs.  Supply paths using \strong{one}
+#' of the following three options — they are checked in order and the first
+#' non-NULL option wins:
+#'
+#' \strong{Option A — sntutils paths object (recommended):}
+#' \preformatted{
+#' paths <- sntutils::setup_project_paths()
+#' run_seasonality_pipeline(..., paths = paths)
+#' }
+#' All input and output directories are resolved automatically from the
+#' standard SNT project folder structure.
+#'
+#' \strong{Option B — base path only:}
+#' \preformatted{
+#' run_seasonality_pipeline(..., base_path = Sys.getenv("MY_PROJECT_DIR"))
+#' }
+#' \code{sntutils::setup_project_paths()} is called internally on
+#' \code{base_path}. Use this when you have not yet called
+#' \code{setup_project_paths()} in your session.
+#'
+#' \strong{Option C — explicit directory paths:}
+#' \preformatted{
+#' run_seasonality_pipeline(
+#'   ...,
+#'   climate_dir   = "path/to/climate/processed",
+#'   dhis2_dir     = "path/to/dhis2/processed",
+#'   admin_shp_dir = "path/to/shapefiles"   # only needed for smc_maps
+#' )
+#' }
+#' Outputs are written under \code{output_dir} (default:
+#' \code{here::here("outputs")}). Use Option C when working outside a standard
+#' SNT project structure.
+#'
+#' @section Input data requirements:
+#' Both the rainfall and DHIS2 files must be \code{.xlsx} files named
+#' \code{{iso3}_rainfall_processed.xlsx} and \code{{iso3}_dhis2_processed.xlsx}
+#' respectively, located in the \code{processed/} subfolder of the climate and
+#' DHIS2 directories.  At minimum they must contain columns for admin level 1,
+#' admin level 2, year, month, and the metric of interest.  Column names can be
+#' remapped via the \code{*_var} arguments if they differ from the defaults.
+#'
+#' @section Choosing max_non_seasonal_years:
+#' This is the only required argument with no default.  It controls how
+#' strictly a district must be seasonal across the full study period to be
+#' classified as \emph{Seasonal}.  The formula is:
+#' \preformatted{max_non_seasonal_years = total_years - min_seasonal_years}
+#' For example, with 12 years of data and a rule of "seasonal in at least 10
+#' out of 12 years", use \code{max_non_seasonal_years = 2}.  A value of
+#' \code{0} means every single year must show a seasonal peak.
+#'
+#' @param iso3 Character. ISO3 country code in \strong{lowercase}
+#'   (e.g. \code{"gin"} for Guinea, \code{"civ"} for Côte d'Ivoire).
+#'   Used to construct input filenames and output file prefixes.
+#' @param adm0_name Character. Country display name used in plot titles and
+#'   subtitles (e.g. \code{"Guinea"}).
 #' @param paths Named list from \code{sntutils::setup_project_paths()}.
-#'   When supplied, all output is routed through \code{paths$val_fig} and
-#'   \code{paths$val_tbl}. The \code{output_dir} argument is ignored.
-#'   Default: \code{NULL}.
-#' @param base_path Character or \code{NULL}. Base project directory passed to
-#'   \code{sntutils::setup_project_paths()}. Ignored when \code{paths} is
-#'   supplied. Default: \code{NULL}.
-#' @param climate_dir Character or \code{NULL}. Direct path to the processed
-#'   climate/rainfall folder. Only used when neither \code{paths} nor
-#'   \code{base_path} is supplied. Default: \code{NULL}.
-#' @param dhis2_dir Character or \code{NULL}. Direct path to the processed
-#'   DHIS2 folder. Only used when neither \code{paths} nor \code{base_path}
-#'   is supplied. Default: \code{NULL}.
+#'   When supplied, all input and output paths are resolved automatically.
+#'   Default: \code{NULL}. See the \emph{Supplying paths} section above.
+#' @param base_path Character or \code{NULL}. Root project directory passed to
+#'   \code{sntutils::setup_project_paths()} internally. Only used when
+#'   \code{paths} is \code{NULL}. Default: \code{NULL}.
+#' @param climate_dir Character or \code{NULL}. Direct path to the folder
+#'   containing \code{{iso3}_rainfall_processed.xlsx}. Only used when both
+#'   \code{paths} and \code{base_path} are \code{NULL}. Default: \code{NULL}.
+#' @param dhis2_dir Character or \code{NULL}. Direct path to the folder
+#'   containing \code{{iso3}_dhis2_processed.xlsx}. Only used when both
+#'   \code{paths} and \code{base_path} are \code{NULL}. Default: \code{NULL}.
 #' @param admin_shp_dir Character or \code{NULL}. Direct path to the processed
-#'   shapefiles folder. Needed for \code{"smc_maps"} when using direct paths.
-#'   Default: \code{NULL}.
-#' @param type Character. Data type(s) to analyse. One of \code{"both"}
-#'   (default), \code{"rainfall"}, or \code{"cases"}. The \code{"graphs"} step
-#'   requires \code{"both"} and is skipped otherwise.
-#' @param steps Character vector. Pipeline steps to run. Any subset of
+#'   shapefiles folder. Only required when running the \code{"smc_maps"} step
+#'   with Option C paths. Default: \code{NULL}.
+#' @param type Character. Which data to analyse. One of \code{"both"}
+#'   (default, runs rainfall and cases), \code{"rainfall"}, or \code{"cases"}.
+#'   Note: the \code{"graphs"} step requires \code{"both"} and is automatically
+#'   skipped if only one type is selected.
+#' @param steps Character vector. Which pipeline steps to run. Any subset of
 #'   \code{c("heatmap", "seasonality", "blocks", "graphs", "smc_maps",
-#'   "case_rain_plots")}. Default: all six steps.
-#' @param s_year Integer or \code{NULL}. First year to include. Default:
-#'   \code{NULL} (all available years).
-#' @param e_year Integer or \code{NULL}. Last year to include. Default:
-#'   \code{NULL} (all available years).
-#' @param adm1_var Character. Column name for admin level 1. Default:
-#'   \code{"adm1"}.
-#' @param adm2_var Character. Column name for admin level 2. Default:
-#'   \code{"adm2"}.
-#' @param adm3_var Character or \code{NULL}. Column name for admin level 3.
-#'   When supplied, adm3 is carried through the block analysis outputs
-#'   (summary, detailed, and frequency tables). Requires the column to exist
-#'   in the source rainfall/DHIS2 file. Default: \code{NULL}.
-#' @param year_var Character. Column name for year. Default: \code{"year"}.
-#' @param month_var Character. Column name for month (1-12). Default:
-#'   \code{"month"}.
-#' @param value_var_rainfall Character or \code{NULL}. Rainfall metric column.
-#'   Default: \code{NULL} (uses \code{"mean_rainfall_mm"}).
-#' @param value_var_cases Character or \code{NULL}. Cases metric column.
-#'   Default: \code{NULL} (uses \code{"conf"}).
-#' @param adm_level Character. Heatmap y-axis level. One of \code{"adm1"}
-#'   (default) or \code{"adm2"}.
-#' @param viridis_option Character. Viridis colour palette. Default:
-#'   \code{"viridis"}.
-#' @param x_breaks_by Numeric. Heatmap x-axis tick interval in years.
-#'   Default: \code{0.5}.
-#' @param analysis_start_month Integer (1-12). Month to begin rolling windows.
-#'   Default: \code{1}.
-#' @param seasonality_threshold Numeric. Percentage of annual total a 4-month
-#'   window must reach to be classified as seasonal. Default: \code{60}.
-#' @param max_non_seasonal_years Integer. Maximum non-seasonal years a location
-#'   may have and still be classified as Seasonal. \strong{Required.}
+#'   "case_rain_plots")}. Steps are always executed in the order listed above
+#'   regardless of the order supplied here. Default: all six steps.
+#' @param s_year Integer or \code{NULL}. First calendar year to include in the
+#'   analysis. Rows with \code{year < s_year} are dropped. Default: \code{NULL}
+#'   (uses all available years).
+#' @param e_year Integer or \code{NULL}. Last calendar year to include.
+#'   Default: \code{NULL} (uses all available years).
+#' @param adm1_var Character. Name of the admin level 1 column in the source
+#'   files. Default: \code{"adm1"}.
+#' @param adm2_var Character. Name of the admin level 2 (district) column.
+#'   Default: \code{"adm2"}.
+#' @param adm3_var Character or \code{NULL}. Name of the admin level 3 column.
+#'   When supplied, adm3 is joined into the block analysis output tables
+#'   (summary, detailed, frequency). The column must exist in both source files.
+#'   Default: \code{NULL}.
+#' @param year_var Character. Name of the year column. Default: \code{"year"}.
+#' @param month_var Character. Name of the month column (integer 1–12).
+#'   Default: \code{"month"}.
+#' @param value_var_rainfall Character or \code{NULL}. Rainfall metric column
+#'   to use in the seasonality and block analyses. Default: \code{NULL}
+#'   (uses \code{"mean_rainfall_mm"}).
+#' @param value_var_cases Character or \code{NULL}. Cases metric column to use.
+#'   Should match \code{case_stratification}: e.g. use \code{"conf_ov5"} when
+#'   \code{case_stratification = "ov5"}. Default: \code{NULL} (uses
+#'   \code{"conf"}).
+#' @param adm_level Character. Y-axis grouping level for the heatmap. One of
+#'   \code{"adm2"} (default) or \code{"adm1"}. Automatically switched to
+#'   \code{"adm1"} when more than 40 adm2 units are present.
+#' @param viridis_option Character. Viridis palette for the heatmap fill scale.
+#'   One of \code{"viridis"} (default), \code{"magma"}, \code{"plasma"},
+#'   \code{"inferno"}, or \code{"cividis"}.
+#' @param x_breaks_by Numeric. Interval between x-axis tick marks on the
+#'   heatmap, in years. Default: \code{0.5} (every 6 months).
+#' @param analysis_start_month Integer (1–12). Calendar month at which rolling
+#'   windows begin. Default: \code{1} (January). Change to \code{7} for
+#'   southern-hemisphere countries where the rainy season spans the calendar
+#'   year boundary.
+#' @param seasonality_threshold Numeric (0–100). Minimum percentage of the
+#'   annual total that a 4-month window must contain to be counted as a
+#'   seasonal peak. Default: \code{60}.
+#' @param max_non_seasonal_years Integer. \strong{Required — no default.}
+#'   Maximum number of years in which a district may fail to show a seasonal
+#'   peak and still be classified as Seasonal overall.
 #'   Formula: \code{total_years - min_seasonal_years}.
-#' @param min_years_required Integer. Minimum years of data to run the
-#'   seasonality step. Default: \code{6}.
+#'   Example: 12 years of data, require seasonal in \eqn{\geq} 10 years
+#'   \eqn{\Rightarrow} \code{max_non_seasonal_years = 2}.
+#' @param min_years_required Integer. Minimum number of years of data needed
+#'   to run the seasonality step. An error is thrown if fewer years are found
+#'   after applying \code{s_year}/\code{e_year} filters. Default: \code{6}.
 #' @param n_cumulative_maps Integer. Number of cumulative threshold maps to
-#'   generate. Auto-generates thresholds counting down from \code{n_years - 1}.
-#'   For example, with 12 years of data and \code{n_cumulative_maps = 4}:
-#'   \{11\}, \{11,10\}, \{11,10,9\}, \{11,10,9,8\}. Default: \code{4}.
+#'   produce in addition to the binary classification map. Maps count down
+#'   from \code{n_years - 1} seasonal years. For example, with 12 years and
+#'   \code{n_cumulative_maps = 4} the thresholds are \{11\}, \{11,10\},
+#'   \{11,10,9\}, \{11,10,9,8\}. Default: \code{4}.
 #' @param cumulative_thresholds List of integer vectors or \code{NULL}.
-#'   Manual override for cumulative threshold maps. Each vector contains the
-#'   \code{SeasonalYears} values to classify as Seasonal at that threshold.
-#'   When \code{NULL} (default), auto-generated from \code{n_cumulative_maps}.
+#'   Manual override for the cumulative threshold maps. Each vector element
+#'   specifies which \code{SeasonalYears} values are coloured as Seasonal on
+#'   that map. When \code{NULL}, auto-generated from \code{n_cumulative_maps}.
 #'   Example: \code{list(c(11), c(11, 10), c(11, 10, 9))}.
-#' @param smc_eligible_districts Character vector or \code{NULL}. Manual SMC
-#'   eligibility list. Default \code{NULL} auto-derives from the seasonality
-#'   classification. Default: \code{NULL}.
-#' @param smc_additional_districts Character vector or \code{NULL}. Districts
-#'   to add to the derived SMC list. Default: \code{NULL}.
-#' @param smc_remove_districts Character vector or \code{NULL}. Districts to
-#'   remove from the derived SMC list. Applied last. Default: \code{NULL}.
-#' @param case_stratification Character. Age stratification for cases data.
-#'   One of \code{"ov5"} (over 5, default), \code{"u5"} (under 5), or
-#'   \code{"all"} (all ages). Controls the output subfolder and file prefix
-#'   so that multiple stratifications can be run back to back without
-#'   overwriting each other. Pair with \code{value_var_cases} to point at
-#'   the correct column (e.g. \code{value_var_cases = "conf_u5"} when
-#'   \code{case_stratification = "u5"}).
-#' @param case_var_ov5 Character. Column name for confirmed cases over 5 years.
-#'   Default: \code{"conf_ov5"}.
-#' @param case_var_u5 Character. Column name for confirmed cases under 5 years.
-#'   Default: \code{"conf_u5"}.
-#' @param rainfall_total_var Character. Column name for total rainfall (mm).
-#'   Default: \code{"total_rainfall_mm"}.
-#' @param case_rain_s_date Character or \code{NULL}. Start date filter for
-#'   case_rain_plots in \code{"YYYY-MM-DD"} format. Default: \code{NULL}
-#'   (uses \code{s_year} if supplied, otherwise all data).
-#' @param case_rain_e_date Character or \code{NULL}. End date filter for
-#'   case_rain_plots. Default: \code{NULL}.
-#' @param panels_per_row Integer. Default number of district panels per row in
-#'   the cases vs rainfall faceted plots. Automatically scaled up for regions
-#'   with many districts (≥9 → 4, ≥15 → 5, ≥30 → 6) so no plot exceeds
-#'   ~30 inches wide. Default: \code{3}.
-#' @param output_dir Character. Root output folder. Only used for Option C
-#'   (direct paths — no sntutils). Default: \code{here::here("outputs")}.
-#' @param dpi Numeric. Resolution for all saved plots. Default: \code{400}.
-#'
-#' @return A named list (invisibly):
-#'   \describe{
-#'     \item{\code{heatmap}}{Named by type: \code{plot}, \code{data},
-#'       \code{output_path}.}
-#'     \item{\code{seasonality}}{Named by type: \code{detailed_results},
-#'       \code{yearly_summary}, \code{location_summary}, \code{maps}.}
-#'     \item{\code{blocks}}{Named by type: \code{summary}, \code{detailed},
-#'       \code{frequency}.}
-#'     \item{\code{graphs}}{Named by province: ggplot objects.}
-#'     \item{\code{smc_maps}}{Named by type: \code{timing_maps},
-#'       \code{coverage_maps}, \code{eligible}.}
-#'     \item{\code{case_rain_plots}}{Named list with \code{median} and
-#'       \code{crude}, each containing named ggplot objects per adm1.}
+#' @param smc_eligible_districts Character vector or \code{NULL}. An explicit
+#'   list of adm2 district names to treat as SMC-eligible, bypassing the
+#'   derived classification. Only used when \code{smc_eligibility_source =
+#'   "manual"}. Default: \code{NULL}.
+#' @param smc_additional_districts Character vector or \code{NULL}. District
+#'   names to add to the derived eligible list after derivation. Applied before
+#'   \code{smc_remove_districts}. Default: \code{NULL}.
+#' @param smc_remove_districts Character vector or \code{NULL}. District names
+#'   to remove from the eligible list. Applied last, after additions.
+#'   Default: \code{NULL}.
+#' @param smc_eligibility_source Character. Determines which seasonality
+#'   classification is used to derive SMC-eligible districts. One of:
+#'   \itemize{
+#'     \item \code{"rainfall"} (default) — districts classified as Seasonal
+#'       by the \strong{rainfall} analysis. Used for both the rainfall and
+#'       cases SMC maps. This is the standard field practice.
+#'     \item \code{"cases"} — districts classified as Seasonal by the
+#'       \strong{cases} analysis.
+#'     \item \code{"manual"} — \code{smc_eligible_districts} is used verbatim.
+#'       Requires \code{smc_eligible_districts} to be non-\code{NULL}.
 #'   }
+#' @param case_stratification Character. Age group for cases outputs. Controls
+#'   the output subfolder name and file prefixes so that multiple
+#'   stratifications can be run back-to-back without overwriting each other.
+#'   One of \code{"ov5"} (over 5, default), \code{"u5"} (under 5), or
+#'   \code{"all"} (all ages). \strong{Remember to also set}
+#'   \code{value_var_cases} to the matching column (e.g.
+#'   \code{value_var_cases = "conf_u5"} when \code{case_stratification = "u5"}).
+#' @param case_var_ov5 Character. Column name for confirmed over-5 cases in the
+#'   DHIS2 file. Used by the \code{"case_rain_plots"} step only. Default:
+#'   \code{"conf_ov5"}.
+#' @param case_var_u5 Character. Column name for confirmed under-5 cases.
+#'   Default: \code{"conf_u5"}.
+#' @param rainfall_total_var Character. Column name for total monthly rainfall
+#'   (mm) in the rainfall file. Used by \code{"case_rain_plots"} only. Default:
+#'   \code{"total_rainfall_mm"}.
+#' @param case_rain_s_date Character or \code{NULL}. Start date for the
+#'   \strong{median} cases vs rainfall plots, in \code{"YYYY-MM-DD"} format
+#'   (e.g. \code{"2015-01-01"}). Also used as the fallback start date for the
+#'   crude plots when \code{crude_s_date} is not supplied. Default: \code{NULL}
+#'   (uses \code{s_year} if provided, otherwise all available data).
+#' @param case_rain_e_date Character or \code{NULL}. End date for the median
+#'   plots, \code{"YYYY-MM-DD"} format. Default: \code{NULL}.
+#' @param crude_s_date Character or \code{NULL}. \strong{Independent} start
+#'   date for the crude (time-series) cases vs rainfall plots only, in
+#'   \code{"YYYY-MM-DD"} format. Use this when rainfall and case datasets cover
+#'   different year ranges and you need both series to begin at the same point
+#'   — for example, if rainfall starts in 2014 but cases only from 2020, set
+#'   \code{crude_s_date = "2020-01-01"}. When supplied, fully overrides
+#'   \code{case_rain_s_date} for the crude plots. Default: \code{NULL}.
+#' @param crude_e_date Character or \code{NULL}. Independent end date for the
+#'   crude plots, \code{"YYYY-MM-DD"} format. Default: \code{NULL}.
+#' @param panels_per_row Integer. Default number of district panels per row in
+#'   the faceted cases vs rainfall plots. Automatically scaled up for provinces
+#'   with many districts (\eqn{\geq}9 \eqn{\rightarrow} 4, \eqn{\geq}15
+#'   \eqn{\rightarrow} 5, \eqn{\geq}30 \eqn{\rightarrow} 6). Default: \code{3}.
+#' @param output_dir Character. Root output folder used only with Option C
+#'   (direct paths). Figures are written to \code{output_dir/figures} and
+#'   tables to \code{output_dir/tables}. Ignored when \code{paths} or
+#'   \code{base_path} is supplied. Default: \code{here::here("outputs")}.
+#' @param include_date Logical. Whether to append a date stamp to saved output
+#'   filenames via \code{sntutils::write_snt_data()}. Enables versioning so
+#'   re-runs do not overwrite previous outputs. Default: \code{TRUE}.
+#' @param n_saved Integer. Maximum number of dated versions of each output
+#'   file to retain on disk. Older versions beyond this limit are pruned
+#'   automatically. Default: \code{3}.
+#' @param dpi Numeric. Resolution (dots per inch) for all saved PNG figures.
+#'   Default: \code{400}.
+#'
+#' @return A named list returned invisibly. Each element corresponds to a step
+#'   that was run:
+#'   \describe{
+#'     \item{\code{heatmap}}{Named by type (\code{"rainfall"}, \code{"cases"}).
+#'       Each element is a list with \code{plot} (ggplot object),
+#'       \code{data} (prepared data frame), and \code{output_path} (file path).}
+#'     \item{\code{seasonality}}{Named by type. Each element contains
+#'       \code{detailed_results}, \code{yearly_summary},
+#'       \code{location_summary}, and \code{maps}.}
+#'     \item{\code{blocks}}{Named by type. Each element contains
+#'       \code{summary}, \code{detailed}, and \code{frequency} data frames.}
+#'     \item{\code{graphs}}{Named list of ggplot objects, one per province,
+#'       plus \code{.summary} for the all-provinces overview.}
+#'     \item{\code{smc_maps}}{Named by type. Each element contains
+#'       \code{timing_maps}, \code{coverage_maps}, \code{eligible} (character
+#'       vector of eligible district names), \code{min_best_table}, and
+#'       \code{min_best_maps}.}
+#'     \item{\code{case_rain_plots}}{A list with elements \code{median} and
+#'       \code{crude}, each a named list of ggplot objects per province.}
+#'   }
+#'   All figures are also saved to disk. Tables are saved as versioned
+#'   \code{.xlsx} and \code{.qs2} files.
 #'
 #' @examples
-#' # Full pipeline — paths object already set up
-#' # paths <- sntutils::setup_project_paths()
-#' # run_seasonality_pipeline(
-#' #   iso3 = "gha", adm0_name = "Ghana",
-#' #   paths = paths, max_non_seasonal_years = 4
-#' # )
+#' \dontrun{
+#' # ── Minimal full run (sntutils project) ─────────────────────────────────────
+#' paths <- sntutils::setup_project_paths()
 #'
-#' # 12 years of data — auto-generate cumulative maps from year 11 down
-#' # run_seasonality_pipeline(
-#' #   iso3 = "gha", adm0_name = "Ghana",
-#' #   base_path = Sys.getenv("AHADI_ONEDRIVE_PROJECT"),
-#' #   s_year = 2012, max_non_seasonal_years = 2,
-#' #   n_cumulative_maps = 4
-#' # )
+#' run_seasonality_pipeline(
+#'   iso3                   = "gin",
+#'   adm0_name              = "Guinea",
+#'   paths                  = paths,
+#'   max_non_seasonal_years = 2   # seasonal in >= 10 of 12 years
+#' )
 #'
-#' # Manual cumulative thresholds
-#' # run_seasonality_pipeline(
-#' #   ...,
-#' #   cumulative_thresholds = list(c(11), c(11,10), c(11,10,9), c(11,10,9,8))
-#' # )
+#' # ── Rainfall only, restrict to 2015–2022 ────────────────────────────────────
+#' run_seasonality_pipeline(
+#'   iso3                   = "gin",
+#'   adm0_name              = "Guinea",
+#'   paths                  = paths,
+#'   type                   = "rainfall",
+#'   s_year                 = 2015,
+#'   e_year                 = 2022,
+#'   max_non_seasonal_years = 2
+#' )
+#'
+#' # ── Cases under-5 stratification ────────────────────────────────────────────
+#' run_seasonality_pipeline(
+#'   iso3                   = "gin",
+#'   adm0_name              = "Guinea",
+#'   paths                  = paths,
+#'   max_non_seasonal_years = 2,
+#'   case_stratification    = "u5",
+#'   value_var_cases        = "conf_u5"
+#' )
+#'
+#' # ── Run only the cases vs rainfall plots ────────────────────────────────────
+#' # Useful when rainfall starts 2014 but case data only from 2020.
+#' run_seasonality_pipeline(
+#'   iso3                   = "gin",
+#'   adm0_name              = "Guinea",
+#'   paths                  = paths,
+#'   max_non_seasonal_years = 2,
+#'   steps                  = "case_rain_plots",
+#'   crude_s_date           = "2020-01-01",
+#'   crude_e_date           = "2024-12-31"
+#' )
+#'
+#' # ── SMC maps using cases-derived eligibility ─────────────────────────────────
+#' run_seasonality_pipeline(
+#'   iso3                   = "gin",
+#'   adm0_name              = "Guinea",
+#'   paths                  = paths,
+#'   max_non_seasonal_years = 2,
+#'   smc_eligibility_source = "cases"
+#' )
+#'
+#' # ── Manually override which districts are SMC-eligible ───────────────────────
+#' run_seasonality_pipeline(
+#'   iso3                     = "gin",
+#'   adm0_name                = "Guinea",
+#'   paths                    = paths,
+#'   max_non_seasonal_years   = 2,
+#'   smc_eligibility_source   = "manual",
+#'   smc_eligible_districts   = c("BOFFA", "KINDIA", "COYAH"),
+#'   smc_additional_districts = c("FORECARIAH"),
+#'   smc_remove_districts     = c("COYAH")
+#' )
+#'
+#' # ── Option C: direct paths, no sntutils project structure ───────────────────
+#' run_seasonality_pipeline(
+#'   iso3                   = "gin",
+#'   adm0_name              = "Guinea",
+#'   climate_dir            = "data/climate/processed",
+#'   dhis2_dir              = "data/dhis2/processed",
+#'   admin_shp_dir          = "data/shapefiles",
+#'   output_dir             = "outputs",
+#'   max_non_seasonal_years = 2
+#' )
+#' }
 #'
 #' @export
 run_seasonality_pipeline <- function(
@@ -208,49 +452,66 @@ run_seasonality_pipeline <- function(
     value_var_cases    = NULL,
 
     # ── heatmap aesthetics ────────────────────────────────────────────────────
-    adm_level      = c("adm1", "adm2"),
+    adm_level      = c("adm2", "adm1"),
     viridis_option = "viridis",
     x_breaks_by    = 0.5,
 
     # ── seasonality parameters ────────────────────────────────────────────────
     analysis_start_month   = 1,
     seasonality_threshold  = 60,
-    max_non_seasonal_years,          
+    max_non_seasonal_years,
     min_years_required     = 6,
 
     # ── cumulative threshold maps ─────────────────────────────────────────────
     n_cumulative_maps     = 4,
-    cumulative_thresholds = NULL,       
+    cumulative_thresholds = NULL,
 
     # ── SMC eligibility ───────────────────────────────────────────────────────
     smc_eligible_districts   = NULL,
     smc_additional_districts = NULL,
     smc_remove_districts     = NULL,
+    smc_eligibility_source   = c("rainfall", "cases", "manual"),
 
     # ── case stratification ───────────────────────────────────────────────────
-    case_stratification = "ov5",         # "ov5", "u5", or "all"
+    case_stratification = "ov5",
 
     # ── case vs rainfall plot options ─────────────────────────────────────────
     case_var_ov5       = "conf_ov5",
     case_var_u5        = "conf_u5",
     rainfall_total_var = "total_rainfall_mm",
-    case_rain_s_date   = NULL,          
+    case_rain_s_date   = NULL,
     case_rain_e_date   = NULL,
+    crude_s_date       = NULL,
+    crude_e_date       = NULL,
     panels_per_row     = 3,
 
-    # ── output (Option C only — ignored for sntutils users) ───────────────────
-    output_dir = here::here("outputs"),
-    dpi        = 400
+    # ── output ────────────────────────────────────────────────────────────────
+    output_dir   = here::here("outputs"),
+    include_date = TRUE,
+    n_saved      = 3,
+    dpi          = 400
 ) {
+
+  # ── upfront package checks ──────────────────────────────────────────────────
+  .check_pipeline_deps(steps)
 
   # ── validate inputs ─────────────────────────────────────────────────────────
 
-  type      <- match.arg(type)
-  adm_level <- match.arg(adm_level)
+  type                   <- match.arg(type)
+  adm_level              <- match.arg(adm_level)
+  smc_eligibility_source <- match.arg(smc_eligibility_source)
+
+  # Validate: "manual" requires smc_eligible_districts to be supplied
+  if (smc_eligibility_source == "manual" && is.null(smc_eligible_districts)) {
+    cli::cli_abort(c(
+      "{.arg smc_eligibility_source = 'manual'} requires {.arg smc_eligible_districts}.",
+      "i" = "Provide a character vector of district names, or change {.arg smc_eligibility_source}."
+    ))
+  }
 
   valid_steps <- c("heatmap", "seasonality", "blocks",
                    "graphs", "smc_maps", "case_rain_plots")
-  bad_steps   <- setdiff(steps, valid_steps)
+  bad_steps <- setdiff(steps, valid_steps)
   if (length(bad_steps) > 0) {
     cli::cli_abort(c(
       "Invalid step{?s}: {.val {bad_steps}}",
@@ -294,16 +555,32 @@ run_seasonality_pipeline <- function(
     ))
   }
 
+  if (!is.numeric(dpi) || dpi <= 0)
+    cli::cli_abort("{.arg dpi} must be a positive number.")
+
+  if (!is.numeric(n_saved) || n_saved < 1)
+    cli::cli_abort("{.arg n_saved} must be a positive integer.")
+
+  # Validate year range
+  if (!is.null(s_year) && !is.null(e_year) && s_year > e_year) {
+    cli::cli_abort(c(
+      "{.arg s_year} must be \u2264 {.arg e_year}.",
+      "x" = "Got {.arg s_year} = {.val {s_year}}, {.arg e_year} = {.val {e_year}}."
+    ))
+  }
+
   # ── step dependency checks ──────────────────────────────────────────────────
 
   if ("smc_maps" %in% steps &&
       !("blocks" %in% steps) &&
       !("seasonality" %in% steps) &&
-      is.null(smc_eligible_districts)) {
+      is.null(smc_eligible_districts) &&
+      smc_eligibility_source != "manual") {
     cli::cli_abort(c(
       "Step {.val smc_maps} has unresolved dependencies.",
       "i" = "Add {.val 'blocks'} and {.val 'seasonality'} to {.arg steps}, or",
-      "i" = "supply {.arg smc_eligible_districts} if those steps were run previously."
+      "i" = "supply {.arg smc_eligible_districts} with {.arg smc_eligibility_source = 'manual'},",
+      "i" = "or run those steps before {.val 'smc_maps'}."
     ))
   }
 
@@ -318,8 +595,6 @@ run_seasonality_pipeline <- function(
   )
 
   # ── resolve output roots ────────────────────────────────────────────────────
-  # sntutils users: val_fig / val_tbl already exist — never recreate them
-  # Option C users: build under output_dir
 
   if (dirs$use_sntutils_output) {
     fig_root <- dirs$val_fig
@@ -331,6 +606,11 @@ run_seasonality_pipeline <- function(
     .ensure_dir(tbl_root)
   }
 
+  # ── write options bundle (passed to every step) ────────────────────────────
+  # Mirrors how the MBG pipeline standardises sntutils::write_snt_data() args.
+
+  write_opts <- list(include_date = include_date, n_saved = n_saved)
+
   # ── types to run ────────────────────────────────────────────────────────────
 
   types_to_run <- if (type == "both") c("rainfall", "cases") else type
@@ -340,7 +620,7 @@ run_seasonality_pipeline <- function(
   cli::cli_h1("Seasonality Pipeline: {adm0_name} ({toupper(iso3)})")
   cli::cli_alert_info("Steps:   {.val {steps}}")
   cli::cli_alert_info("Type(s): {.val {types_to_run}}")
-  cli::cli_alert_info("Output:  {.path {fig_root}}")
+  cli::cli_alert_info("Output:  {.path { .relative_path(fig_root)}}")
 
   results <- list()
 
@@ -398,6 +678,7 @@ run_seasonality_pipeline <- function(
         case_stratification    = case_stratification,
         fig_root               = fig_root,
         tbl_root               = tbl_root,
+        write_opts             = write_opts,
         dpi                    = dpi
       )
     )
@@ -410,19 +691,20 @@ run_seasonality_pipeline <- function(
     results$blocks <- purrr::map(
       purrr::set_names(types_to_run),
       ~ .run_block_step(
-        dirs      = dirs,
-        iso3      = iso3,
-        type      = .x,
-        s_year    = s_year,
-        e_year    = e_year,
-        adm1_var  = adm1_var,
-        adm2_var  = adm2_var,
-        adm3_var  = adm3_var,
-        year_var  = year_var,
-        month_var = month_var,
-        value_var = if (.x == "rainfall") value_var_rainfall else value_var_cases,
+        dirs                = dirs,
+        iso3                = iso3,
+        type                = .x,
+        s_year              = s_year,
+        e_year              = e_year,
+        adm1_var            = adm1_var,
+        adm2_var            = adm2_var,
+        adm3_var            = adm3_var,
+        year_var            = year_var,
+        month_var           = month_var,
+        value_var           = if (.x == "rainfall") value_var_rainfall else value_var_cases,
         case_stratification = case_stratification,
-        tbl_root  = tbl_root
+        tbl_root            = tbl_root,
+        write_opts          = write_opts
       )
     )
   }
@@ -464,6 +746,19 @@ run_seasonality_pipeline <- function(
         "i" = "Provide {.arg paths}, {.arg base_path}, or {.arg admin_shp_dir}."
       ))
     }
+
+    # Resolve which location_summary drives eligibility for each type.
+    # When smc_eligibility_source = "rainfall", the cases map also uses the
+    # rainfall-derived eligible districts (the most common field practice).
+    # When smc_eligibility_source = "cases",  both maps use cases-derived.
+    # When smc_eligibility_source = "manual",  smc_eligible_districts is used
+    # directly and location_summary is ignored by .derive_smc_eligibility().
+    .pick_location_summary <- function(type) {
+      if (smc_eligibility_source == "manual") return(NULL)
+      src <- if (smc_eligibility_source == "cases") "cases" else "rainfall"
+      results$seasonality[[src]]$location_summary
+    }
+
     results$smc_maps <- purrr::map(
       purrr::set_names(types_to_run),
       ~ .run_smc_maps_step(
@@ -472,13 +767,14 @@ run_seasonality_pipeline <- function(
         adm0_name                = adm0_name,
         type                     = .x,
         block_frequency          = results$blocks[[.x]]$frequency,
-        location_summary         = results$seasonality[[.x]]$location_summary,
+        location_summary         = .pick_location_summary(.x),
         tbl_root                 = tbl_root,
         case_stratification      = case_stratification,
         smc_eligible_districts   = smc_eligible_districts,
         smc_additional_districts = smc_additional_districts,
         smc_remove_districts     = smc_remove_districts,
         fig_root                 = fig_root,
+        write_opts               = write_opts,
         dpi                      = dpi
       )
     )
@@ -501,6 +797,8 @@ run_seasonality_pipeline <- function(
       rainfall_total_var = rainfall_total_var,
       case_rain_s_date   = case_rain_s_date,
       case_rain_e_date   = case_rain_e_date,
+      crude_s_date       = crude_s_date,
+      crude_e_date       = crude_e_date,
       s_year             = s_year,
       e_year             = e_year,
       panels_per_row     = panels_per_row,
@@ -539,6 +837,15 @@ run_seasonality_pipeline <- function(
     value_var = value_var
   ) |> .filter_years(s_year, e_year)
 
+  n_adm2 <- dplyr::n_distinct(df_raw$adm2)
+  if (n_adm2 > 40 && adm_level == "adm2") {
+    cli::cli_warn(c(
+      "{n_adm2} adm2 units detected \u2014 exceeds 40.",
+      "i" = "Switching heatmap to {.val adm1} level for readability."
+    ))
+    adm_level <- "adm1"
+  }
+
   df_ready <- .prepare_heatmap_data(df_raw, adm_level = adm_level)
 
   p <- .build_heatmap_plot(
@@ -550,10 +857,9 @@ run_seasonality_pipeline <- function(
     x_breaks_by    = x_breaks_by
   )
 
-  # Heatmaps go directly in val_fig (no subfolder)
   out <- .save_heatmap_plot(
     plot = p, output_dir = fig_root, filename = NULL,
-    iso3 = iso3, type = type, width = 12, height = 8, dpi = dpi
+    iso3 = iso3, type = type, width = 12, height = 8, dpi = 500
   )
 
   invisible(list(plot = p, data = df_ready, output_path = out))
@@ -568,11 +874,9 @@ run_seasonality_pipeline <- function(
     max_non_seasonal_years, min_years_required,
     n_cumulative_maps, cumulative_thresholds,
     case_stratification,
-    fig_root, tbl_root, dpi
+    fig_root, tbl_root, write_opts, dpi
 ) {
   cli::cli_alert_info("Seasonality \u2192 {.val {type}}")
-
-  # ── load + validate ─────────────────────────────────────────────────────────
 
   df <- .load_analysis_data(
     dirs = dirs, iso3 = iso3, type = type,
@@ -598,8 +902,6 @@ run_seasonality_pipeline <- function(
     "Data: {min(available_years)}\u2013{max(available_years)} ({n_years} years)"
   )
 
-  # ── analysis ────────────────────────────────────────────────────────────────
-
   blocks           <- .generate_rolling_blocks(df, analysis_start_month)
   detailed_results <- .calculate_seasonality(df, blocks, seasonality_threshold)
   yearly_summary   <- .build_yearly_summary(detailed_results)
@@ -610,21 +912,46 @@ run_seasonality_pipeline <- function(
   cli::cli_alert_success("Classification: {n_s} seasonal, {n_ns} not seasonal.")
 
   # ── save tables ─────────────────────────────────────────────────────────────
-  # Seasonality tables → val_tbl root (no subfolder)
+  # Uses versioned write_snt_data() with date-stamping and auto-pruning.
 
   type_pfx <- .type_prefix(type, case_stratification)
 
-  sntutils::write_snt_data(
-    detailed_results, tbl_root,
-    glue::glue("{iso3}_{type_pfx}_detailed_seasonality_results"), "xlsx"
+  .write_snt <- function(obj, name) {
+    sntutils::write_snt_data(
+      obj          = obj,
+      path         = tbl_root,
+      data_name    = glue::glue("{iso3}_{name}"),
+      file_formats = c("xlsx", "qs2"),
+      include_date = write_opts$include_date,
+      n_saved      = write_opts$n_saved
+    )
+  }
+
+  # Attach data dictionaries — mirrors MBG pipeline's build_dictionary pattern
+  .write_snt(
+    list(
+      data          = detailed_results,
+      data_dict     = sntutils::build_dictionary(data = detailed_results)
+    ),
+    glue::glue("{type_pfx}_detailed_seasonality_results")
   )
-  sntutils::write_snt_data(
-    yearly_summary, tbl_root,
-    glue::glue("{iso3}_{type_pfx}_yearly_seasonality_summary"), "xlsx"
+  .write_snt(
+    list(
+      data          = yearly_summary,
+      data_dict     = sntutils::build_dictionary(data = yearly_summary)
+    ),
+    glue::glue("{type_pfx}_yearly_seasonality_summary")
   )
-  sntutils::write_snt_data(
-    location_summary, tbl_root,
-    glue::glue("{iso3}_{type_pfx}_location_seasonality_summary"), "xlsx"
+  .write_snt(
+    list(
+      data          = location_summary,
+      data_dict     = sntutils::build_dictionary(data = location_summary)
+    ),
+    glue::glue("{type_pfx}_location_seasonality_summary")
+  )
+
+  cli::cli_alert_success(
+    "Seasonality tables saved \u2192 {.path { .relative_path(tbl_root)}}"
   )
 
   # ── save maps ───────────────────────────────────────────────────────────────
@@ -659,7 +986,7 @@ run_seasonality_pipeline <- function(
     dirs, iso3, type, s_year, e_year,
     adm1_var, adm2_var, adm3_var = NULL, year_var, month_var, value_var,
     case_stratification,
-    tbl_root
+    tbl_root, write_opts
 ) {
   cli::cli_alert_info("Block analysis \u2192 {.val {type}}")
 
@@ -672,29 +999,16 @@ run_seasonality_pipeline <- function(
     .filter_years(s_year, e_year) |>
     dplyr::mutate(district = paste(adm1, adm2, sep = " - "))
 
-  # Optionally attach adm3 if the source file contains it
-  adm3_lookup <- NULL
-  if (!is.null(adm3_var)) {
-    cfg_type <- switch(type,
-      rainfall = list(folder = dirs$climate,
-                      filename = glue::glue("{iso3}_rainfall_processed")),
-      cases    = list(folder = dirs$dhis2,
-                      filename = glue::glue("{iso3}_dhis2_processed"))
-    )
-    raw <- sntutils::read_snt_data(cfg_type$folder, cfg_type$filename, "xlsx")
-    if (adm3_var %in% names(raw) && adm1_var %in% names(raw) && adm2_var %in% names(raw)) {
-      adm3_lookup <- raw |>
-        dplyr::select(dplyr::all_of(c(adm1_var, adm2_var, adm3_var))) |>
-        dplyr::rename(adm1 = !!adm1_var, adm2 = !!adm2_var, adm3 = !!adm3_var) |>
-        dplyr::distinct() |>
-        dplyr::mutate(district = paste(adm1, adm2, sep = " - "))
-    } else {
-      cli::cli_warn(c(
-        "{.arg adm3_var} ({.val {adm3_var}}) not found in {.val {type}} source data.",
-        "i" = "Proceeding without adm3."
-      ))
-    }
-  }
+  # ── optional adm3 lookup (mirrors MBG's clean join pattern) ─────────────────
+
+  adm3_lookup <- .resolve_adm3_lookup(
+    dirs     = dirs,
+    iso3     = iso3,
+    type     = type,
+    adm1_var = adm1_var,
+    adm2_var = adm2_var,
+    adm3_var = adm3_var
+  )
 
   windows       <- .calculate_rolling_windows(df)
   summary_tbl   <- windows$summary
@@ -703,51 +1017,48 @@ run_seasonality_pipeline <- function(
 
   # Join adm3 into all three tables when available
   if (!is.null(adm3_lookup)) {
-    adm_cols <- c("adm1", "adm2", "adm3")
-    summary_tbl   <- summary_tbl   |> dplyr::left_join(adm3_lookup, by = "district") |>
+    adm3_only <- adm3_lookup |> dplyr::select(district, adm3)
+    summary_tbl   <- summary_tbl   |>
+      dplyr::left_join(adm3_only, by = "district") |>
       dplyr::select(district, adm1, adm2, adm3, dplyr::everything())
-    detailed_tbl  <- detailed_tbl  |> dplyr::left_join(adm3_lookup, by = "district") |>
+    detailed_tbl  <- detailed_tbl  |>
+      dplyr::left_join(adm3_only, by = "district") |>
       dplyr::select(district, adm1, adm2, adm3, years, dplyr::everything())
-    frequency_tbl <- frequency_tbl |> dplyr::left_join(
-      adm3_lookup |> dplyr::select(district, adm3), by = "district"
-    ) |>
+    frequency_tbl <- frequency_tbl |>
+      dplyr::left_join(adm3_only, by = "district") |>
       dplyr::select(district, adm1, adm2, adm3, dplyr::everything())
   }
 
   # ── save tables ─────────────────────────────────────────────────────────────
-  # Block tables → type-specific subfolder (val_tbl/rainfall/ or val_tbl/cases_{strat}_block/)
 
   tbl_sub <- file.path(tbl_root, .type_tbl_subdir(type, case_stratification))
   .ensure_dir(tbl_sub)
 
-  if (type == "rainfall") {
+  .write_block <- function(obj, name) {
     sntutils::write_snt_data(
-      summary_tbl,  tbl_sub,
-      glue::glue("{iso3}_malaria_rainfall_block_analysis"), "xlsx"
-    )
-    sntutils::write_snt_data(
-      detailed_tbl, tbl_sub,
-      glue::glue("{iso3}_malaria_detailed_yearly_block_analysis"), "xlsx"
-    )
-  } else {
-    sntutils::write_snt_data(
-      summary_tbl,  tbl_sub,
-      glue::glue("{iso3}_malaria_cases_block_analysis"), "xlsx"
-    )
-    sntutils::write_snt_data(
-      detailed_tbl, tbl_sub,
-      glue::glue("{iso3}_malaria_cases_detailed_yearly_block_analysis"), "xlsx"
+      obj          = list(
+        data      = obj,
+        data_dict = sntutils::build_dictionary(data = obj)
+      ),
+      path         = tbl_sub,
+      data_name    = glue::glue("{iso3}_{name}"),
+      file_formats = c("xlsx", "qs2"),
+      include_date = write_opts$include_date,
+      n_saved      = write_opts$n_saved
     )
   }
 
-  # Frequency file: same name for both types — subfolder differentiates them
-  sntutils::write_snt_data(
-    frequency_tbl, tbl_sub,
-    glue::glue("{iso3}_malaria_block_frequency_analysis"), "xlsx"
-  )
+  if (type == "rainfall") {
+    .write_block(summary_tbl,   "malaria_rainfall_block_analysis")
+    .write_block(detailed_tbl,  "malaria_detailed_yearly_block_analysis")
+  } else {
+    .write_block(summary_tbl,   "malaria_cases_block_analysis")
+    .write_block(detailed_tbl,  "malaria_cases_detailed_yearly_block_analysis")
+  }
+  .write_block(frequency_tbl, "malaria_block_frequency_analysis")
 
   cli::cli_alert_success(
-    "Block tables saved \u2192 {.path {tbl_sub}}"
+    "Block tables saved \u2192 {.path { .relative_path(tbl_sub)}}"
   )
 
   invisible(list(
@@ -765,14 +1076,10 @@ run_seasonality_pipeline <- function(
     case_stratification,
     tbl_root, fig_root, dpi
 ) {
-  # ── get detailed results (memory first, then disk) ───────────────────────────
-
   rain_df <- .get_or_read_detailed(rain_detailed, tbl_root, iso3, "rainfall",
                                    case_stratification)
   case_df <- .get_or_read_detailed(case_detailed,  tbl_root, iso3, "cases",
                                    case_stratification)
-
-  # ── filter + reshape ─────────────────────────────────────────────────────────
 
   rain_df <- rain_df |>
     .filter_years(s_year, e_year, col = "StartYear") |>
@@ -811,24 +1118,31 @@ run_seasonality_pipeline <- function(
       Type = ifelse(Type == "Percent_Seasonality_Cases", "Cases", "Rainfall")
     )
 
-  # ── output → val_fig/cas_rain_graphs/ ───────────────────────────────────────
-
   graphs_dir <- file.path(fig_root, "cas_rain_graphs")
   .ensure_dir(graphs_dir)
 
   provinces <- sort(unique(merged_df$province))
 
-  # Province-level plots
   plots <- purrr::map(purrr::set_names(provinces), function(prov) {
     prov_data  <- merged_df |> dplyr::filter(province == prov)
-    fig_height <- max(8, dplyr::n_distinct(prov_data$district) * 1.5)
+    n_dist     <- dplyr::n_distinct(prov_data$district)
+
+    facet_ncol <- dplyr::case_when(
+      n_dist >= 30 ~ 6L,
+      n_dist >= 15 ~ 4L,
+      n_dist >= 6  ~ 3L,
+      TRUE         ~ 2L
+    )
+    n_rows     <- ceiling(n_dist / facet_ncol)
+    fig_height <- max(6, n_rows * 4)
+    fig_width  <- facet_ncol * 5
 
     p <- ggplot2::ggplot(
       prov_data,
       ggplot2::aes(x = Date, y = Percent_Seasonality, color = Type)
     ) +
       ggplot2::geom_line(linewidth = 0.8) +
-      ggplot2::facet_wrap(~ district, ncol = 2, scales = "free_y") +
+      ggplot2::facet_wrap(~ district, ncol = facet_ncol, scales = "free_y") +
       ggplot2::scale_color_manual(
         values = c("Cases" = "#E74C3C", "Rainfall" = "#3498DB")
       ) +
@@ -843,30 +1157,22 @@ run_seasonality_pipeline <- function(
         subtitle = "Percent Seasonality of Cases vs Rainfall by District",
         x = NULL, y = "Percent Seasonality (%)", color = "Type"
       ) +
-      ggplot2::theme_minimal(base_size = 12) +
-      ggplot2::theme(
-        plot.title       = ggplot2::element_text(size = 16, face = "bold", hjust = 0.5),
-        plot.subtitle    = ggplot2::element_text(size = 11, hjust = 0.5, color = "gray30"),
-        strip.text       = ggplot2::element_text(size = 10, face = "bold"),
-        legend.position  = "bottom",
-        panel.grid.minor = ggplot2::element_blank(),
-        axis.text.x      = ggplot2::element_text(angle = 45, hjust = 1)
-      )
+      .snt_theme_minimal()
 
     ggplot2::ggsave(
-      filename = paste0(gsub(" ", "_", prov), "_seasonality_comparison.png"),
-      plot     = p,
-      path     = graphs_dir,
-      width    = 14,
-      height   = fig_height,
-      dpi      = dpi
+      filename  = paste0(gsub(" ", "_", prov), "_seasonality_comparison.png"),
+      plot      = p,
+      path      = graphs_dir,
+      width     = fig_width,
+      height    = fig_height,
+      dpi       = dpi,
+      limitsize = FALSE
     )
 
     cli::cli_alert_success("Overlay graph saved: {.val {prov}}")
     p
   })
 
-  # Summary plot — all provinces averaged
   summary_data <- merged_df |>
     dplyr::group_by(province, Date, Type) |>
     dplyr::summarise(
@@ -894,23 +1200,17 @@ run_seasonality_pipeline <- function(
       subtitle = "Mean Percent Seasonality of Cases vs Rainfall",
       x = NULL, y = "Mean Percent Seasonality (%)", color = "Type"
     ) +
-    ggplot2::theme_minimal(base_size = 12) +
-    ggplot2::theme(
-      plot.title       = ggplot2::element_text(size = 16, face = "bold", hjust = 0.5),
-      strip.text       = ggplot2::element_text(size = 10, face = "bold"),
-      legend.position  = "bottom",
-      panel.grid.minor = ggplot2::element_blank(),
-      axis.text.x      = ggplot2::element_text(angle = 45, hjust = 1)
-    )
+    .snt_theme_minimal()
 
   ggplot2::ggsave(
-    filename = glue::glue("{iso3}_ALL_PROVINCES_summary_comparison.png"),
-    plot     = summary_plot,
-    path     = graphs_dir,
-    width    = 14, height = 12, dpi = dpi
+    filename  = glue::glue("{iso3}_ALL_PROVINCES_summary_comparison.png"),
+    plot      = summary_plot,
+    path      = graphs_dir,
+    width     = 14, height = 12, dpi = dpi,
+    limitsize = FALSE
   )
 
-  cli::cli_alert_success("Summary overlay graph saved.")
+  cli::cli_alert_success("Summary overlay graph saved \u2192 {.path { .relative_path(graphs_dir)}}")
   invisible(c(plots, list(.summary = summary_plot)))
 }
 
@@ -921,7 +1221,7 @@ run_seasonality_pipeline <- function(
     block_frequency, location_summary, tbl_root,
     case_stratification,
     smc_eligible_districts, smc_additional_districts, smc_remove_districts,
-    fig_root, dpi
+    fig_root, write_opts, dpi
 ) {
   cli::cli_alert_info("SMC maps \u2192 {.val {type}}")
 
@@ -935,7 +1235,7 @@ run_seasonality_pipeline <- function(
     smc_remove_districts     = smc_remove_districts
   )
 
-  spatial  <- sntutils::read_snt_data(
+  spatial <- sntutils::read_snt_data(
     path         = here::here(dirs$admin_shp, "processed"),
     data_name    = glue::glue("{iso3}_shp_list"),
     file_formats = "qs2"
@@ -944,44 +1244,45 @@ run_seasonality_pipeline <- function(
   adm2_sp <- spatial$adm2
   adm1_sp <- spatial$adm1
 
-  # SMC figures → val_fig/rain_seas/ (rainfall) or val_fig/ov5/ (cases)
   smc_fig_dir <- file.path(fig_root, .type_smc_subdir(type))
   .ensure_dir(smc_fig_dir)
 
-  month_lkp <- c(apr=4L,may=5L,jun=6L,jul=7L,aug=8L,sep=9L)
+  # \u2500\u2500 responsive dimensions \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  dims <- .compute_map_dims(adm2_sp)
 
-  block_data <- freq |>
-    dplyr::mutate(
-      adm1   = stringr::str_trim(stringr::str_extract(district, "^[^-]+")),
-      adm2   = stringr::str_trim(stringr::str_extract(district, "(?<=-).*$")),
-      smc_yn = dplyr::if_else(adm2 %in% eligible, 1L, 0L)
-    ) |>
+  month_lkp <- c(apr = 4L, may = 5L, jun = 6L, jul = 7L, aug = 8L, sep = 9L)
+
+  if (all(c("adm1", "adm2") %in% names(freq))) {
+    freq_adm <- freq
+  } else {
+    cli::cli_warn(c(
+      "Block frequency table is missing adm1/adm2 columns.",
+      "i" = "Falling back to district string parsing \u2014 hyphenated names may not match."
+    ))
+    freq_adm <- freq |>
+      dplyr::mutate(
+        adm1 = stringr::str_trim(stringr::str_extract(district, "^[^-]+")),
+        adm2 = stringr::str_trim(stringr::str_extract(district, "(?<=- ).*$"))
+      )
+  }
+
+  block_data <- freq_adm |>
+    dplyr::mutate(smc_yn = dplyr::if_else(adm2 %in% eligible, 1L, 0L)) |>
     dplyr::filter(smc_yn == 1L) |>
     dplyr::arrange(adm1, adm2, duration, block_freq, median_max_prop) |>
     dplyr::group_by(adm1, adm2, duration) |>
     dplyr::mutate(
-      mostfreq = dplyr::if_else(
-        dplyr::row_number() == dplyr::n(), 1L, NA_integer_
-      )
+      mostfreq = dplyr::if_else(dplyr::row_number() == dplyr::n(), 1L, NA_integer_)
     ) |>
     dplyr::ungroup() |>
     dplyr::filter(mostfreq == 1L) |>
     dplyr::mutate(
       month1      = stringr::str_sub(block, 1, 3),
       firmonth    = month_lkp[month1],
-      median_cats = dplyr::case_when(
-        median_max_prop <  40                            ~ 1L,
-        median_max_prop >= 40 & median_max_prop <  50    ~ 2L,
-        median_max_prop >= 50 & median_max_prop <  60    ~ 3L,
-        median_max_prop >= 60 & median_max_prop <  70    ~ 4L,
-        median_max_prop >= 70 & median_max_prop <  80    ~ 5L,
-        median_max_prop >= 80 & median_max_prop <= 100   ~ 6L,
-        TRUE ~ NA_integer_
-      )
+      median_cats = .categorise_median_prop(median_max_prop)
     )
 
-  # ── colour palettes shared across all SMC maps ───────────────────────────────
-
+  # \u2500\u2500 shared palettes \u2014 colours unchanged \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
   month_pal <- c(
     "4" = "#7c4aa5ff", "5" = "#4169E1", "6" = "#32CD32",
     "7" = "#FFA500",   "8" = "#FFFF00", "9" = "#FF0000"
@@ -990,32 +1291,16 @@ run_seasonality_pipeline <- function(
     "4" = "April", "5" = "May",    "6" = "June",
     "7" = "July",  "8" = "August", "9" = "September"
   )
-
   cov_pal <- c(
     "1" = "#E6E6D3", "2" = "#F4E3C1", "3" = "#87CEEB",
     "4" = "#4c73e6ff", "5" = "#1313c9ff", "6" = "#0b0b70ff"
   )
-
   cov_lbl <- c(
     "1" = "20-40%", "2" = "40-50%", "3" = "50-60%",
-    "4" = "60-70%", "5" = "70-80%",
-    "6" = "80-100%"
+    "4" = "60-70%", "5" = "70-80%", "6" = "80-100%"
   )
 
-  # Shared theme for all SMC maps
-  smc_theme <- ggplot2::theme_minimal(base_size = 13) +
-    ggplot2::theme(
-      panel.grid.major = ggplot2::element_blank(),
-      panel.grid.minor = ggplot2::element_blank(),
-      plot.title       = ggplot2::element_text(face = "bold", size = 16, hjust = 0),
-      plot.subtitle    = ggplot2::element_text(size = 11, hjust = 0,
-                                                margin = ggplot2::margin(t = 4, b = 6)),
-      legend.position  = "right",
-      legend.title     = ggplot2::element_text(face = "bold", size = 11),
-      legend.text      = ggplot2::element_text(size = 10),
-      plot.margin      = ggplot2::margin(5, 15, 5, 5)
-    )
-
+  # \u2500\u2500 per-duration timing + coverage maps \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
   durations     <- sort(unique(block_data$duration))
   timing_maps   <- list()
   coverage_maps <- list()
@@ -1025,190 +1310,108 @@ run_seasonality_pipeline <- function(
     map_data <- adm2_sp |>
       dplyr::left_join(dur_data, by = "adm2") |>
       dplyr::mutate(
-        firmonth_f  = factor(as.character(firmonth), levels = as.character(4:9)),
+        firmonth_f    = factor(as.character(firmonth),    levels = as.character(4:9)),
         median_cats_f = factor(as.character(median_cats), levels = as.character(1:6))
       )
 
-    # ── Timing map ─────────────────────────────────────────────────────────────
     present_months <- as.character(sort(unique(stats::na.omit(map_data$firmonth))))
-
-    timing_maps[[as.character(dur)]] <- ggplot2::ggplot() +
-      ggplot2::geom_sf(
-        data      = map_data,
-        ggplot2::aes(fill = firmonth_f),
-        color     = "grey30",
-        linewidth = 0.25
-      ) +
-      ggplot2::geom_sf(
-        data      = adm1_sp,
-        fill      = NA,
-        color     = "black",
-        linewidth = 0.9
-      ) +
-      ggplot2::scale_fill_manual(
-        values   = month_pal[present_months],
-        labels   = month_lbl[present_months],
-        na.value = "white",
-        name     = "First Month",
-        drop     = FALSE
-      ) +
-      ggplot2::coord_sf(datum = NA) +
-      ggplot2::labs(
-        title = glue::glue(
-          "Ideal first month \u2014 {dur} cycles ({type})"
-        )
-      ) +
-      smc_theme
-
-    ggplot2::ggsave(
-      file.path(smc_fig_dir, glue::glue("{type}_block_{dur}m.png")),
-      timing_maps[[as.character(dur)]],
-      width = 10, height = 8, dpi = dpi
+    tm <- .build_snt_map(
+      adm2_sf     = map_data,
+      fill_col    = "firmonth_f",
+      fill_values = month_pal[present_months],
+      fill_labels = month_lbl[present_months],
+      adm1_sf     = adm1_sp,
+      title       = glue::glue("Ideal first month \u2014 {dur} cycles ({type})"),
+      fill_label  = "First Month"
     )
+    timing_maps[[as.character(dur)]] <- tm
+    .save_map(tm, file.path(smc_fig_dir, glue::glue("{type}_block_{dur}m.png")),
+              dims, dpi)
 
-    # ── Coverage map ───────────────────────────────────────────────────────────
     present_cats <- as.character(sort(unique(stats::na.omit(map_data$median_cats))))
-
-    coverage_maps[[as.character(dur)]] <- ggplot2::ggplot() +
-      ggplot2::geom_sf(
-        data      = map_data,
-        ggplot2::aes(fill = median_cats_f),
-        color     = "grey30",
-        linewidth = 0.25
-      ) +
-      ggplot2::geom_sf(
-        data      = adm1_sp,
-        fill      = NA,
-        color     = "black",
-        linewidth = 0.9
-      ) +
-      ggplot2::scale_fill_manual(
-        values   = cov_pal[present_cats],
-        labels   = cov_lbl[present_cats],
-        na.value = "white",
-        name     = "% Covered",
-        drop     = FALSE
-      ) +
-      ggplot2::coord_sf(datum = NA) +
-      ggplot2::labs(
-        title = glue::glue(
-          "% of {type} covered \u2014 {dur}-month window"
-        )
-      ) +
-      smc_theme
-
-    ggplot2::ggsave(
-      file.path(smc_fig_dir, glue::glue("{type}_prop_{dur}m.png")),
-      coverage_maps[[as.character(dur)]],
-      width = 10, height = 8, dpi = dpi
+    cm <- .build_snt_map(
+      adm2_sf     = map_data,
+      fill_col    = "median_cats_f",
+      fill_values = cov_pal[present_cats],
+      fill_labels = cov_lbl[present_cats],
+      adm1_sf     = adm1_sp,
+      title       = glue::glue("% of {type} covered \u2014 {dur}-month window"),
+      fill_label  = "% Covered"
     )
+    coverage_maps[[as.character(dur)]] <- cm
+    .save_map(cm, file.path(smc_fig_dir, glue::glue("{type}_prop_{dur}m.png")),
+              dims, dpi)
 
     cli::cli_alert_success(
-      "SMC maps saved: {dur}-month window \u2192 {.path {smc_fig_dir}}"
+      "SMC maps saved: {dur}-month window \u2192 {.path { .relative_path(smc_fig_dir)}}"
     )
   }
 
-  # ── MINIMUM BEST BLOCK ───────────────────────────────────────────────────────
-  # For each district, find the shortest window that covers >= 60% of the
-  # annual metric. If no window reaches 60%, use the best available (rule 1).
-  #
-  # Rule 1 (max < 60):  flag the single block with the highest median_max_prop
-  # Rule 2 (max >= 60): flag the block with the smallest duration that still
-  #                     reaches >= 60%, breaking ties by lowest median_max_prop
-
+  # \u2500\u2500 minimum best block computation \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
   cli::cli_alert_info("Computing minimum best blocks...")
 
   min_summary <- block_data |>
     dplyr::group_by(adm1, adm2) |>
     dplyr::mutate(
       max_prop = max(median_max_prop, na.rm = TRUE),
-      rule = dplyr::case_when(
+      rule     = dplyr::case_when(
         max_prop <  60 ~ 1L,
         max_prop >= 60 ~ 2L,
         TRUE           ~ NA_integer_
       )
     ) |>
-    dplyr::ungroup()
-
-  min_summary <- min_summary |>
+    dplyr::ungroup() |>
     dplyr::group_by(adm1, adm2) |>
     dplyr::mutate(
-      # Rule 1: best available (highest prop) when nothing hits 60%
       minimum_best = dplyr::case_when(
         rule == 1L & median_max_prop == max_prop ~ 1L,
         TRUE ~ NA_integer_
       ),
-      # Rule 2 helper: only values >= 60% are eligible
       freq60 = dplyr::if_else(
         rule == 2L & median_max_prop >= 60,
         median_max_prop, NA_real_
       )
     ) |>
     dplyr::mutate(
-      # min_freq60: the lowest eligible proportion in this group (same value for
-      # all rows — this is how the original script's sort works: arrange by this
-      # scalar then freq60 effectively sorts purely by freq60 ascending, picking
-      # the block that JUST reaches 60% — the most conservative choice)
-      min_freq60 = min(freq60, na.rm = TRUE),
+      min_freq60 = suppressWarnings(min(freq60, na.rm = TRUE)),
       min_freq60 = dplyr::if_else(is.infinite(min_freq60), NA_real_, min_freq60),
       min_freq60 = dplyr::if_else(median_max_prop < 60, NA_real_, min_freq60)
     ) |>
-    # Arrange exactly as original: by min_freq60 (scalar group minimum),
-    # then freq60 ascending — picks the row whose proportion just reaches 60%
-    dplyr::arrange(adm1, adm2, min_freq60, freq60) |>
+    dplyr::arrange(min_freq60, freq60, .by_group = TRUE) |>
     dplyr::mutate(
       minimum_best = dplyr::if_else(
-        is.na(minimum_best) &
-          dplyr::row_number() == 1L &
-          rule == 2L &
-          !is.na(min_freq60),
-        1L,
-        minimum_best
+        is.na(minimum_best) & dplyr::row_number() == 1L &
+          rule == 2L & !is.na(min_freq60),
+        1L, minimum_best
       )
     ) |>
     dplyr::ungroup() |>
-    # Recompute median_cats with type-correct upper bound for category 6
-    dplyr::mutate(
-      median_cats = dplyr::case_when(
-        median_max_prop <  40                          ~ 1L,
-        median_max_prop >= 40 & median_max_prop <  50  ~ 2L,
-        median_max_prop >= 50 & median_max_prop <  60  ~ 3L,
-        median_max_prop >= 60 & median_max_prop <  70  ~ 4L,
-        median_max_prop >= 70 & median_max_prop <  80  ~ 5L,
-        median_max_prop >= 80 & median_max_prop <= 100 ~ 6L,
-        TRUE ~ NA_integer_
-      )
-    )
-
-  # ── save minimum best block table ────────────────────────────────────────────
+    dplyr::mutate(median_cats = .categorise_median_prop(median_max_prop))
 
   tbl_sub <- file.path(tbl_root, .type_tbl_subdir(type, case_stratification))
   .ensure_dir(tbl_sub)
 
   export_min <- min_summary |>
-    dplyr::select(
-      adm1, adm2, duration, block,
-      block_freq, years, median_max_prop, minimum_best
-    )
+    dplyr::select(adm1, adm2, duration, block, block_freq,
+                  years, median_max_prop, minimum_best)
 
   sntutils::write_snt_data(
-    export_min,
-    tbl_sub,
-    glue::glue("{iso3}_{type}_data_minimum_best_block"),
-    "xlsx"
+    obj          = list(
+      data      = export_min,
+      data_dict = sntutils::build_dictionary(data = export_min)
+    ),
+    path         = tbl_sub,
+    data_name    = glue::glue("{iso3}_{type}_data_minimum_best_block"),
+    file_formats = c("xlsx", "qs2"),
+    include_date = write_opts$include_date,
+    n_saved      = write_opts$n_saved
   )
-
   cli::cli_alert_success(
-    "Minimum best block table saved \u2192 {.path {tbl_sub}}"
+    "Minimum best block table saved \u2192 {.path { .relative_path(tbl_sub)}}"
   )
 
-  # ── build minimum maps ───────────────────────────────────────────────────────
-  # Three maps: (1) duration, (2) first month, (3) % coverage
-  # Using only the minimum_best == 1 records
-
-  min_final <- min_summary |>
-    dplyr::filter(minimum_best == 1L)
-
+  # \u2500\u2500 minimum best block maps \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  min_final   <- min_summary |> dplyr::filter(minimum_best == 1L)
   min_spatial <- adm2_sp |>
     dplyr::left_join(min_final, by = "adm2") |>
     dplyr::mutate(
@@ -1216,145 +1419,75 @@ run_seasonality_pipeline <- function(
       median_cats_f = factor(as.character(median_cats), levels = as.character(1:6))
     )
 
-  # Set duration as factor using only levels present in the data
-  dur_levels <- sort(unique(stats::na.omit(min_final$duration)))
-  min_spatial$duration <- factor(min_spatial$duration, levels = dur_levels)
+  dur_levels  <- sort(unique(stats::na.omit(min_final$duration)))
+  min_spatial <- min_spatial |>
+    dplyr::mutate(duration = factor(duration, levels = dur_levels))
 
-  # Colour palette for duration — up to 3 levels (3m, 4m, 5m)
-  dur_colours <- c(
-    "3" = "#d8c974ff",
-    "4" = "#e25ae2ff",
-    "5" = "#6e1e6eff"
-  )
-  dur_labels <- c(
-    "3" = "3 months (4 cycles)",
-    "4" = "4 months (5 cycles)",
-    "5" = "5 months (6 cycles)"
+  dur_colours <- c("2" = "#52b788ff", "3" = "#d8c974ff",
+                   "4" = "#e25ae2ff", "5" = "#6e1e6eff")
+  dur_labels  <- c(
+    "2" = "2 months (3 cycles)", "3" = "3 months (4 cycles)",
+    "4" = "4 months (5 cycles)", "5" = "5 months (6 cycles)"
   )
   dur_colours <- dur_colours[as.character(dur_levels)]
   dur_labels  <- dur_labels[as.character(dur_levels)]
 
   type_label_min <- if (type == "rainfall") "Rainfall" else "Cases"
 
-  # Map 1: Minimum duration required
-  map_min_duration <- ggplot2::ggplot() +
-    ggplot2::geom_sf(
-      data      = min_spatial,
-      ggplot2::aes(fill = duration),
-      color     = "grey30",
-      linewidth = 0.25
-    ) +
-    ggplot2::geom_sf(
-      data      = adm1_sp,
-      fill      = NA,
-      color     = "black",
-      linewidth = 0.9
-    ) +
-    ggplot2::scale_fill_manual(
-      values   = dur_colours,
-      labels   = dur_labels,
-      na.value = "white",
-      name     = "Duration",
-      drop     = FALSE
-    ) +
-    ggplot2::coord_sf(datum = NA) +
-    ggplot2::labs(
-      title    = glue::glue(
-        "Minimum months to cover ~60% of {type_label_min}"
-      ),
-      subtitle = "Minimum SMC cycles required per district"
-    ) +
-    smc_theme
-
-  ggplot2::ggsave(
-    file.path(smc_fig_dir, glue::glue("{type}_cycles_minimum.png")),
-    map_min_duration, width = 10, height = 8, dpi = dpi
+  map_min_duration <- .build_snt_map(
+    adm2_sf     = min_spatial,
+    fill_col    = "duration",
+    fill_values = dur_colours,
+    fill_labels = dur_labels,
+    adm1_sf     = adm1_sp,
+    title       = glue::glue("Minimum months to cover ~60% of {type_label_min}"),
+    subtitle    = "Minimum SMC cycles required per district",
+    fill_label  = "Duration"
   )
+  .save_map(map_min_duration,
+            file.path(smc_fig_dir, glue::glue("{type}_cycles_minimum.png")),
+            dims, dpi)
 
-  # Map 2: First month of minimum best block
-  present_min_months <- as.character(
-    sort(unique(stats::na.omit(min_final$firmonth)))
+  present_min_months <- as.character(sort(unique(stats::na.omit(min_final$firmonth))))
+  map_min_firstmonth <- .build_snt_map(
+    adm2_sf     = min_spatial,
+    fill_col    = "firmonth_f",
+    fill_values = month_pal[present_min_months],
+    fill_labels = month_lbl[present_min_months],
+    adm1_sf     = adm1_sp,
+    title       = "First month for the minimum number of cycles",
+    subtitle    = glue::glue("Based on {tolower(type_label_min)}"),
+    fill_label  = "First Month"
   )
+  .save_map(map_min_firstmonth,
+            file.path(smc_fig_dir, glue::glue("{type}_block_minimum.png")),
+            dims, dpi)
 
-  map_min_firstmonth <- ggplot2::ggplot() +
-    ggplot2::geom_sf(
-      data      = min_spatial,
-      ggplot2::aes(fill = firmonth_f),
-      color     = "grey30",
-      linewidth = 0.25
-    ) +
-    ggplot2::geom_sf(
-      data      = adm1_sp,
-      fill      = NA,
-      color     = "black",
-      linewidth = 0.9
-    ) +
-    ggplot2::scale_fill_manual(
-      values   = month_pal[present_min_months],
-      labels   = month_lbl[present_min_months],
-      na.value = "white",
-      name     = "First Month",
-      drop     = FALSE
-    ) +
-    ggplot2::coord_sf(datum = NA) +
-    ggplot2::labs(
-      title    = "First month for the minimum number of cycles",
-      subtitle = glue::glue("Based on {tolower(type_label_min)}")
-    ) +
-    smc_theme
-
-  ggplot2::ggsave(
-    file.path(smc_fig_dir, glue::glue("{type}_block_minimum.png")),
-    map_min_firstmonth, width = 10, height = 8, dpi = dpi
+  present_min_cats <- as.character(sort(unique(stats::na.omit(min_final$median_cats))))
+  map_min_coverage <- .build_snt_map(
+    adm2_sf     = min_spatial,
+    fill_col    = "median_cats_f",
+    fill_values = cov_pal[present_min_cats],
+    fill_labels = cov_lbl[present_min_cats],
+    adm1_sf     = adm1_sp,
+    title       = glue::glue("% of {type_label_min} Covered (minimum block)"),
+    subtitle    = "Median proportion captured by the minimum best block",
+    fill_label  = "% Covered"
   )
-
-  # Map 3: % of metric covered by the minimum best block
-  present_min_cats <- as.character(
-    sort(unique(stats::na.omit(min_final$median_cats)))
-  )
-
-  map_min_coverage <- ggplot2::ggplot() +
-    ggplot2::geom_sf(
-      data      = min_spatial,
-      ggplot2::aes(fill = median_cats_f),
-      color     = "grey30",
-      linewidth = 0.25
-    ) +
-    ggplot2::geom_sf(
-      data      = adm1_sp,
-      fill      = NA,
-      color     = "black",
-      linewidth = 0.9
-    ) +
-    ggplot2::scale_fill_manual(
-      values   = cov_pal[present_min_cats],
-      labels   = cov_lbl[present_min_cats],
-      na.value = "white",
-      name     = "% Covered",
-      drop     = FALSE
-    ) +
-    ggplot2::coord_sf(datum = NA) +
-    ggplot2::labs(
-      title    = glue::glue("% of {type_label_min} Covered (minimum block)"),
-      subtitle = "Median proportion captured by the minimum best block"
-    ) +
-    smc_theme
-
-  ggplot2::ggsave(
-    file.path(smc_fig_dir, glue::glue("{type}_prop_minimum.png")),
-    map_min_coverage, width = 10, height = 8, dpi = dpi
-  )
+  .save_map(map_min_coverage,
+            file.path(smc_fig_dir, glue::glue("{type}_prop_minimum.png")),
+            dims, dpi)
 
   cli::cli_alert_success(
-    "Minimum best block maps saved \u2192 {.path {smc_fig_dir}}"
+    "Minimum best block maps saved \u2192 {.path { .relative_path(smc_fig_dir)}}"
   )
 
   invisible(list(
-    timing_maps      = timing_maps,
-    coverage_maps    = coverage_maps,
-    eligible         = eligible,
-    min_best_table   = export_min,
-    min_best_maps    = list(
+    timing_maps    = timing_maps,
+    coverage_maps  = coverage_maps,
+    eligible       = eligible,
+    min_best_table = export_min,
+    min_best_maps  = list(
       duration   = map_min_duration,
       firstmonth = map_min_firstmonth,
       coverage   = map_min_coverage
@@ -1369,46 +1502,25 @@ run_seasonality_pipeline <- function(
     adm1_var, adm2_var, year_var, month_var,
     case_var_ov5, case_var_u5, rainfall_total_var,
     case_rain_s_date, case_rain_e_date,
+    crude_s_date = NULL, crude_e_date = NULL,
     s_year, e_year,
     panels_per_row,
     fig_root, dpi
 ) {
-  # ── output dirs ─────────────────────────────────────────────────────────────
-  # Median → val_fig/cas_v_pluie/
-  # Crude  → val_fig/cas_v_pluie_crude/
-
   median_dir <- file.path(fig_root, "cas_v_pluie")
   crude_dir  <- file.path(fig_root, "cas_v_pluie_crude")
   .ensure_dir(median_dir)
   .ensure_dir(crude_dir)
 
-  # ── resolve date filter ──────────────────────────────────────────────────────
-  # Prefer explicit case_rain_s/e_date; fall back to s_year/e_year; else NA.
-  # Use plain if/else — dplyr::case_when() is for vectors inside mutate(),
-  # not for scalar conditionals, and returns length-0 when all inputs are NULL.
+  # ── resolve date filters ─────────────────────────────────────────────────────
 
-  s_date_resolved <- if (!is.null(case_rain_s_date)) {
-    as.Date(case_rain_s_date)
-  } else if (!is.null(s_year)) {
-    as.Date(sprintf("%04d-01-01", s_year))
-  } else {
-    NA_real_
-  }
+  s_date_resolved <- .resolve_date(case_rain_s_date, s_year, "start")
+  e_date_resolved <- .resolve_date(case_rain_e_date, e_year, "end")
 
-  e_date_resolved <- if (!is.null(case_rain_e_date)) {
-    as.Date(case_rain_e_date)
-  } else if (!is.null(e_year)) {
-    as.Date(sprintf("%04d-12-31", e_year))
-  } else {
-    NA_real_
-  }
-
-  # ── load raw data ────────────────────────────────────────────────────────────
+  # ── load and validate raw data ───────────────────────────────────────────────
 
   case_raw <- sntutils::read_snt_data(
-    dirs$dhis2,
-    glue::glue("{iso3}_dhis2_processed"),
-    "xlsx"
+    dirs$dhis2, glue::glue("{iso3}_dhis2_processed"), "xlsx"
   )
 
   required_case <- c(adm1_var, adm2_var, year_var, month_var,
@@ -1423,9 +1535,7 @@ run_seasonality_pipeline <- function(
   }
 
   rain_raw <- sntutils::read_snt_data(
-    dirs$climate,
-    glue::glue("{iso3}_rainfall_processed"),
-    "xlsx"
+    dirs$climate, glue::glue("{iso3}_rainfall_processed"), "xlsx"
   )
 
   required_rain <- c(adm1_var, adm2_var, year_var, month_var, rainfall_total_var)
@@ -1438,20 +1548,17 @@ run_seasonality_pipeline <- function(
     ))
   }
 
-  # ── aggregate case data ──────────────────────────────────────────────────────
+  # ── aggregate ────────────────────────────────────────────────────────────────
 
   case_df <- case_raw |>
-    dplyr::filter(
-      dplyr::if_all(dplyr::all_of(c(case_var_ov5, case_var_u5)), ~ !is.na(.))
-    ) |>
+    dplyr::filter(dplyr::if_all(
+      dplyr::all_of(c(case_var_ov5, case_var_u5)), ~ !is.na(.)
+    )) |>
     dplyr::select(dplyr::all_of(required_case)) |>
     dplyr::rename(
-      adm1  = !!adm1_var,
-      adm2  = !!adm2_var,
-      year  = !!year_var,
-      month = !!month_var,
-      conf_ov5 = !!case_var_ov5,
-      conf_u5  = !!case_var_u5
+      adm1 = !!adm1_var, adm2 = !!adm2_var,
+      year = !!year_var, month = !!month_var,
+      conf_ov5 = !!case_var_ov5, conf_u5 = !!case_var_u5
     ) |>
     dplyr::group_by(adm1, adm2, year, month) |>
     dplyr::summarise(
@@ -1461,15 +1568,14 @@ run_seasonality_pipeline <- function(
     ) |>
     dplyr::mutate(date = as.Date(sprintf("%04d-%02d-01", year, month)))
 
-  # ── aggregate rainfall data ──────────────────────────────────────────────────
-
-  rain_df <- rain_raw |>
+  # Aggregate rainfall to adm/year/month WITHOUT any date filter yet.
+  # The median window and the crude window are independent — applying one
+  # filter before the other would discard rain rows the second path needs.
+  rain_df_full <- rain_raw |>
     dplyr::select(dplyr::all_of(required_rain)) |>
     dplyr::rename(
-      adm1  = !!adm1_var,
-      adm2  = !!adm2_var,
-      year  = !!year_var,
-      month = !!month_var,
+      adm1 = !!adm1_var, adm2 = !!adm2_var,
+      year = !!year_var, month = !!month_var,
       total_rainfall_mm = !!rainfall_total_var
     ) |>
     dplyr::group_by(adm1, adm2, year, month) |>
@@ -1479,16 +1585,14 @@ run_seasonality_pipeline <- function(
     ) |>
     dplyr::mutate(date = as.Date(sprintf("%04d-%02d-01", year, month)))
 
-  # Apply date filter to rainfall
-  if (!is.na(s_date_resolved)) rain_df <- rain_df |>
-      dplyr::filter(date >= s_date_resolved)
-  if (!is.na(e_date_resolved)) rain_df <- rain_df |>
-      dplyr::filter(date <= e_date_resolved)
+  # ── median plot data ─────────────────────────────────────────────────────────
+  # Apply the shared case_rain date window to rainfall for the median path.
 
-  # ── MEDIAN PLOT DATA ─────────────────────────────────────────────────────────
-  # Join → filter to period → group by month (1-12) → take median across years
+  rain_median <- rain_df_full
+  if (!is.na(s_date_resolved)) rain_median <- rain_median |> dplyr::filter(date >= s_date_resolved)
+  if (!is.na(e_date_resolved)) rain_median <- rain_median |> dplyr::filter(date <= e_date_resolved)
 
-  combined_raw <- rain_df |>
+  combined_raw <- rain_median |>
     dplyr::left_join(
       case_df |> dplyr::select(adm1, adm2, year, month, conf_ov5, conf_u5),
       by = c("adm1", "adm2", "year", "month")
@@ -1503,81 +1607,91 @@ run_seasonality_pipeline <- function(
       .groups = "drop"
     )
 
-  # ── CRUDE PLOT DATA ──────────────────────────────────────────────────────────
-  # Full join on actual dates — rainfall drives date range, cases overlay
+  # ── crude plot data ──────────────────────────────────────────────────────────
+  # crude_s/e_date are independent of case_rain_s/e_date.  When the user
+  # supplies crude_s_date / crude_e_date (e.g. because cases start in 2020
+  # while rainfall starts in 2014), those values take full precedence.
+  # Only fall back to the shared case_rain dates if the crude-specific ones
+  # were not provided at all — never chain through the already-filtered copy.
 
-  case_date_filtered <- case_df
-  if (!is.na(s_date_resolved))
-    case_date_filtered <- case_date_filtered |> dplyr::filter(date >= s_date_resolved)
-  if (!is.na(e_date_resolved))
-    case_date_filtered <- case_date_filtered |> dplyr::filter(date <= e_date_resolved)
+  crude_s_resolved <- .resolve_date(crude_s_date, NULL, "start")
+  if (is.na(crude_s_resolved))
+    crude_s_resolved <- .resolve_date(case_rain_s_date, s_year, "start")
+
+  crude_e_resolved <- .resolve_date(crude_e_date, NULL, "end")
+  if (is.na(crude_e_resolved))
+    crude_e_resolved <- .resolve_date(case_rain_e_date, e_year, "end")
+
+  # Both series filtered from the full (unsliced) data independently
+  crude_rain <- rain_df_full
+  if (!is.na(crude_s_resolved)) crude_rain <- crude_rain |> dplyr::filter(date >= crude_s_resolved)
+  if (!is.na(crude_e_resolved)) crude_rain <- crude_rain |> dplyr::filter(date <= crude_e_resolved)
+
+  case_crude <- case_df
+  if (!is.na(crude_s_resolved)) case_crude <- case_crude |> dplyr::filter(date >= crude_s_resolved)
+  if (!is.na(crude_e_resolved)) case_crude <- case_crude |> dplyr::filter(date <= crude_e_resolved)
 
   combined_crude <- dplyr::full_join(
-    rain_df         |> dplyr::select(adm1, adm2, date, total_rainfall_mm),
-    case_date_filtered |> dplyr::select(adm1, adm2, date, conf_ov5, conf_u5),
+    crude_rain |> dplyr::select(adm1, adm2, date, total_rainfall_mm),
+    case_crude |> dplyr::select(adm1, adm2, date, conf_ov5, conf_u5),
     by = c("adm1", "adm2", "date")
   ) |>
     dplyr::filter(!is.na(date))
 
-  # ── GENERATE PLOTS ───────────────────────────────────────────────────────────
+  # ── generate plots ───────────────────────────────────────────────────────────
 
   adm1_regions <- sort(unique(df_median$adm1))
 
   median_plots <- purrr::map(purrr::set_names(adm1_regions), function(region) {
     n_adm2 <- dplyr::n_distinct(df_median$adm2[df_median$adm1 == region])
-
-    # Adapt panels_per_row to district count so no region exceeds ~30 inches wide
-    ppr <- dplyr::case_when(
-      n_adm2 >= 30 ~ 6L,
-      n_adm2 >= 15 ~ 5L,
-      n_adm2 >= 9  ~ 4L,
-      TRUE         ~ as.integer(panels_per_row)
-    )
-
+    ppr    <- .adapt_panels_per_row(n_adm2, panels_per_row)
     p      <- .build_median_adm1_plot(df_median, region, ppr)
     n_rows <- ceiling(n_adm2 / ppr)
 
     ggplot2::ggsave(
-      filename = glue::glue("Cases_v_rainfall_median_{region}.png"),
-      plot     = p,
-      path     = median_dir,
-      width    = ppr * 5,
-      height   = 3.5 * n_rows + 1.5,
-      dpi      = dpi,
-      bg       = "white",
-      limitsize = FALSE
+      filename  = glue::glue("Cases_v_rainfall_median_{region}.png"),
+      plot      = p, path = median_dir,
+      width = ppr * 5, height = 3.5 * n_rows + 1.5,
+      dpi = dpi, bg = "white", limitsize = FALSE
     )
-
     cli::cli_alert_success("Median plot saved: {.val {region}}")
     p
   })
 
   adm1_crude <- sort(unique(combined_crude$adm1))
 
+  if (length(adm1_crude) == 0) {
+    cli::cli_warn(c(
+      "No crude plots produced \u2014 combined_crude is empty.",
+      "i" = "Check that {.arg crude_s_date}/{.arg crude_e_date} overlap with both datasets.",
+      "i" = "Rainfall runs {.val {format(min(rain_df_full$date), '%Y-%m')}} \u2013 {.val {format(max(rain_df_full$date), '%Y-%m')}}.",
+      "i" = "Cases run {.val {format(min(case_df$date), '%Y-%m')}} \u2013 {.val {format(max(case_df$date), '%Y-%m')}}."
+    ))
+  }
+
   crude_plots <- purrr::map(purrr::set_names(adm1_crude), function(region) {
+    region_data <- combined_crude |> dplyr::filter(adm1 == region)
+
+    # Warn if case columns are entirely NA for this region in this window —
+    # this happens when crude_s_date predates the start of case reporting.
+    cases_in_window <- any(!is.na(region_data$conf_ov5) | !is.na(region_data$conf_u5))
+    if (!cases_in_window) {
+      cli::cli_warn(c(
+        "Crude plot for {.val {region}}: no case data in the selected date window.",
+        "i" = "Only rainfall will be visible. Adjust {.arg crude_s_date} if needed."
+      ))
+    }
     n_adm2 <- dplyr::n_distinct(combined_crude$adm2[combined_crude$adm1 == region])
-
-    ppr <- dplyr::case_when(
-      n_adm2 >= 30 ~ 6L,
-      n_adm2 >= 15 ~ 5L,
-      n_adm2 >= 9  ~ 4L,
-      TRUE         ~ as.integer(panels_per_row)
-    )
-
+    ppr    <- .adapt_panels_per_row(n_adm2, panels_per_row)
     p      <- .build_crude_adm1_plot(combined_crude, region, ppr)
     n_rows <- ceiling(n_adm2 / ppr)
 
     ggplot2::ggsave(
-      filename = glue::glue("Cases_v_rainfall_crude_{region}.png"),
-      plot     = p,
-      path     = crude_dir,
-      width    = ppr * 5,
-      height   = 3.5 * n_rows + 1.5,
-      dpi      = dpi,
-      bg       = "white",
-      limitsize = FALSE
+      filename  = glue::glue("Cases_v_rainfall_crude_{region}.png"),
+      plot      = p, path = crude_dir,
+      width = ppr * 5, height = 3.5 * n_rows + 1.5,
+      dpi = dpi, bg = "white", limitsize = FALSE
     )
-
     cli::cli_alert_success("Crude plot saved: {.val {region}}")
     p
   })
@@ -1587,10 +1701,244 @@ run_seasonality_pipeline <- function(
 
 
 # ==============================================================================
+# INTERNAL HELPERS — shared aesthetics
+# ==============================================================================
+
+#' Shared minimal ggplot theme for line/facet plots
+#' @keywords internal
+.snt_theme_minimal <- function(base_size = 12) {
+  ggplot2::theme_minimal(base_size = base_size) +
+    ggplot2::theme(
+      plot.title       = ggplot2::element_text(size = 16, face = "bold", hjust = 0.5),
+      plot.subtitle    = ggplot2::element_text(size = 11, hjust = 0.5, color = "gray30"),
+      strip.text       = ggplot2::element_text(size = 10, face = "bold"),
+      legend.position  = "bottom",
+      panel.grid.minor = ggplot2::element_blank(),
+      axis.text.x      = ggplot2::element_text(angle = 45, hjust = 1)
+    )
+}
+
+#' Company-standard map theme
+#'
+#' Aligns with \code{facetted_map_bins}: \code{theme_void()} base, bottom
+#' horizontal legend, strip text with breathing room, tight plot margins.
+#'
+#' @param title_size,subtitle_size,legend_title_size Font sizes.
+#' @keywords internal
+.snt_theme_map <- function(title_size = 14, subtitle_size = 11,
+                           legend_title_size = 10) {
+  ggplot2::theme_void() +
+    ggplot2::theme(
+      # ── titles ───────────────────────────────────────────────────────────────
+      plot.title    = ggplot2::element_text(
+        size   = title_size,
+        face   = "bold",
+        hjust  = 0,
+        margin = ggplot2::margin(b = 8)
+      ),
+      plot.subtitle = ggplot2::element_text(
+        size   = subtitle_size,
+        hjust  = 0,
+        margin = ggplot2::margin(b = 10)
+      ),
+      plot.caption  = ggplot2::element_text(
+        size   = 8,
+        hjust  = 1,
+        color  = "grey50",
+        margin = ggplot2::margin(t = 6)
+      ),
+      # ── legend ───────────────────────────────────────────────────────────────
+      legend.position      = "bottom",
+      legend.direction     = "horizontal",
+      legend.title         = ggplot2::element_text(
+        size   = legend_title_size,
+        face   = "bold",
+        margin = ggplot2::margin(b = 6)
+      ),
+      legend.text          = ggplot2::element_text(size = 9),
+      legend.box.margin    = ggplot2::margin(t = 8),
+      # ── facet strips (for any multi-panel map) ───────────────────────────────
+      strip.text   = ggplot2::element_text(
+        face   = "bold",
+        size   = 10,
+        margin = ggplot2::margin(t = 2, b = 6, l = 4, r = 4)
+      ),
+      strip.text.y = ggplot2::element_text(angle = -90),
+      panel.spacing = grid::unit(4, "pt"),
+      # ── outer margin ─────────────────────────────────────────────────────────
+      plot.margin = ggplot2::margin(t = 5, r = 5, b = 5, l = 5)
+    )
+}
+
+
+#' Derive map output dimensions from a country's bounding box
+#'
+#' Reads the bounding box of an \code{sf} object and returns \code{width} and
+#' \code{height} in inches scaled so that the longer axis is capped at
+#' \code{max_long_side} and the shorter axis reflects the true aspect ratio.
+#' Replaces hardcoded \code{width = 10, height = 8} across all map saves.
+#'
+#' @param shp An \code{sf} object. Only the bounding box is used.
+#' @param max_long_side Numeric. Maximum inches for the longer axis. Default \code{11}.
+#' @param min_inches Numeric. Minimum inches for either axis. Default \code{5}.
+#' @param extra_height Numeric. Extra inches added to height for the bottom
+#'   legend and title. Default \code{1.8}.
+#' @return Named numeric vector with elements \code{width} and \code{height}.
+#' @keywords internal
+.compute_map_dims <- function(shp, max_long_side = 11,
+                              min_inches = 5, extra_height = 1.8) {
+  bb      <- sf::st_bbox(shp)
+  lon_ext <- as.numeric(bb["xmax"] - bb["xmin"])
+  lat_ext <- as.numeric(bb["ymax"] - bb["ymin"])
+
+  if (lon_ext <= 0 || lat_ext <= 0) return(c(width = 10, height = 8))
+
+  aspect <- lon_ext / lat_ext
+
+  if (aspect >= 1) {
+    width  <- max_long_side
+    height <- max_long_side / aspect
+  } else {
+    height <- max_long_side
+    width  <- max_long_side * aspect
+  }
+
+  width  <- max(min_inches, width)
+  height <- max(min_inches, height) + extra_height
+
+  c(width = round(width, 1), height = round(height, 1))
+}
+
+
+#' Build a single SNT choropleth map (company standard)
+#'
+#' Central factory used by \code{.build_seasonality_maps()} and
+#' \code{.run_smc_maps_step()}. Applies \code{facetted_map_bins} principles:
+#' \code{theme_void()} base, white district borders at \code{linewidth = 0.15},
+#' \code{inherit.aes = FALSE} on the ADM1 overlay, and a bottom horizontal
+#' legend via \code{guide_legend(nrow = 1, label.position = "bottom")}.
+#'
+#' @param adm2_sf  \code{sf} polygon object at ADM2 level containing the fill
+#'   variable.
+#' @param fill_col Character. Column in \code{adm2_sf} mapped to fill.
+#'   Must already be a factor whose levels match \code{fill_values}.
+#' @param fill_values Named character vector of colours.
+#' @param fill_labels Named character vector of legend labels, or \code{NULL}
+#'   to use the names of \code{fill_values}.
+#' @param adm1_sf Optional \code{sf} polygon object overlaid as province
+#'   outlines.
+#' @param title,subtitle,caption Optional character scalars.
+#' @param fill_label Character. Legend title. Default \code{NULL}.
+#' @param na_value Colour for \code{NA} districts. Default \code{"grey92"}.
+#' @return A \code{ggplot} object.
+#' @keywords internal
+.build_snt_map <- function(adm2_sf,
+                           fill_col,
+                           fill_values,
+                           fill_labels   = NULL,
+                           adm1_sf       = NULL,
+                           title         = NULL,
+                           subtitle      = NULL,
+                           caption       = NULL,
+                           fill_label    = NULL,
+                           na_value      = "grey92") {
+
+  p <- ggplot2::ggplot(adm2_sf) +
+    ggplot2::geom_sf(
+      ggplot2::aes(fill = .data[[fill_col]]),
+      color     = "white",
+      linewidth = 0.15,
+      na.rm     = TRUE
+    )
+
+  if (!is.null(adm1_sf)) {
+    p <- p +
+      ggplot2::geom_sf(
+        data        = adm1_sf,
+        fill        = NA,
+        color       = "black",
+        linewidth   = 0.4,
+        inherit.aes = FALSE
+      )
+  }
+
+  p +
+    ggplot2::scale_fill_manual(
+      values   = fill_values,
+      labels   = fill_labels %||% names(fill_values),
+      na.value = na_value,
+      name     = fill_label,
+      drop     = FALSE,
+      guide    = ggplot2::guide_legend(
+        label.position = "bottom",
+        title.position = "top",
+        title.hjust    = 0.5,
+        override.aes   = list(color = "grey40", linewidth = 0.3),
+        nrow           = 1,
+        byrow          = TRUE
+      )
+    ) +
+    ggplot2::coord_sf(datum = NA) +
+    ggplot2::labs(title = title, subtitle = subtitle, caption = caption) +
+    .snt_theme_map()
+}
+
+
+#' Save a map with responsive dimensions
+#'
+#' Thin wrapper around \code{ggplot2::ggsave()} that accepts the output of
+#' \code{.compute_map_dims()} and logs a clean relative path.
+#'
+#' @param plot A \code{ggplot} object.
+#' @param path Full file path including filename and extension.
+#' @param dims Named numeric vector from \code{.compute_map_dims()}.
+#' @param dpi Numeric. Resolution. Default \code{300}.
+#' @keywords internal
+.save_map <- function(plot, path, dims, dpi = 300) {
+  ggplot2::ggsave(
+    filename  = path,
+    plot      = plot,
+    width     = dims[["width"]],
+    height    = dims[["height"]],
+    dpi       = dpi,
+    limitsize = FALSE
+  )
+  cli::cli_alert_success("Map saved \u2192 {.path { .relative_path(path)}}")
+  invisible(path)
+}
+
+#' Categorise median_max_prop into 6 coverage bands
+#' Extracted as a helper so the same logic isn't copy-pasted in two places.
+#' @keywords internal
+.categorise_median_prop <- function(x) {
+  dplyr::case_when(
+    x <  40                    ~ 1L,
+    x >= 40 & x <  50          ~ 2L,
+    x >= 50 & x <  60          ~ 3L,
+    x >= 60 & x <  70          ~ 4L,
+    x >= 70 & x <  80          ~ 5L,
+    x >= 80 & x <= 100         ~ 6L,
+    TRUE                       ~ NA_integer_
+  )
+}
+
+#' Adapt panels_per_row to district count
+#' Mirrors MBG pipeline's repeated case_when logic, extracted to a helper.
+#' @keywords internal
+.adapt_panels_per_row <- function(n_adm2, default_ppr) {
+  dplyr::case_when(
+    n_adm2 >= 30 ~ 6L,
+    n_adm2 >= 15 ~ 5L,
+    n_adm2 >= 9  ~ 4L,
+    TRUE         ~ as.integer(default_ppr)
+  )
+}
+
+
+# ==============================================================================
 # INTERNAL HELPERS — case vs rainfall plot builders
 # ==============================================================================
 
-#' Single district panel — median version (x = month 1–12)
 #' @keywords internal
 .build_median_adm2_plot <- function(data, adm2_name,
                                     show_y_left = TRUE, show_y_right = TRUE) {
@@ -1600,25 +1948,17 @@ run_seasonality_pipeline <- function(
   scale_factor  <- if (max_rain > 0) max_cases / max_rain else 1
 
   ggplot2::ggplot(d, ggplot2::aes(x = month)) +
-    ggplot2::geom_line(
-      ggplot2::aes(y = total_rainfall_mm * scale_factor, color = "Pluie"),
-      linewidth = 1.2
-    ) +
-    ggplot2::geom_line(
-      ggplot2::aes(y = conf_ov5, color = "Cas >5 ans"),
-      linewidth = 1.2
-    ) +
-    ggplot2::geom_line(
-      ggplot2::aes(y = conf_u5, color = "Cas <5 ans"),
-      linewidth = 1.2
-    ) +
+    ggplot2::geom_line(ggplot2::aes(y = total_rainfall_mm * scale_factor,
+                                    color = "Pluie"), linewidth = 1.2) +
+    ggplot2::geom_line(ggplot2::aes(y = conf_ov5, color = "Cas >5 ans"), linewidth = 1.2) +
+    ggplot2::geom_line(ggplot2::aes(y = conf_u5,  color = "Cas <5 ans"), linewidth = 1.2) +
     ggplot2::scale_y_continuous(
-      name   = if (show_y_left) "Cas confirm\u00e9s (m\u00e9diane)" else NULL,
+      name = if (show_y_left) "Cas confirm\u00e9s (m\u00e9diane)" else NULL,
       labels = scales::comma,
       sec.axis = ggplot2::sec_axis(
         transform = ~ . / scale_factor,
-        name      = if (show_y_right) "Pluie (mm)" else NULL,
-        labels    = scales::comma
+        name = if (show_y_right) "Pluie (mm)" else NULL,
+        labels = scales::comma
       )
     ) +
     ggplot2::scale_x_continuous(breaks = 1:12, labels = 1:12) +
@@ -1634,8 +1974,7 @@ run_seasonality_pipeline <- function(
       plot.title         = ggplot2::element_text(hjust = 0.5, face = "bold", size = 13),
       legend.position    = "none",
       panel.grid.minor   = ggplot2::element_blank(),
-      panel.border       = ggplot2::element_rect(color = "gray80", fill = NA,
-                                                  linewidth = 0.5),
+      panel.border       = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.5),
       axis.title.y.left  = if (show_y_left)  ggplot2::element_text(color = "black", size = 12)
                            else               ggplot2::element_blank(),
       axis.title.y.right = if (show_y_right) ggplot2::element_text(color = "black", size = 12)
@@ -1644,8 +1983,6 @@ run_seasonality_pipeline <- function(
     )
 }
 
-
-#' Assemble all district panels for one adm1 region — median version
 #' @keywords internal
 .build_median_adm1_plot <- function(data, adm1_name, panels_per_row = 3) {
   adm1_data    <- data |> dplyr::filter(adm1 == adm1_name)
@@ -1654,65 +1991,68 @@ run_seasonality_pipeline <- function(
 
   panel_list <- purrr::imap(
     adm2_regions,
-    ~ .build_median_adm2_plot(
+    \(adm2_name, idx) .build_median_adm2_plot(
       data         = adm1_data,
-      adm2_name    = .x,
-      show_y_left  = (.y == 1),
-      show_y_right = (.y == n)
+      adm2_name    = adm2_name,
+      show_y_left  = (idx %% panels_per_row == 1),
+      show_y_right = (idx %% panels_per_row == 0 | idx == n)
     )
   )
 
   legend_plot   <- .build_median_adm2_plot(adm1_data, adm2_regions[1]) +
-    ggplot2::theme(legend.position = "bottom")
+    ggplot2::theme(legend.position = "bottom",
+                   legend.text = ggplot2::element_text(size = 12, face = "bold"))
   shared_legend <- cowplot::get_legend(legend_plot)
 
   combined <- patchwork::wrap_plots(panel_list, ncol = panels_per_row) +
     patchwork::plot_annotation(
-      title = adm1_name,
+      title = toupper(adm1_name),
       theme = ggplot2::theme(
         plot.title = ggplot2::element_text(hjust = 0.5, face = "bold", size = 14)
       )
     )
 
-  cowplot::plot_grid(combined, shared_legend, ncol = 1, rel_heights = c(1, 0.08))
+  cowplot::plot_grid(combined, shared_legend, ncol = 1, rel_heights = c(1, 0.06))
 }
 
-
-#' Single district panel — crude version (x = real dates)
 #' @keywords internal
 .build_crude_adm2_plot <- function(data, adm2_name,
                                    show_y_left = TRUE, show_y_right = TRUE) {
   d            <- data |> dplyr::filter(adm2 == adm2_name)
-  max_cases    <- max(c(d$conf_ov5, d$conf_u5), na.rm = TRUE)
-  max_rain     <- max(d$total_rainfall_mm, na.rm = TRUE)
-  scale_factor <- if (max_rain > 0) max_cases / max_rain else 1
+  max_cases    <- suppressWarnings(max(c(d$conf_ov5, d$conf_u5), na.rm = TRUE))
+  max_rain     <- suppressWarnings(max(d$total_rainfall_mm,       na.rm = TRUE))
+
+  # Guard: if case data is entirely absent (crude date window predates case
+  # reporting), scale_factor would be -Inf / max_rain which silently corrupts
+  # the dual-axis and produces a blank plot.  Fall back to rainfall-only.
+  cases_present <- is.finite(max_cases) && max_cases > 0
+  scale_factor  <- if (is.finite(max_rain) && max_rain > 0 && cases_present) {
+    max_cases / max_rain
+  } else if (is.finite(max_rain) && max_rain > 0) {
+    1   # rainfall only — cases not yet available in this window
+  } else {
+    1
+  }
 
   ggplot2::ggplot(d, ggplot2::aes(x = date)) +
-    ggplot2::geom_line(
-      ggplot2::aes(y = total_rainfall_mm * scale_factor, color = "Pluie"),
-      linewidth = 1.0, na.rm = TRUE
-    ) +
-    ggplot2::geom_line(
-      ggplot2::aes(y = conf_ov5, color = "Cas >5 ans"),
-      linewidth = 1.0, na.rm = TRUE
-    ) +
-    ggplot2::geom_line(
-      ggplot2::aes(y = conf_u5, color = "Cas <5 ans"),
-      linewidth = 1.0, na.rm = TRUE
-    ) +
+    ggplot2::geom_line(ggplot2::aes(y = total_rainfall_mm * scale_factor,
+                                    color = "Pluie"), linewidth = 1.0, na.rm = TRUE) +
+    ggplot2::geom_line(ggplot2::aes(y = conf_ov5, color = "Cas >5 ans"),
+                       linewidth = 1.0, na.rm = TRUE) +
+    ggplot2::geom_line(ggplot2::aes(y = conf_u5,  color = "Cas <5 ans"),
+                       linewidth = 1.0, na.rm = TRUE) +
     ggplot2::scale_y_continuous(
-      name   = if (show_y_left) "Cas confirm\u00e9s" else NULL,
+      name = if (show_y_left) "Cas confirm\u00e9s" else NULL,
       labels = scales::comma,
       sec.axis = ggplot2::sec_axis(
         transform = ~ . / scale_factor,
-        name      = if (show_y_right) "Pluie (mm)" else NULL,
-        labels    = scales::comma
+        name = if (show_y_right) "Pluie (mm)" else NULL,
+        labels = scales::comma
       )
     ) +
     ggplot2::scale_x_date(
-      date_breaks = "6 months",
-      date_labels = "%b %Y",
-      expand      = ggplot2::expansion(mult = c(0, 0.01))
+      date_breaks = "6 months", date_labels = "%b %Y",
+      expand = ggplot2::expansion(mult = c(0, 0.01))
     ) +
     ggplot2::scale_color_manual(
       name   = "",
@@ -1726,8 +2066,7 @@ run_seasonality_pipeline <- function(
       plot.title         = ggplot2::element_text(hjust = 0.5, face = "bold", size = 11),
       legend.position    = "none",
       panel.grid.minor   = ggplot2::element_blank(),
-      panel.border       = ggplot2::element_rect(color = "gray80", fill = NA,
-                                                  linewidth = 0.5),
+      panel.border       = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.5),
       axis.text.x        = ggplot2::element_text(angle = 45, hjust = 1, size = 10),
       axis.text.y        = ggplot2::element_text(size = 10),
       axis.title.y.left  = if (show_y_left)  ggplot2::element_text(color = "black", size = 13)
@@ -1737,8 +2076,6 @@ run_seasonality_pipeline <- function(
     )
 }
 
-
-#' Assemble all district panels for one adm1 region — crude version
 #' @keywords internal
 .build_crude_adm1_plot <- function(data, adm1_name, panels_per_row = 3) {
   adm1_data    <- data |> dplyr::filter(adm1 == adm1_name)
@@ -1836,7 +2173,6 @@ run_seasonality_pipeline <- function(
   ))
 }
 
-
 #' Create a directory only if it does not already exist
 #' @keywords internal
 .ensure_dir <- function(path) {
@@ -1847,6 +2183,77 @@ run_seasonality_pipeline <- function(
   invisible(path)
 }
 
+#' Get a short project-relative path for CLI output
+#' Mirrors MBG pipeline's .relative_path() helper for clean path reporting.
+#' @keywords internal
+.relative_path <- function(path) {
+  path <- as.character(path)
+
+  match <- regmatches(
+    path,
+    regexpr("(01_data|02_scripts|03_outputs|04_reports|05_metadata_docs)/.*$", path)
+  )
+  if (length(match) > 0 && nchar(match) > 0) return(match)
+
+  rel <- tryCatch(
+    as.character(fs::path_rel(path, start = getwd())),
+    error = function(e) NULL
+  )
+  if (!is.null(rel) && !grepl("^\\.\\./\\.\\./\\.\\./", rel)) return(rel)
+
+  basename(path)
+}
+
+#' Resolve a date scalar from explicit date string or year integer
+#' Replaces repeated if/else chains in case_rain step.
+#' @keywords internal
+.resolve_date <- function(date_str, year_fallback, which = c("start", "end")) {
+  which <- match.arg(which)
+  if (!is.null(date_str)) return(as.Date(date_str))
+  if (!is.null(year_fallback)) {
+    suffix <- if (which == "start") "-01-01" else "-12-31"
+    return(as.Date(sprintf("%04d%s", year_fallback, suffix)))
+  }
+  NA_real_
+}
+
+#' Resolve optional adm3 lookup table for block step
+#' Mirrors the MBG pipeline's clean pattern of loading optional joins from
+#' raw source files rather than scattering the logic across the step body.
+#' @keywords internal
+.resolve_adm3_lookup <- function(dirs, iso3, type, adm1_var, adm2_var, adm3_var) {
+  if (is.null(adm3_var)) return(NULL)
+
+  cfg_type <- switch(type,
+    rainfall = list(folder = dirs$climate,
+                    filename = glue::glue("{iso3}_rainfall_processed")),
+    cases    = list(folder = dirs$dhis2,
+                    filename = glue::glue("{iso3}_dhis2_processed"))
+  )
+
+  raw <- tryCatch(
+    sntutils::read_snt_data(cfg_type$folder, cfg_type$filename, "xlsx"),
+    error = function(e) {
+      cli::cli_warn("Could not load source file for adm3 lookup: {e$message}")
+      return(NULL)
+    }
+  )
+  if (is.null(raw)) return(NULL)
+
+  if (!all(c(adm3_var, adm1_var, adm2_var) %in% names(raw))) {
+    cli::cli_warn(c(
+      "{.arg adm3_var} ({.val {adm3_var}}) or parent columns not found in {.val {type}} source data.",
+      "i" = "Proceeding without adm3."
+    ))
+    return(NULL)
+  }
+
+  raw |>
+    dplyr::select(dplyr::all_of(c(adm1_var, adm2_var, adm3_var))) |>
+    dplyr::rename(adm1 = !!adm1_var, adm2 = !!adm2_var, adm3 = !!adm3_var) |>
+    dplyr::distinct() |>
+    dplyr::mutate(district = paste(adm1, adm2, sep = " - "))
+}
 
 #' Consistent naming helpers
 #' @keywords internal
@@ -1859,6 +2266,9 @@ run_seasonality_pipeline <- function(
   switch(type, rainfall = "rainfall", cases = paste0("cases_", strat, "_block"))
 }
 
+#' NULL coalescing operator
+#' @keywords internal
+`%||%` <- function(x, y) if (!is.null(x)) x else y
 
 #' Load and aggregate raw source data to adm/year/month level
 #' @keywords internal
@@ -1869,12 +2279,12 @@ run_seasonality_pipeline <- function(
     rainfall = list(
       folder   = dirs$climate,
       filename = glue::glue("{iso3}_rainfall_processed"),
-      col_src  = if (!is.null(value_var)) value_var else "mean_rainfall_mm"
+      col_src  = value_var %||% "mean_rainfall_mm"
     ),
     cases = list(
       folder   = dirs$dhis2,
       filename = glue::glue("{iso3}_dhis2_processed"),
-      col_src  = if (!is.null(value_var)) value_var else "conf"
+      col_src  = value_var %||% "conf"
     )
   )
 
@@ -1923,7 +2333,6 @@ run_seasonality_pipeline <- function(
     )
 }
 
-
 #' Filter data to a year or date range
 #' @keywords internal
 .filter_years <- function(df, s_year, e_year, col = "year") {
@@ -1931,7 +2340,6 @@ run_seasonality_pipeline <- function(
   if (!is.null(e_year)) df <- df |> dplyr::filter(.data[[col]] <= e_year)
   df
 }
-
 
 #' Paste admin columns into a single admin_group string
 #' @keywords internal
@@ -1942,11 +2350,9 @@ run_seasonality_pipeline <- function(
     )
 }
 
-
 #' Read detailed seasonality results from memory or disk
 #' @keywords internal
-.get_or_read_detailed <- function(in_memory, tbl_root, iso3, type,
-                                  strat = "ov5") {
+.get_or_read_detailed <- function(in_memory, tbl_root, iso3, type, strat = "ov5") {
   if (!is.null(in_memory)) return(in_memory)
 
   type_pfx  <- .type_prefix(type, strat)
@@ -1968,11 +2374,9 @@ run_seasonality_pipeline <- function(
   result
 }
 
-
 #' Read block frequency from memory or disk
 #' @keywords internal
-.get_or_read_block_freq <- function(in_memory, tbl_root, iso3, type,
-                                    strat = "ov5") {
+.get_or_read_block_freq <- function(in_memory, tbl_root, iso3, type, strat = "ov5") {
   if (!is.null(in_memory)) return(in_memory)
 
   tbl_sub   <- file.path(tbl_root, .type_tbl_subdir(type, strat))
@@ -1996,7 +2400,7 @@ run_seasonality_pipeline <- function(
 
 
 # ==============================================================================
-# INTERNAL HELPERS — seasonality analysis
+# INTERNAL HELPERS — seasonality analysis (unchanged logic, cleaner structure)
 # ==============================================================================
 
 #' Generate rolling 4-month + 12-month block definitions
@@ -2043,7 +2447,6 @@ run_seasonality_pipeline <- function(
   blocks
 }
 
-
 #' Calculate seasonality % per admin unit per block
 #' @keywords internal
 .calculate_seasonality <- function(df, blocks, seasonality_threshold) {
@@ -2085,7 +2488,6 @@ run_seasonality_pipeline <- function(
   detailed
 }
 
-
 #' Yearly summary from detailed block results
 #' @keywords internal
 .build_yearly_summary <- function(detailed_results) {
@@ -2111,7 +2513,6 @@ run_seasonality_pipeline <- function(
     dplyr::arrange(Year, adm1, adm2)
 }
 
-
 #' Classify each location as Seasonal / Not Seasonal
 #' @keywords internal
 .build_location_summary <- function(yearly_summary, max_non_seasonal_years) {
@@ -2131,7 +2532,6 @@ run_seasonality_pipeline <- function(
     ) |>
     dplyr::arrange(adm1, adm2)
 }
-
 
 #' Build all seasonality maps (years count + binary + cumulative thresholds)
 #' @keywords internal
@@ -2154,7 +2554,10 @@ run_seasonality_pipeline <- function(
   yr_range   <- glue::glue("{min(available_years)}\u2013{max(available_years)}")
   n_years    <- length(available_years)
 
-  # ── Map 1: Seasonal years count (choropleth 0–11) ───────────────────────────
+  # ── responsive dimensions — one bbox read, reused for every map ──────────────
+  dims <- .compute_map_dims(adm2_sp)
+
+  # ── Map 1: Seasonal years count ──────────────────────────────────────────────
 
   merged$category <- factor(
     as.character(tidyr::replace_na(merged$SeasonalYears, 0)),
@@ -2162,96 +2565,68 @@ run_seasonality_pipeline <- function(
   )
 
   cat_pal <- c(
-    "0"="#ffffff","1"="#ffeda0","2"="#fed976","3"="#feb24c",
-    "4"="#fd8d3c","5"="#fc4e2a","6"="#e31a1c","7"="#bd0026",
-    "8"="#800026","9"="#67001f","10"="#4d0016","11"="#33000d"
+    "0"  = "#ffffff", "1"  = "#ffeda0", "2"  = "#fed976", "3"  = "#feb24c",
+    "4"  = "#fd8d3c", "5"  = "#fc4e2a", "6"  = "#e31a1c", "7"  = "#bd0026",
+    "8"  = "#800026", "9"  = "#67001f", "10" = "#4d0016", "11" = "#33000d"
   )
   cat_n   <- table(merged$category)
   cat_n   <- cat_n[cat_n > 0]
   cat_pal <- cat_pal[names(cat_pal) %in% names(cat_n)]
-  cat_lbl <- paste0(
-    names(cat_n), " year",
-    ifelse(as.integer(names(cat_n)) != 1, "s", ""),
-    " (n=", cat_n, ")"
+  cat_lbl <- stats::setNames(
+    paste0(names(cat_n), " year",
+           ifelse(as.integer(names(cat_n)) != 1, "s", ""),
+           " (n=", cat_n, ")"),
+    names(cat_n)
   )
-  names(cat_lbl) <- names(cat_n)
 
-  p1 <- ggplot2::ggplot() +
-    ggplot2::geom_sf(data = merged, ggplot2::aes(fill = category),
-                     color = "grey30", linewidth = 0.25) +
-    ggplot2::geom_sf(data = adm1_sp, fill = NA, color = "black", linewidth = 0.9) +
-    ggplot2::scale_fill_manual(
-      values = cat_pal, labels = cat_lbl, drop = FALSE,
-      name   = glue::glue("Years with\nseasonal {tolower(type_label)} peaks")
-    ) +
-    ggplot2::coord_sf(datum = NA) +
-    ggplot2::labs(
-      title    = glue::glue("Seasonality of {type_label} in {adm0_name}"),
-      subtitle = glue::glue(
-        "Number of years with seasonal peaks eligible for SMC ({yr_range})"
-      )
-    ) +
-    ggplot2::theme_minimal(base_size = 14) +
-    ggplot2::theme(
-      panel.grid.major = ggplot2::element_blank(),
-      panel.grid.minor = ggplot2::element_blank(),
-      plot.title       = ggplot2::element_text(face = "bold", size = 18),
-      plot.margin      = ggplot2::margin(5, 15, 2, 2)
-    )
-
-  ggplot2::ggsave(
+  p1 <- .build_snt_map(
+    adm2_sf     = merged,
+    fill_col    = "category",
+    fill_values = cat_pal,
+    fill_labels = cat_lbl,
+    adm1_sf     = adm1_sp,
+    title       = glue::glue("Seasonality of {type_label} in {adm0_name}"),
+    subtitle    = glue::glue(
+      "Number of years with seasonal peaks eligible for SMC ({yr_range})"
+    ),
+    fill_label  = glue::glue("Years with seasonal {tolower(type_label)} peaks")
+  )
+  .save_map(
+    p1,
     file.path(fig_dir, glue::glue("{iso3}_{type}_seasonality_years_map.png")),
-    p1, width = 10, height = 8, dpi = dpi
+    dims, dpi
   )
 
-  # ── Map 2: Binary Seasonal / Not Seasonal ───────────────────────────────────
+  # ── Map 2: Binary Seasonal / Not Seasonal ────────────────────────────────────
 
-  merged$Seasonality <- factor(
-    merged$Seasonality, levels = c("Seasonal", "Not Seasonal")
-  )
-
+  merged$Seasonality <- factor(merged$Seasonality,
+                               levels = c("Seasonal", "Not Seasonal"))
   cls_pal <- c("Seasonal" = "#2d8659", "Not Seasonal" = "#f7f7f7")
   cls_n   <- table(merged$Seasonality)
   cls_n   <- cls_n[cls_n > 0]
-  cls_lbl <- c(
-    "Seasonal"     = paste0("SMC Seasonality (n=", cls_n["Seasonal"],     ")"),
-    "Not Seasonal" = paste0("Non-Seasonal (n=",    cls_n["Not Seasonal"], ")")
+  cls_lbl <- stats::setNames(
+    c(paste0("SMC Seasonality (n=", cls_n["Seasonal"],     ")"),
+      paste0("Non-Seasonal (n=",    cls_n["Not Seasonal"], ")")
+    )[seq_along(cls_n)],
+    names(cls_n)
   )
-  cls_lbl <- cls_lbl[names(cls_lbl) %in% names(cls_n)]
 
-  p2 <- ggplot2::ggplot() +
-    ggplot2::geom_sf(data = merged, ggplot2::aes(fill = Seasonality),
-                     color = "grey30", linewidth = 0.25) +
-    ggplot2::geom_sf(data = adm1_sp, fill = NA, color = "black", linewidth = 0.9) +
-    ggplot2::scale_fill_manual(
-      values = cls_pal[names(cls_pal) %in% names(cls_n)],
-      labels = cls_lbl, drop = FALSE
-    ) +
-    ggplot2::coord_sf(datum = NA) +
-    ggplot2::labs(
-      title    = glue::glue("Malaria Seasonality Classification in {adm0_name}"),
-      subtitle = glue::glue("Based on {tolower(type_label)} ({yr_range})")
-    ) +
-    ggplot2::theme_minimal(base_size = 14) +
-    ggplot2::theme(
-      panel.grid.major = ggplot2::element_blank(),
-      panel.grid.minor = ggplot2::element_blank(),
-      plot.title       = ggplot2::element_text(face = "bold", size = 18),
-      legend.position  = "right"
-    )
-
-  ggplot2::ggsave(
+  p2 <- .build_snt_map(
+    adm2_sf     = merged,
+    fill_col    = "Seasonality",
+    fill_values = cls_pal[names(cls_pal) %in% names(cls_n)],
+    fill_labels = cls_lbl,
+    adm1_sf     = adm1_sp,
+    title       = glue::glue("Malaria Seasonality Classification in {adm0_name}"),
+    subtitle    = glue::glue("Based on {tolower(type_label)} ({yr_range})")
+  )
+  .save_map(
+    p2,
     file.path(fig_dir, glue::glue("{iso3}_{type}_seasonality_classification_map.png")),
-    p2, width = 10, height = 8, dpi = dpi
+    dims, dpi
   )
 
-  # ── Maps 3+: Cumulative threshold maps ──────────────────────────────────────
-  # Auto-generate thresholds if not manually supplied.
-  # For 12 years data and n_cumulative_maps = 4:
-  #   step 1 → {11}
-  #   step 2 → {11, 10}
-  #   step 3 → {11, 10, 9}
-  #   step 4 → {11, 10, 9, 8}
+  # ── Maps 3+: Cumulative threshold maps ───────────────────────────────────────
 
   if (is.null(cumulative_thresholds)) {
     if (n_cumulative_maps >= n_years) {
@@ -2261,7 +2636,7 @@ run_seasonality_pipeline <- function(
       ))
       n_cumulative_maps <- n_years - 1
     }
-    top_year              <- n_years - 1
+    top_year              <- n_years
     cumulative_thresholds <- purrr::map(
       seq_len(n_cumulative_maps),
       ~ seq(from = top_year, by = -1, length.out = .x)
@@ -2272,87 +2647,50 @@ run_seasonality_pipeline <- function(
   cumul_maps   <- list()
 
   for (thresh in cumulative_thresholds) {
-
     thresh_int   <- as.integer(thresh)
     thresh_label <- paste(thresh_int, collapse = " + ")
-    safe_label   <- gsub("[^0-9]", "_", thresh_label)
-    safe_label   <- gsub("_+", "_", safe_label)
+    safe_label   <- gsub("_+", "_", gsub("[^0-9]", "_", thresh_label))
     safe_label   <- gsub("^_|_$", "", safe_label)
 
     merged_thresh <- merged |>
       dplyr::mutate(
-        Seasonality = dplyr::if_else(
-          SeasonalYears %in% thresh_int,
-          "Seasonal", "Not Seasonal"
-        ),
-        Seasonality = factor(Seasonality, levels = c("Seasonal", "Not Seasonal"))
+        Seasonality = factor(
+          dplyr::if_else(SeasonalYears %in% thresh_int, "Seasonal", "Not Seasonal"),
+          levels = c("Seasonal", "Not Seasonal")
+        )
       )
 
     t_n   <- table(merged_thresh$Seasonality)
     t_n   <- t_n[t_n > 0]
     t_pal <- colors_cumul[names(colors_cumul) %in% names(t_n)]
-    t_lbl <- c(
-      "Seasonal"     = paste0("SMC Seasonality (n=", t_n["Seasonal"],     ")"),
-      "Not Seasonal" = paste0("Non-Seasonal (n=",    t_n["Not Seasonal"], ")")
+    t_lbl <- stats::setNames(
+      c(paste0("SMC Seasonality (n=", t_n["Seasonal"],     ")"),
+        paste0("Non-Seasonal (n=",    t_n["Not Seasonal"], ")")
+      )[seq_along(t_n)],
+      names(t_n)
     )
-    t_lbl <- t_lbl[names(t_lbl) %in% names(t_n)]
 
-    p_cumul <- ggplot2::ggplot() +
-      ggplot2::geom_sf(
-        data      = merged_thresh,
-        ggplot2::aes(fill = Seasonality),
-        color     = "grey30",
-        linewidth = 0.25
-      ) +
-      ggplot2::geom_sf(
-        data      = adm1_sp,
-        fill      = NA,
-        color     = "black",
-        linewidth = 0.9
-      ) +
-      ggplot2::scale_fill_manual(
-        values = t_pal,
-        labels = t_lbl,
-        drop   = FALSE
-      ) +
-      ggplot2::coord_sf(datum = NA) +
-      ggplot2::labs(
-        title    = glue::glue(
-          "Malaria Seasonality \u2014 {thresh_label} years"
-        ),
-        subtitle = glue::glue(
-          "Based on {tolower(type_label)} ({yr_range})"
-        ),
-        fill     = NULL
-      ) +
-      ggplot2::theme_minimal(base_size = 14) +
-      ggplot2::theme(
-        panel.grid.major = ggplot2::element_blank(),
-        panel.grid.minor = ggplot2::element_blank(),
-        plot.title       = ggplot2::element_text(face = "bold", size = 18, hjust = 0),
-        plot.subtitle    = ggplot2::element_text(size = 11, hjust = 0,
-                                                  margin = ggplot2::margin(t = 6)),
-        legend.position  = "right",
-        legend.title     = ggplot2::element_text(face = "bold", size = 12),
-        legend.text      = ggplot2::element_text(size = 10),
-        plot.margin      = ggplot2::margin(5, 15, 2, 2)
-      )
+    p_cumul <- .build_snt_map(
+      adm2_sf     = merged_thresh,
+      fill_col    = "Seasonality",
+      fill_values = t_pal,
+      fill_labels = t_lbl,
+      adm1_sf     = adm1_sp,
+      title       = glue::glue("Malaria Seasonality \u2014 {thresh_label} years"),
+      subtitle    = glue::glue("Based on {tolower(type_label)} ({yr_range})")
+    )
 
     out_file <- file.path(
       fig_dir,
       glue::glue("{iso3}_{type}_seasonality_{safe_label}.png")
     )
-
-    ggplot2::ggsave(out_file, p_cumul, width = 10, height = 8, dpi = dpi)
-    cli::cli_alert_success(
-      "Cumulative map: {thresh_label} years \u2192 {.path {out_file}}"
-    )
+    .save_map(p_cumul, out_file, dims, dpi)
 
     cumul_maps[[thresh_label]] <- p_cumul
   }
 
   cli::cli_alert_success(
-    "All seasonality maps saved \u2192 {.path {fig_dir}}"
+    "All seasonality maps saved \u2192 {.path { .relative_path(fig_dir)}}"
   )
 
   invisible(list(
@@ -2361,7 +2699,6 @@ run_seasonality_pipeline <- function(
     cumulative_maps    = cumul_maps
   ))
 }
-
 
 #' Calculate 3m / 4m / 5m rolling concentration windows per district per year
 #' @keywords internal
@@ -2411,12 +2748,13 @@ run_seasonality_pipeline <- function(
       n5  <- purrr::map_chr(b5, "name")
 
       summary <- rbind(summary, data.frame(
-        year         = yr, district = dist, total = total,
-        max_2m       = max(v2), max_3m = max(v3), max_4m = max(v4), max_5m = max(v5),
-        pct_2m       = max(v2)/total*100,
-        pct_3m       = max(v3)/total*100,
-        pct_4m       = max(v4)/total*100,
-        pct_5m       = max(v5)/total*100,
+        year = yr, district = dist, adm1 = d$adm1[1], adm2 = d$adm2[1],
+        total = total,
+        max_2m = max(v2), max_3m = max(v3), max_4m = max(v4), max_5m = max(v5),
+        pct_2m = max(v2)/total*100,
+        pct_3m = max(v3)/total*100,
+        pct_4m = max(v4)/total*100,
+        pct_5m = max(v5)/total*100,
         max_2m_block = n2[which.max(v2)],
         max_3m_block = n3[which.max(v3)],
         max_4m_block = n4[which.max(v4)],
@@ -2443,7 +2781,6 @@ run_seasonality_pipeline <- function(
   )
   invisible(list(summary = summary, detailed = detailed))
 }
-
 
 #' Build block frequency table
 #' @keywords internal
@@ -2479,9 +2816,14 @@ run_seasonality_pipeline <- function(
     }
   }
 
-  freq |> dplyr::arrange(district, duration, dplyr::desc(block_freq))
-}
+  freq <- freq |> dplyr::arrange(district, duration, dplyr::desc(block_freq))
 
+  adm_lookup <- summary_tbl |> dplyr::distinct(district, adm1, adm2)
+
+  freq |>
+    dplyr::left_join(adm_lookup, by = "district") |>
+    dplyr::select(district, adm1, adm2, dplyr::everything())
+}
 
 #' Derive final SMC-eligible district list
 #' @keywords internal
@@ -2540,119 +2882,105 @@ run_seasonality_pipeline <- function(
 
 # ==============================================================================
 # HEATMAP FUNCTIONS
-# Included here so this file is fully self-contained — no sourcing required.
-#
-# Public function:
-#   run_heatmap_analysis()  — standalone heatmap for a single type
-#
-# Internal helpers (also called by .run_heatmap_step() in the pipeline):
-#   .load_heatmap_data()    — read, validate, NA-filter, aggregate
-#   .prepare_heatmap_data() — compute monthly % of annual total
-#   .build_heatmap_plot()   — construct ggplot object
-#   .save_heatmap_plot()    — write PNG to disk
 # ==============================================================================
 
 #' Generate a Seasonality Heatmap for Rainfall or Cases
 #'
-#' Standalone heatmap function. Produces a monthly distribution heatmap showing
-#' each month's value as a percentage of that year's annual total. Can be called
-#' directly without running the full pipeline.
+#' @description
+#' Standalone heatmap function that can be called independently of the full
+#' pipeline.  Produces a tile plot showing each month's value as a percentage
+#' of that year's annual total, across all districts and years.  Districts are
+#' arranged on the y-axis, time on the x-axis, and the fill colour encodes the
+#' monthly concentration.
 #'
-#' @param iso3 Character. ISO3 country code in lowercase (e.g. \code{"gha"}).
-#' @param adm0_name Character. Country display name for the plot title.
-#' @param type Character. One of \code{"rainfall"} or \code{"cases"}.
-#'   Default: \code{"rainfall"}.
-#' @param paths Named list from \code{sntutils::setup_project_paths()}.
-#'   Default: \code{NULL}.
-#' @param base_path Character or \code{NULL}. Base project directory for
-#'   \code{sntutils::setup_project_paths()}. Default: \code{NULL}.
-#' @param climate_dir Character or \code{NULL}. Direct path to rainfall folder.
-#'   Default: \code{NULL}.
-#' @param dhis2_dir Character or \code{NULL}. Direct path to DHIS2 folder.
-#'   Default: \code{NULL}.
-#' @param adm1_var Character. Column name for admin level 1. Default:
-#'   \code{"adm1"}.
-#' @param adm2_var Character. Column name for admin level 2. Default:
-#'   \code{"adm2"}.
-#' @param year_var Character. Column name for year. Default: \code{"year"}.
-#' @param month_var Character. Column name for month. Default: \code{"month"}.
-#' @param value_var Character or \code{NULL}. Metric column override. Default:
-#'   \code{NULL} (auto-inferred from \code{type}).
-#' @param s_year Integer or \code{NULL}. First year to include. Default:
-#'   \code{NULL}.
-#' @param e_year Integer or \code{NULL}. Last year to include. Default:
-#'   \code{NULL}.
-#' @param adm_level Character. Y-axis level. One of \code{"adm1"} (default)
-#'   or \code{"adm2"}.
+#' This function is called internally by \code{run_seasonality_pipeline()} for
+#' the \code{"heatmap"} step, but it is also useful for quickly checking data
+#' coverage or producing a single heatmap without running the whole pipeline.
+#'
+#' @inheritParams run_seasonality_pipeline
+#' @param type Character. Data type to visualise. One of \code{"rainfall"}
+#'   (default) or \code{"cases"}.
+#' @param value_var Character or \code{NULL}. Specific metric column to map to
+#'   fill colour. Default: \code{NULL} (uses \code{"mean_rainfall_mm"} for
+#'   rainfall, \code{"conf"} for cases).
 #' @param drop_na_cols Character vector. Structural columns that must be
-#'   non-NA. Default: \code{c("adm1", "adm2", "year", "month")}.
-#' @param drop_na_value Logical. Drop NAs in the metric column. Default:
-#'   \code{TRUE}.
-#' @param viridis_option Character. Viridis palette. Default: \code{"viridis"}.
-#' @param x_breaks_by Numeric. X-axis tick interval in years. Default:
-#'   \code{0.5}.
-#' @param output_dir Character. Output folder. Only used for Option C (no
-#'   sntutils). Default: \code{here::here("outputs", "figures")}.
-#' @param filename Character or \code{NULL}. Output filename. Auto-generated
-#'   if \code{NULL}. Default: \code{NULL}.
+#'   non-\code{NA} for a row to be retained. Default:
+#'   \code{c("adm1", "adm2", "year", "month")}.
+#' @param drop_na_value Logical. Whether to also drop rows where the metric
+#'   column itself is \code{NA}. Default: \code{TRUE}.
+#' @param output_dir Character. Output folder when using Option C (direct
+#'   paths). Ignored when \code{paths} or \code{base_path} is supplied.
+#'   Default: \code{here::here("outputs", "figures")}.
+#' @param filename Character or \code{NULL}. Output filename including
+#'   extension. Auto-generated as \code{"{ISO3}_{type}_heatmap.png"} when
+#'   \code{NULL}. Default: \code{NULL}.
 #' @param width Numeric. Plot width in inches. Default: \code{12}.
 #' @param height Numeric. Plot height in inches. Default: \code{8}.
-#' @param dpi Numeric. Plot resolution. Default: \code{400}.
+#' @param dpi Numeric. Plot resolution. Default: \code{500}.
 #'
-#' @return A named list (invisibly): \code{plot}, \code{data},
-#'   \code{output_path}.
+#' @return A named list returned invisibly with three elements:
+#'   \describe{
+#'     \item{\code{plot}}{The ggplot object.}
+#'     \item{\code{data}}{The prepared data frame with \code{prop_m} (monthly
+#'       percentage) and \code{adm_label} columns.}
+#'     \item{\code{output_path}}{Full file path where the PNG was saved.}
+#'   }
 #'
 #' @examples
-#' # paths <- sntutils::setup_project_paths()
-#' # run_heatmap_analysis(
-#' #   iso3 = "gha", adm0_name = "Ghana",
-#' #   paths = paths, type = "rainfall"
-#' # )
+#' \dontrun{
+#' paths <- sntutils::setup_project_paths()
+#'
+#' # Rainfall heatmap at district level
+#' run_heatmap_analysis(
+#'   iso3      = "gin",
+#'   adm0_name = "Guinea",
+#'   paths     = paths,
+#'   type      = "rainfall"
+#' )
+#'
+#' # Cases heatmap collapsed to region level
+#' run_heatmap_analysis(
+#'   iso3      = "gin",
+#'   adm0_name = "Guinea",
+#'   paths     = paths,
+#'   type      = "cases",
+#'   adm_level = "adm1",
+#'   s_year    = 2018
+#' )
+#' }
 #'
 #' @export
 run_heatmap_analysis <- function(
     iso3,
     adm0_name,
     type        = c("rainfall", "cases"),
-
-    # ── paths ────────────────────────────────────────────────────────────────
     paths       = NULL,
     base_path   = NULL,
     climate_dir = NULL,
     dhis2_dir   = NULL,
-
-    # ── column overrides ─────────────────────────────────────────────────────
     adm1_var    = "adm1",
     adm2_var    = "adm2",
     year_var    = "year",
     month_var   = "month",
     value_var   = NULL,
-
-    # ── year range ────────────────────────────────────────────────────────────
     s_year      = NULL,
     e_year      = NULL,
-
-    # ── aesthetics ────────────────────────────────────────────────────────────
-    adm_level      = c("adm1", "adm2"),
+    adm_level      = c("adm2", "adm1"),
     drop_na_cols   = c("adm1", "adm2", "year", "month"),
     drop_na_value  = TRUE,
     viridis_option = "viridis",
     x_breaks_by    = 0.5,
-
-    # ── output ────────────────────────────────────────────────────────────────
     output_dir  = here::here("outputs", "figures"),
     filename    = NULL,
     width       = 12,
     height      = 8,
-    dpi         = 400
+    dpi         = 500
 ) {
-
   type      <- match.arg(type)
   adm_level <- match.arg(adm_level)
 
   if (!is.character(iso3) || nchar(trimws(iso3)) == 0)
     cli::cli_abort("{.arg iso3} must be a non-empty character string.")
-
   if (!is.character(adm0_name) || nchar(trimws(adm0_name)) == 0)
     cli::cli_abort("{.arg adm0_name} must be a non-empty character string.")
 
@@ -2664,11 +2992,15 @@ run_heatmap_analysis <- function(
     ))
   }
 
-  cli::cli_alert_info(
-    "Heatmap: {.val {adm0_name}} | {.val {type}}"
-  )
+  if (!is.null(s_year) && !is.null(e_year) && s_year > e_year) {
+    cli::cli_abort(c(
+      "{.arg s_year} must be \u2264 {.arg e_year}.",
+      "x" = "Got s_year={.val {s_year}}, e_year={.val {e_year}}."
+    ))
+  }
 
-  # Resolve dirs using the shared helper — same logic as the full pipeline
+  cli::cli_alert_info("Heatmap: {.val {adm0_name}} | {.val {type}}")
+
   dirs <- .resolve_dirs(
     paths         = paths,
     base_path     = base_path,
@@ -2677,7 +3009,6 @@ run_heatmap_analysis <- function(
     admin_shp_dir = NULL
   )
 
-  # Determine output directory — sntutils users write to val_fig directly
   out_dir <- if (dirs$use_sntutils_output) dirs$val_fig else output_dir
 
   df_raw <- .load_heatmap_data(
@@ -2716,64 +3047,29 @@ run_heatmap_analysis <- function(
     dpi        = dpi
   )
 
-  cli::cli_alert_success(
-    "Heatmap complete: {.val {adm0_name}} ({.val {type}})"
-  )
-
+  cli::cli_alert_success("Heatmap complete: {.val {adm0_name}} ({.val {type}})")
   invisible(list(plot = p, data = df_ready, output_path = out))
 }
 
-
-#' Load and clean heatmap source data
-#'
-#' Reads the raw xlsx, validates columns, removes NA rows, and aggregates to
-#' adm1/adm2/year/month level. Returns a tibble with a generic \code{value}
-#' column suitable for either rainfall or cases.
-#'
-#' @param dirs Named list from \code{.resolve_dirs()}.
-#' @param iso3 Character. ISO3 country code.
-#' @param type Character. One of \code{"rainfall"} or \code{"cases"}.
-#' @param adm1_var,adm2_var,year_var,month_var Character. Column name overrides.
-#' @param value_var Character or \code{NULL}. Metric column name override.
-#' @param drop_na_cols Character vector. Structural columns to check for NAs.
-#' @param drop_na_value Logical. Whether to drop NAs in the metric column.
-#'
-#' @return A tibble with columns: \code{adm1}, \code{adm2}, \code{year},
-#'   \code{month}, \code{yearmon}, \code{value}.
 #' @keywords internal
 .load_heatmap_data <- function(
-    dirs,
-    iso3,
-    type,
-    adm1_var,
-    adm2_var,
-    year_var,
-    month_var,
-    value_var,
-    drop_na_cols,
-    drop_na_value
+    dirs, iso3, type, adm1_var, adm2_var, year_var, month_var,
+    value_var, drop_na_cols, drop_na_value
 ) {
-
-  # ── type config ──────────────────────────────────────────────────────────────
-
   cfg <- switch(type,
     rainfall = list(
       folder   = dirs$climate,
       filename = glue::glue("{iso3}_rainfall_processed"),
-      col_src  = if (!is.null(value_var)) value_var else "mean_rainfall_mm"
+      col_src  = value_var %||% "mean_rainfall_mm"
     ),
     cases = list(
       folder   = dirs$dhis2,
       filename = glue::glue("{iso3}_dhis2_processed"),
-      col_src  = if (!is.null(value_var)) value_var else "conf"
+      col_src  = value_var %||% "conf"
     )
   )
 
-  # ── read ─────────────────────────────────────────────────────────────────────
-
   df <- sntutils::read_snt_data(cfg$folder, cfg$filename, "xlsx")
-
-  # ── validate columns ─────────────────────────────────────────────────────────
 
   required_cols <- c(adm1_var, adm2_var, year_var, month_var, cfg$col_src)
   missing_cols  <- setdiff(required_cols, names(df))
@@ -2787,17 +3083,13 @@ run_heatmap_analysis <- function(
   }
 
   df <- df |>
-    dplyr::select(
-      dplyr::all_of(c(adm1_var, adm2_var, year_var, month_var, cfg$col_src))
-    ) |>
+    dplyr::select(dplyr::all_of(c(adm1_var, adm2_var, year_var, month_var, cfg$col_src))) |>
     dplyr::rename(
       adm1  = !!adm1_var,
       adm2  = !!adm2_var,
       year  = !!year_var,
       month = !!month_var
     )
-
-  # ── validate metric column ───────────────────────────────────────────────────
 
   if (!is.numeric(df[[cfg$col_src]])) {
     cli::cli_abort(c(
@@ -2810,16 +3102,11 @@ run_heatmap_analysis <- function(
     n_neg <- sum(df[[cfg$col_src]] < 0, na.rm = TRUE)
     cli::cli_abort(c(
       "Column {.var {cfg$col_src}} contains {n_neg} negative value{?s}.",
-      "x" = "Metric values must be \u2265 0.",
-      "i" = "Check your source data for data entry errors."
+      "x" = "Metric values must be \u2265 0."
     ))
   }
 
-  # ── NA handling ───────────────────────────────────────────────────────────────
-
   n_before <- nrow(df)
-
-  # Remap drop_na_cols to standardised names in case user supplied original names
   std_drop_cols <- drop_na_cols |>
     gsub(pattern = adm1_var,  replacement = "adm1") |>
     gsub(pattern = adm2_var,  replacement = "adm2") |>
@@ -2827,22 +3114,16 @@ run_heatmap_analysis <- function(
     gsub(pattern = month_var, replacement = "month")
 
   valid_drop_cols <- intersect(std_drop_cols, names(df))
-
   df <- df |>
-    dplyr::filter(
-      dplyr::if_all(dplyr::all_of(valid_drop_cols), ~ !is.na(.x))
-    )
+    dplyr::filter(dplyr::if_all(dplyr::all_of(valid_drop_cols), ~ !is.na(.x)))
 
-  if (drop_na_value) {
-    df <- df |> dplyr::filter(!is.na(.data[[cfg$col_src]]))
-  }
+  if (drop_na_value) df <- df |> dplyr::filter(!is.na(.data[[cfg$col_src]]))
 
   n_dropped <- n_before - nrow(df)
   if (n_dropped > 0) {
     cli::cli_warn(c(
       "Dropped {n_dropped} row{?s} containing NA value{?s}.",
-      "i" = "{n_before} \u2192 {nrow(df)} rows remaining.",
-      "i" = "Set {.arg drop_na_value = FALSE} to retain rows with missing values."
+      "i" = "{n_before} \u2192 {nrow(df)} rows remaining."
     ))
   }
 
@@ -2854,11 +3135,7 @@ run_heatmap_analysis <- function(
     ))
   }
 
-  cli::cli_alert_success(
-    "Loaded {nrow(df)} row{?s} from {.val {cfg$filename}}."
-  )
-
-  # ── aggregate and attach yearmon ──────────────────────────────────────────────
+  cli::cli_alert_success("Loaded {nrow(df)} row{?s} from {.val {cfg$filename}}.")
 
   df |>
     dplyr::group_by(adm1, adm2, year, month) |>
@@ -2872,71 +3149,33 @@ run_heatmap_analysis <- function(
     dplyr::arrange(adm1, adm2, yearmon)
 }
 
-
-#' Compute monthly proportions for heatmap
-#'
-#' Joins annual totals back to the monthly data and expresses each month's
-#' value as a percentage of that year's total per admin unit. The
-#' \code{adm_level} argument controls whether the y-axis groups by adm1 alone
-#' or combines adm1 and adm2 into a \code{"Region ~ District"} label.
-#'
-#' @param df A tibble as returned by \code{.load_heatmap_data()}.
-#' @param adm_level Character. One of \code{"adm1"} or \code{"adm2"}.
-#'
-#' @return The input tibble with additional columns: \code{annual_total},
-#'   \code{prop_m}, \code{adm_label}.
 #' @keywords internal
 .prepare_heatmap_data <- function(df, adm_level = c("adm1", "adm2")) {
-
   adm_level <- match.arg(adm_level)
 
-  # ── annual totals grouped at the correct level ───────────────────────────────
-
-  group_cols <- if (adm_level == "adm1") {
-    c("adm1", "year")
-  } else {
-    c("adm1", "adm2", "year")
-  }
+  group_cols <- c("adm1", "adm2", "year")
 
   annual_totals <- df |>
     dplyr::group_by(dplyr::across(dplyr::all_of(group_cols))) |>
-    dplyr::summarise(
-      annual_total = sum(value, na.rm = TRUE),
-      .groups = "drop"
-    )
+    dplyr::summarise(annual_total = sum(value, na.rm = TRUE), .groups = "drop")
 
-  # ── join proportions and build adm_label ─────────────────────────────────────
-
-  join_cols <- setdiff(group_cols, "year")
+  # join_cols <- setdiff(group_cols, "year")
 
   prepared <- df |>
-    dplyr::left_join(annual_totals, by = c(join_cols, "year")) |>
+    dplyr::left_join(annual_totals, by = group_cols) |>
     dplyr::mutate(
-      # Add yearmon here so this function works whether the caller used
-      # .load_heatmap_data() (which adds yearmon) or .load_analysis_data()
-      # (the shared pipeline loader, which does not).
       yearmon   = zoo::as.yearmon(sprintf("%04d-%02d", year, month)),
       prop_m    = value / annual_total * 100,
-      adm_label = if (adm_level == "adm2") {
-        paste0(adm1, " ~ ", adm2)
-      } else {
-        adm1
-      },
-      adm_label = factor(
-        adm_label,
-        levels = rev(sort(unique(adm_label)))
-      )
+      adm_label = if (adm_level == "adm2") paste(adm1, adm2, sep = " - ") else adm1,
+      adm_label = factor(adm_label, levels = rev(sort(unique(adm_label))))
     ) |>
     dplyr::arrange(adm1, adm2)
-
-  # ── warn on zero annual totals ────────────────────────────────────────────────
 
   n_zero <- sum(annual_totals$annual_total == 0, na.rm = TRUE)
   if (n_zero > 0) {
     cli::cli_warn(c(
       "{n_zero} admin-year combination{?s} have an annual total of zero.",
-      "i" = "Proportions for these units will be {.val NaN}.",
-      "i" = "This may indicate missing data for an entire year."
+      "i" = "Proportions for these units will be {.val NaN}."
     ))
   }
 
@@ -2947,46 +3186,17 @@ run_heatmap_analysis <- function(
   prepared
 }
 
-
-#' Build the heatmap ggplot object
-#'
-#' @param df A tibble as returned by \code{.prepare_heatmap_data()}.
-#' @param adm0_name Character. Country display name for the plot title.
-#' @param type Character. One of \code{"rainfall"} or \code{"cases"}.
-#' @param adm_level Character. One of \code{"adm1"} or \code{"adm2"}.
-#'   Controls the y-axis label.
-#' @param viridis_option Character. Viridis palette option.
-#' @param x_breaks_by Numeric. Interval between x-axis ticks in years.
-#'
-#' @return A \code{ggplot} object.
 #' @keywords internal
-.build_heatmap_plot <- function(
-    df, adm0_name, type, adm_level, viridis_option, x_breaks_by
-) {
-
-  # ── type-specific labels ──────────────────────────────────────────────────────
-
-  legend_label <- switch(type,
-    rainfall = "% of Annual\nRainfall",
-    cases    = "% of Annual\nCases"
-  )
-
-  title_label <- switch(type,
+.build_heatmap_plot <- function(df, adm0_name, type, adm_level,
+                                viridis_option, x_breaks_by) {
+  legend_label <- switch(type, rainfall = "% Rainfall", cases = "% Cases")
+  title_label  <- switch(type,
     rainfall = glue::glue("{adm0_name}: Monthly Distribution of Rainfall"),
     cases    = glue::glue("{adm0_name}: Monthly Distribution of Cases")
   )
+  y_label <- switch(adm_level, adm1 = "Region", adm2 = "District")
 
-  y_label <- switch(adm_level,
-    adm1 = "Region",
-    adm2 = "Region ~ District"
-  )
-
-  # ── build ─────────────────────────────────────────────────────────────────────
-
-  ggplot2::ggplot(
-    df,
-    ggplot2::aes(x = yearmon, y = adm_label, fill = prop_m)
-  ) +
+  ggplot2::ggplot(df, ggplot2::aes(x = yearmon, y = adm_label, fill = prop_m)) +
     ggplot2::geom_tile(color = "white", linewidth = 0.5) +
     ggplot2::scale_fill_viridis_c(
       name   = legend_label,
@@ -2994,23 +3204,15 @@ run_heatmap_analysis <- function(
       labels = scales::percent_format(scale = 1)
     ) +
     zoo::scale_x_yearmon(
-      breaks = seq(
-        from = min(df$yearmon),
-        to   = max(df$yearmon),
-        by   = x_breaks_by
-      ),
+      breaks = seq(min(df$yearmon), max(df$yearmon), by = x_breaks_by),
       format = "%b %Y"
     ) +
-    ggplot2::labs(
-      x     = NULL,
-      y     = y_label,
-      title = title_label
-    ) +
+    ggplot2::labs(x = "Month", y = y_label, title = title_label) +
     ggplot2::theme_minimal(base_size = 12) +
     ggplot2::theme(
-      axis.text.y     = ggplot2::element_text(size = 9, hjust = 1, face = "bold"),
+      axis.text.y     = ggplot2::element_text(size = 6, hjust = 1, face = "bold"),
       axis.text.x     = ggplot2::element_text(angle = 45, hjust = 1, vjust = 1),
-      axis.title.y    = ggplot2::element_text(size = 10, face = "bold"),
+      axis.title      = ggplot2::element_text(size = 11, face = "bold"),
       plot.title      = ggplot2::element_text(size = 13, face = "bold", hjust = 0.5),
       legend.title    = ggplot2::element_text(size = 10, face = "bold"),
       legend.text     = ggplot2::element_text(size = 9),
@@ -3020,42 +3222,17 @@ run_heatmap_analysis <- function(
     )
 }
 
-
-#' Save the heatmap plot to disk
-#'
-#' @param plot A \code{ggplot} object.
-#' @param output_dir Character. Output directory path.
-#' @param filename Character or \code{NULL}. Output filename. Auto-generated
-#'   as \code{"{ISO3}_{type}_heatmap.png"} if \code{NULL}.
-#' @param iso3 Character. ISO3 code (for auto-generated filename).
-#' @param type Character. Data type (for auto-generated filename).
-#' @param width,height Numeric. Plot dimensions in inches.
-#' @param dpi Numeric. Plot resolution.
-#'
-#' @return The full output path (invisibly).
 #' @keywords internal
-.save_heatmap_plot <- function(
-    plot, output_dir, filename, iso3, type, width, height, dpi
-) {
-
+.save_heatmap_plot <- function(plot, output_dir, filename, iso3, type,
+                               width, height, dpi) {
   if (is.null(filename)) {
     filename <- glue::glue("{toupper(iso3)}_{type}_heatmap.png")
   }
-
-  # Only create if it genuinely does not exist — respects sntutils root dirs
   .ensure_dir(output_dir)
-
   output_path <- file.path(output_dir, filename)
-
-  ggplot2::ggsave(
-    filename = output_path,
-    plot     = plot,
-    width    = width,
-    height   = height,
-    dpi      = dpi
-  )
-
-  cli::cli_alert_success("Heatmap saved: {.path {output_path}}")
+  ggplot2::ggsave(filename = output_path, plot = plot,
+                  width = width, height = height, dpi = dpi)
+  cli::cli_alert_success("Heatmap saved: {.path { .relative_path(output_path)}}")
   invisible(output_path)
 }
 
