@@ -550,6 +550,11 @@
 #' dhs_dictionary() |> dplyr::distinct(domain, dhs_recode, calc_function)
 #' }
 dhs_dictionary <- function() {
+  # Fail fast on missing suggested dependencies
+  .check_pkg(
+    c("purrr", "tibble"),
+    reason = "for `dhs_dictionary()`"
+  )
 
   # Domain specifications: dictionary function, metadata, DHS variables
 

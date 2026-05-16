@@ -786,6 +786,12 @@ calc_wealth_dhs <- function(
   join_nearest = TRUE,
   ci_method    = "logit"
 ) {
+  # Fail fast on missing suggested dependencies
+  .check_pkg(
+    c("purrr", "tibble"),
+    reason = "for `calc_wealth_dhs()`"
+  )
+
   # ---- 1. Input validation ----
 
   if (!is.data.frame(dhs_hr)) {

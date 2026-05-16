@@ -30,6 +30,24 @@ Default 24 (DHS standard).}
 \item{region_var}{Optional column name (character string) in \code{dhs_ir} to use
 as the subnational grouping variable (e.g., \code{"v024"} for region).}
 
+\item{gps_data}{Optional DHS GE (GPS) cluster dataset used to attach
+admin-unit labels when \code{shapefile} is supplied. Default \code{NULL}.}
+
+\item{gps_vars}{Named list mapping cluster/lat/lon column names in
+\code{gps_data}. Defaults to the standard DHS GE names
+(\code{DHSCLUST}, \code{LATNUM}, \code{LONGNUM}).}
+
+\item{shapefile}{Optional \code{sf} polygon dataset whose attributes carry
+admin labels for the cluster-to-admin spatial join. When \code{NULL}
+(default) the spatial join step is skipped.}
+
+\item{admin_level}{Character vector of admin column names in \code{shapefile}
+to retain (e.g. \code{c("adm1", "adm2")}). Default \code{NULL} (use all).}
+
+\item{join_nearest}{Logical. If \code{TRUE} (default), clusters that fall
+outside any polygon are re-assigned to the nearest polygon. If
+\code{FALSE}, unmatched clusters are left as \code{NA}.}
+
 \item{ci_method}{CI method for svyciprop. Default: "logit".}
 }
 \value{

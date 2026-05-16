@@ -205,16 +205,21 @@ fit_mbg_indicator <- function(
 
   ## ---- 1) Validation + canonicalisation ------------------------------------
 
+  # Fail fast on missing suggested dependencies. Spatial stack first
+  # (terra / sf / fs), then mbg + INLA stack required to actually run MBG,
+  # then data.table for cluster handling. countrycode + rnaturalearth are
+  # *not* required up front -- they are used inside `.derive_country_from_coords()`
+  # which already falls back gracefully when they are missing.
   .check_spatial_pkg("terra", "fit_mbg_indicator")
   .check_spatial_pkg("sf",    "fit_mbg_indicator")
   .check_spatial_pkg("fs",    "fit_mbg_indicator")
-
-  if (!requireNamespace("mbg", quietly = TRUE)) {
-    cli::cli_abort(c(
-      "Package {.pkg mbg} is required by {.fun fit_mbg_indicator}.",
-      "i" = "Install it with {.code remotes::install_github('ihmeuw/mbg')} (or your fork)."
-    ))
-  }
+  .check_pkg(
+    c(
+      "mbg", "INLA", "fmesher", "MatrixModels", "sn",
+      "data.table", "tibble", "qs2"
+    ),
+    reason = "to fit the MBG model and persist outputs in `fit_mbg_indicator()`"
+  )
 
   if (is.null(indicator_name) || !nzchar(indicator_name)) {
     cli::cli_abort("{.arg indicator_name} must be a non-empty character string.")
@@ -388,7 +393,18 @@ fit_mbg_indicator <- function(
   # supplied; otherwise falls back to rnaturalearth. iso2 and the DHS
   # 2-letter country code are then resolved via countrycode.
   .derive_country_from_coords <- function(x, y, adm0_sf = NULL) {
-    if (!requireNamespace("countrycode", quietly = TRUE)) return(list())
+    if (!requireNamespace("countrycode", quietly = TRUE)) {
+      cli::cli_inform(
+        c(
+          "i" = paste0(
+            "Suggested package {.pkg countrycode} not installed; ",
+            "skipping iso3 / iso2 / DHS-code derivation from cluster coordinates."
+          ),
+          "i" = "Install with {.code install.packages(\"countrycode\")} to enable."
+        )
+      )
+      return(list())
+    }
     med_x <- stats::median(x, na.rm = TRUE)
     med_y <- stats::median(y, na.rm = TRUE)
     if (!is.finite(med_x) || !is.finite(med_y) ||

@@ -75,6 +75,12 @@ calc_case_management_dhs <- function(
   ),
   region_var = NULL
 ) {
+  # Fail fast on missing suggested dependencies
+  .check_pkg(
+    c("tibble"),
+    reason = "for `calc_case_management_dhs()`"
+  )
+
   # ---- 1. Input validation ----
 
   if (!is.data.frame(dhs_kr)) {

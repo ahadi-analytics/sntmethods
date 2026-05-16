@@ -190,6 +190,12 @@ calc_irs_dhs <- function(
   join_nearest = TRUE,
   ci_method    = "logit"
 ) {
+  # Fail fast on missing suggested dependencies
+  .check_pkg(
+    c("tibble"),
+    reason = "for `calc_irs_dhs()`"
+  )
+
   # ---- 1. Extract survey metadata (HR data uses hv-prefix) ----
   survey_meta <- .extract_survey_meta_hv(dhs_hr)
 

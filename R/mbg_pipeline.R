@@ -245,31 +245,25 @@ run_mbg_pipeline <- function(
     )
   }
 
-  # Check for required spatial packages
+  # Fail fast on always-required dependencies (spatial stack + glue/arrow
+  # used throughout the pipeline). countrycode is technically only needed
+  # for iso3/iso2 derivation but is so widely used here it is required up
+  # front rather than discovered mid-run.
   .check_spatial_pkg("sf", "run_mbg_pipeline")
   .check_spatial_pkg("terra", "run_mbg_pipeline")
   .check_spatial_pkg("fs", "run_mbg_pipeline")
-  .check_spatial_pkg("countrycode", "run_mbg_pipeline")
+  .check_pkg(
+    c("countrycode", "glue", "arrow", "data.table", "tibble", "qs2"),
+    reason = "always-needed support packages for `run_mbg_pipeline()`"
+  )
 
-  # Warn about MBG dependencies (soft check - will abort later if run_mbg = TRUE)
-  mbg_deps_missing <- character(0)
-
-  if (!requireNamespace("mbg", quietly = TRUE)) {
-    mbg_deps_missing <- c(mbg_deps_missing, "mbg")
-  }
-  if (!requireNamespace("INLA", quietly = TRUE)) {
-    mbg_deps_missing <- c(mbg_deps_missing, "INLA")
-  }
-  if (!requireNamespace("fmesher", quietly = TRUE)) {
-    mbg_deps_missing <- c(mbg_deps_missing, "fmesher")
-  }
-  if (!requireNamespace("MatrixModels", quietly = TRUE)) {
-    mbg_deps_missing <- c(mbg_deps_missing, "MatrixModels")
-  }
-  if (!requireNamespace("sn", quietly = TRUE)) {
-    mbg_deps_missing <- c(mbg_deps_missing, "sn")
-  }
-
+  # Soft pre-check on MBG modeling deps -- pipeline can still be used in
+  # data-prep-only mode (run_mbg = FALSE), but warn now so the user knows
+  # before they wait for the rest of the run.
+  mbg_deps_missing <- setdiff(
+    c("mbg", "INLA", "fmesher", "MatrixModels", "sn"),
+    rownames(utils::installed.packages())
+  )
   if (length(mbg_deps_missing) > 0) {
     cli::cli_warn(c(
       "MBG dependencies not installed: {.pkg {mbg_deps_missing}}",
@@ -294,36 +288,12 @@ run_mbg_pipeline <- function(
     ))
   }
 
-  # Check mbg package and its dependencies are available when run_mbg = TRUE
+  # Hard fail when run_mbg = TRUE: all modeling deps must be installed.
   if (isTRUE(run_mbg)) {
-    mbg_required_missing <- character(0)
-
-    if (!requireNamespace("fmesher", quietly = TRUE)) {
-      mbg_required_missing <- c(mbg_required_missing, "fmesher")
-    }
-    if (!requireNamespace("MatrixModels", quietly = TRUE)) {
-      mbg_required_missing <- c(mbg_required_missing, "MatrixModels")
-    }
-    if (!requireNamespace("INLA", quietly = TRUE)) {
-      mbg_required_missing <- c(mbg_required_missing, "INLA")
-    }
-    if (!requireNamespace("mbg", quietly = TRUE)) {
-      mbg_required_missing <- c(mbg_required_missing, "mbg")
-    }
-    if (!requireNamespace("sn", quietly = TRUE)) {
-      mbg_required_missing <- c(mbg_required_missing, "sn")
-    }
-
-    if (length(mbg_required_missing) > 0) {
-      cli::cli_abort(c(
-        "MBG dependencies required when {.arg run_mbg = TRUE}: {.pkg {mbg_required_missing}}",
-        "i" = "Install in this order:",
-        " " = "1. {.code install.packages(c('fmesher', 'MatrixModels', 'sn'))}",
-        " " = "2. {.code install.packages('INLA', repos = c(INLA = 'https://inla.r-inla-download.org/R/stable'), dep = TRUE)}",
-        " " = "3. {.code devtools::install_github('ihmeuw/mbg')}",
-        "i" = "Or set {.arg run_mbg = FALSE} to skip MBG modeling"
-      ))
-    }
+    .check_pkg(
+      c("fmesher", "MatrixModels", "INLA", "mbg", "sn"),
+      reason = "when `run_mbg = TRUE` in `run_mbg_pipeline()` (set `run_mbg = FALSE` to skip MBG modeling)"
+    )
   }
 
   # ---- Input Validation ----
@@ -3981,15 +3951,10 @@ run_mbg_pipeline <- function(
 #'
 #' @noRd
 .get_dhs_country_code <- function(iso3) {
-  if (!requireNamespace("countrycode", quietly = TRUE)) {
-    cli::cli_abort(
-      c(
-        "Package {.pkg countrycode} is required to derive DHS country code",
-        "i" = "Install with: install.packages('countrycode')",
-        "i" = "Or provide `country_iso2` directly"
-      )
-    )
-  }
+  .check_pkg(
+    "countrycode",
+    reason = "to derive DHS country code in `.get_dhs_country_code()` (or pass `country_iso2` directly)"
+  )
 
   # Normalize to uppercase for lookup
   iso3_upper <- toupper(iso3)

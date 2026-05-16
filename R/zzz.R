@@ -1,4 +1,31 @@
+#' Check that one or more suggested packages are installed
+#'
+#' Thin wrapper around [rlang::check_installed()] used throughout the package
+#' to fail fast (with a clear, actionable error message and an interactive
+#' install prompt) when a suggested dependency is missing. Prefer this over
+#' bare `requireNamespace()` checks so users learn about missing dependencies
+#' at the start of a function rather than several minutes into a workflow.
+#'
+#' @param pkg Character vector of package names to check.
+#' @param reason Short string explaining *why* the package is needed (used in
+#'   the error message). Optional but strongly recommended.
+#' @param call Calling environment, forwarded to [rlang::check_installed()] so
+#'   the error is attributed to the user-facing function.
+#'
+#' @return `TRUE` invisibly if all packages are available. Errors otherwise.
+#' @keywords internal
+#' @noRd
+.check_pkg <- function(pkg, reason = NULL, call = rlang::caller_env()) {
+  rlang::check_installed(pkg, reason = reason, call = call)
+  invisible(TRUE)
+}
+
 #' Check if spatial packages are available
+#'
+#' Backwards-compatible wrapper that now delegates to [.check_pkg()] so that
+#' all dependency errors flow through the same code path. Retained for the
+#' helpful PROJ/GDAL/GEOS system-library hint that is specific to spatial
+#' stack failures.
 #'
 #' @param pkg Package name to check
 #' @param func_name Function name for error message
@@ -6,22 +33,27 @@
 #' @keywords internal
 #' @noRd
 .check_spatial_pkg <- function(pkg, func_name = NULL) {
-  if (!requireNamespace(pkg, quietly = TRUE)) {
-    func_msg <- if (!is.null(func_name)) {
-      paste0("Function '", func_name, "' requires")
-    } else {
-      "This function requires"
-    }
+  if (requireNamespace(pkg, quietly = TRUE)) {
+    return(TRUE)
+  }
 
-    stop(
-      func_msg, " the '", pkg, "' package.\n",
-      "Install it with: install.packages('", pkg, "')\n",
-      "Note: On macOS/Linux, you may need system libraries (GDAL, GEOS, PROJ).\n",
-      "  macOS: brew install gdal geos proj\n",
-      "  Ubuntu: sudo apt-get install libgdal-dev libgeos-dev libproj-dev",
-      call. = FALSE
+  reason <- if (!is.null(func_name)) {
+    paste0(
+      "for `", func_name, "()` (spatial operations).\n",
+      "Note: On macOS/Linux you may also need system libraries ",
+      "(GDAL, GEOS, PROJ).\n",
+      "  macOS:  brew install gdal geos proj\n",
+      "  Ubuntu: sudo apt-get install libgdal-dev libgeos-dev libproj-dev"
+    )
+  } else {
+    paste0(
+      "for spatial operations.\n",
+      "Note: On macOS/Linux you may also need system libraries ",
+      "(GDAL, GEOS, PROJ)."
     )
   }
+
+  rlang::check_installed(pkg, reason = reason, call = rlang::caller_env())
   TRUE
 }
 

@@ -626,6 +626,11 @@ calc_pfpr_dhs <- function(
   indicators   = NULL,
   ci_method    = "logit"
 ) {
+  # Fail fast on missing suggested dependencies
+  .check_pkg(
+    c("purrr", "stringr", "tibble"),
+    reason = "for `calc_pfpr_dhs()`"
+  )
 
   # ---- 1. Input validation ----
 
@@ -1268,6 +1273,9 @@ aggregate_pfpr_admin <- function(
   admin_level = c("adm1"),
   weighted = TRUE
 ) {
+  # sf is used unconditionally below
+  .check_spatial_pkg("sf", "aggregate_pfpr_admin")
+
   if (!inherits(cluster_results, "sf")) {
     cluster_sf <- cluster_results |>
       sf::st_as_sf(

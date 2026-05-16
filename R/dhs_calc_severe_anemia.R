@@ -378,6 +378,19 @@ calc_severe_anemia_dhs_core <- function(
 #'   hemoglobin variable (hw53). If FALSE, uses raw hemoglobin (hc56).
 #' @param region_var Optional column name for subnational grouping (e.g.,
 #'   "hv024"). If NULL, defaults to survey_vars$adm1.
+#' @param gps_data Optional DHS GE (GPS) cluster dataset used to attach
+#'   admin-unit labels when `shapefile` is supplied. Default `NULL`.
+#' @param gps_vars Named list mapping cluster/lat/lon column names in
+#'   `gps_data`. Defaults to the standard DHS GE names
+#'   (`DHSCLUST`, `LATNUM`, `LONGNUM`).
+#' @param shapefile Optional `sf` polygon dataset whose attributes carry
+#'   admin labels for the cluster-to-admin spatial join. When `NULL`
+#'   (default) the spatial join step is skipped.
+#' @param admin_level Character vector of admin column names in `shapefile`
+#'   to retain (e.g. `c("adm1", "adm2")`). Default `NULL` (use all).
+#' @param join_nearest Logical. If `TRUE` (default), clusters that fall
+#'   outside any polygon are re-assigned to the nearest polygon. If
+#'   `FALSE`, unmatched clusters are left as `NA`.
 #' @param ci_method Method for confidence intervals. Default: "logit".
 #'
 #' @return Named list of tibbles:
@@ -423,6 +436,12 @@ calc_severe_anemia_dhs <- function(
   join_nearest      = TRUE,
   ci_method         = "logit"
 ) {
+  # Fail fast on missing suggested dependencies
+  .check_pkg(
+    c("tibble"),
+    reason = "for `calc_severe_anemia_dhs()`"
+  )
+
   # ---- 1. Extract survey metadata (PR data = hv-prefix) ----
   survey_meta <- .extract_survey_meta_hv(dhs_pr)
 
@@ -608,6 +627,9 @@ aggregate_severe_anemia_admin <- function(
   admin_level = c("adm1"),
   weighted = TRUE
 ) {
+  # sf is used unconditionally below
+  .check_spatial_pkg("sf", "aggregate_severe_anemia_admin")
+
   if (!inherits(cluster_results, "sf")) {
     cluster_sf <- cluster_results |>
       sf::st_as_sf(

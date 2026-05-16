@@ -607,6 +607,12 @@ calc_u5mr_dhs <- function(
   admin_level  = NULL,
   join_nearest = TRUE
 ) {
+  # Fail fast on missing suggested dependencies
+  .check_pkg(
+    c("stringr", "tibble"),
+    reason = "for `calc_u5mr_dhs()`"
+  )
+
   # ---- 1. Input validation ----
 
   if (!is.data.frame(dhs_kr)) {

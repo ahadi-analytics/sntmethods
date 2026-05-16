@@ -521,6 +521,13 @@ dhs_read <- function(
   survey_type = NULL,
   verbose = TRUE
 ) {
+  # Fail fast on missing suggested dependencies (arrow for parquet I/O,
+  # fs for path handling, janitor for empty-row removal).
+  .check_pkg(
+    c("arrow", "fs", "janitor"),
+    reason = "to read DHS parquet datasets in `dhs_read()`"
+  )
+
   # -------------------------------------------
   # Validate file_type (now mandatory)
   # -------------------------------------------
@@ -849,6 +856,9 @@ dhs_read <- function(
 #' \code{\link{dhs_read}} for loading DHS parquet datasets
 #' @export
 make_dhs_raw_dictionary <- function(data) {
+  # Fail fast on missing suggested dependency (purrr used for mapping)
+  .check_pkg("purrr", reason = "for `make_dhs_raw_dictionary()`")
+
   var_names <- names(data)
 
   var_labels <- purrr::map_chr(var_names, function(v) {

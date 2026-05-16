@@ -94,6 +94,12 @@ calc_wealth_mbg <- function(
     lon = "LONGNUM"
   )
 ) {
+  # Fail fast on missing suggested dependencies
+  .check_pkg(
+    c("tibble"),
+    reason = "for `calc_wealth_mbg()`"
+  )
+
   # ---- Input validation ----
 
   if (!is.data.frame(dhs_hr)) {

@@ -139,6 +139,11 @@ calc_act_dhs <- function(
   indicators   = NULL,
   ci_method    = "logit"
 ) {
+  # Fail fast on missing suggested dependencies
+  .check_pkg(
+    c("countrycode", "purrr", "stringr", "tibble"),
+    reason = "for `calc_act_dhs()`"
+  )
 
   # ---- 1. Input validation ----
 

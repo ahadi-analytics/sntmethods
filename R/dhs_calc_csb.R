@@ -930,6 +930,12 @@ calc_csb_dhs <- function(
   admin_level = NULL,
   join_nearest = TRUE
 ) {
+  # Fail fast on missing suggested dependencies
+  .check_pkg(
+    c("purrr", "tibble", "tidyr"),
+    reason = "for `calc_csb_dhs()`"
+  )
+
   csb_priority_method <- match.arg(csb_priority_method)
   # calc_csb_dhs is now a thin wrapper around calc_csb_dhs_core
   # which returns the same named list structure as calc_act_dhs

@@ -81,6 +81,12 @@ calc_u5mr_mbg <- function(
     lon     = "LONGNUM"
   )
 ) {
+  # Fail fast on missing suggested dependencies
+  .check_pkg(
+    c("data.table"),
+    reason = "for `calc_u5mr_mbg()`"
+  )
+
   # ---- Check DHS.rates availability ----
 
   if (!requireNamespace("DHS.rates", quietly = TRUE)) {

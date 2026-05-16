@@ -145,6 +145,7 @@ test_that("dhs_model_datasets examples work", {
 test_that("dhs_model_datasets URLs are accessible", {
   skip_if_offline()
   skip_on_cran()  # Don't run on CRAN to avoid excessive HTTP requests
+  skip_if_not_installed("httr")
 
   df <- dhs_model_datasets()
 

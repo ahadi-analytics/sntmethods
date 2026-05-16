@@ -95,6 +95,12 @@ calc_csb_by_wealth_dhs <- function(
   region_var = NULL,
   ci_method = "logit"
 ) {
+  # Fail fast on missing suggested dependencies
+  .check_pkg(
+    c("purrr", "tibble"),
+    reason = "for `calc_csb_by_wealth_dhs()`"
+  )
+
   csb_priority_method <- match.arg(csb_priority_method)
   # ---- 1. Input validation ----
 

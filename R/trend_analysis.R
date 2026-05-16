@@ -89,6 +89,12 @@ run_grouped_stl_trend <- function(
   normalize_fun = normalize_zscore,
   stl_window = "periodic"
 ) {
+  # Fail fast on missing suggested dependencies
+  .check_pkg(
+    c("stlplus", "trend"),
+    reason = "to run STL decomposition + Mann-Kendall / Sen's slope tests in `run_grouped_stl_trend()`"
+  )
+
   if (!all(group_col %in% names(data))) {
     cli::cli_abort(
       paste0(

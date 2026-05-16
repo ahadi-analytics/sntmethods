@@ -396,6 +396,12 @@ calc_fever_dhs <- function(
   join_nearest = TRUE,
   ci_method    = "logit"
 ) {
+  # Fail fast on missing suggested dependencies
+  .check_pkg(
+    c("tibble"),
+    reason = "for `calc_fever_dhs()`"
+  )
+
   # ---- 1. Extract survey metadata ----
   survey_meta <- .extract_survey_meta(dhs_kr)
 

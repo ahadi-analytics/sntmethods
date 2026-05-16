@@ -94,6 +94,11 @@ calc_itn_dhs <- function(
   age_labels   = NULL,
   ci_method    = "logit"
 ) {
+  # Fail fast on missing suggested dependencies
+  .check_pkg(
+    c("purrr", "tibble"),
+    reason = "for `calc_itn_dhs()`"
+  )
 
   # ---- 1. Input validation ----
 

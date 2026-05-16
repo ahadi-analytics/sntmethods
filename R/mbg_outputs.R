@@ -83,6 +83,12 @@ save_mbg_cluster_data <- function(
   country_iso3 = NULL,
   survey_year = NULL
 ) {
+  # Fail fast on missing suggested dependency (data.table for fwrite)
+  .check_pkg(
+    "data.table",
+    reason = "to write MBG cluster CSVs in `save_mbg_cluster_data()`"
+  )
+
   if (!is.list(mbg_results) || is.data.frame(mbg_results)) {
     cli::cli_abort(
       "`mbg_results` must be a named list from a calc_*_mbg() function"
@@ -177,15 +183,13 @@ plot_mbg_clusters <- function(
   point_size_range = c(0.8, 5),
   palette = "heat"
 ) {
-  # Check for ggplot2
-  if (!requireNamespace("ggplot2", quietly = TRUE)) {
-    cli::cli_abort("Package {.pkg ggplot2} is required for plotting")
-  }
-
-  # Check for sf if boundaries provided
-  if (!is.null(adm0_sf) || !is.null(adm_sf)) {
-    .check_spatial_pkg("sf", "plot_mbg_clusters")
-  }
+  # Fail fast on missing suggested dependencies
+  .check_pkg(
+    "ggplot2",
+    reason = "for plotting in `plot_mbg_clusters()`"
+  )
+  # sf is always needed because the function builds an sf object from x/y
+  .check_spatial_pkg("sf", "plot_mbg_clusters")
 
   # Validate input data
   required_cols <- c("x", "y", "indicator", "samplesize")
@@ -330,6 +334,13 @@ plot_mbg_clusters_all <- function(
   dpi = 320,
   ...
 ) {
+  # Fail fast on missing suggested dependencies (glue for title/filename,
+  # ggplot2 for ggsave; sf is enforced inside plot_mbg_clusters())
+  .check_pkg(
+    c("glue", "ggplot2"),
+    reason = "to build / save cluster maps in `plot_mbg_clusters_all()`"
+  )
+
   if (!is.list(mbg_results) || is.data.frame(mbg_results)) {
     cli::cli_abort(
       "`mbg_results` must be a named list from a calc_*_mbg() function"
@@ -443,9 +454,10 @@ save_mbg_rasters <- function(
     cli::cli_abort("survey_year must be non-NA")
   }
 
-  # Check for required spatial packages
+  # Check for required spatial packages + glue used for filename
   .check_spatial_pkg("terra", "save_mbg_rasters")
   .check_spatial_pkg("fs", "save_mbg_rasters")
+  .check_pkg("glue", reason = "to build raster filenames in `save_mbg_rasters()`")
   fs::dir_create(path)
 
   # Build file paths
@@ -510,6 +522,11 @@ aggregate_raster_to_admin <- function(
   method = "weighted_mean",
   fun = NULL
 ) {
+  # Fail fast on missing suggested dependencies. terra/sf required for any
+  # path; exactextractr only required for population-weighted extraction.
+  .check_spatial_pkg("terra", "aggregate_raster_to_admin")
+  .check_spatial_pkg("sf", "aggregate_raster_to_admin")
+
   # Input validation
   if (!inherits(raster, "SpatRaster")) {
     cli::cli_abort("raster must be a SpatRaster object")
@@ -525,13 +542,11 @@ aggregate_raster_to_admin <- function(
 
   if (is.null(fun)) {
     if (method == "weighted_mean" && !is.null(pop_raster)) {
-      # Check for exactextractr package
-      if (!requireNamespace("exactextractr", quietly = TRUE)) {
-        cli::cli_abort(c(
-          "Package {.pkg exactextractr} is required for weighted raster extraction",
-          "i" = "Install with: install.packages('exactextractr')"
-        ))
-      }
+      # Population-weighted extraction requires exactextractr
+      .check_pkg(
+        "exactextractr",
+        reason = "for population-weighted raster extraction in `aggregate_raster_to_admin()`"
+      )
 
       # Population-weighted mean
       result <- exactextractr::exact_extract(
@@ -589,6 +604,13 @@ build_final_dataset <- function(
   survey_dates = NULL,
   survey_year = NULL
 ) {
+  # Fail fast on missing suggested dependencies
+  .check_spatial_pkg("sf", "build_final_dataset")
+  .check_pkg(
+    "tibble",
+    reason = "to build the final dataset in `build_final_dataset()`"
+  )
+
   # Start with ADM2 geometry info
   final <- adm2_sf |>
     sf::st_drop_geometry() |>
@@ -705,13 +727,12 @@ generate_indicator_map <- function(
   legend_title = "Indicator",
   show_values = FALSE
 ) {
-  # Check for RColorBrewer package
-  if (!requireNamespace("RColorBrewer", quietly = TRUE)) {
-    cli::cli_abort(c(
-      "Package {.pkg RColorBrewer} is required for map color palettes",
-      "i" = "Install with: install.packages('RColorBrewer')"
-    ))
-  }
+  # Fail fast on missing suggested dependencies
+  .check_pkg(
+    c("ggplot2", "RColorBrewer"),
+    reason = "to render indicator maps in `generate_indicator_map()`"
+  )
+  .check_spatial_pkg("sf", "generate_indicator_map")
 
   # Validate indicator column exists in estimate_data
   if (!is.null(estimate_data) && !indicator_col %in% names(estimate_data)) {
@@ -928,6 +949,10 @@ save_indicator_map <- function(
   dpi = 300
 ) {
   if (inherits(map, "ggplot")) {
+    .check_pkg(
+      "ggplot2",
+      reason = "to save ggplot maps in `save_indicator_map()`"
+    )
     ggplot2::ggsave(
       filename = filename,
       plot = map,
@@ -936,12 +961,10 @@ save_indicator_map <- function(
       dpi = dpi
     )
   } else if (inherits(map, "tmap")) {
-    if (!requireNamespace("tmap", quietly = TRUE)) {
-      cli::cli_abort(c(
-        "Package {.pkg tmap} is required to save tmap objects",
-        "i" = "Install with: install.packages('tmap')"
-      ))
-    }
+    .check_pkg(
+      "tmap",
+      reason = "to save tmap objects in `save_indicator_map()`"
+    )
     tmap::tmap_save(
       tm = map,
       filename = filename,
@@ -987,6 +1010,14 @@ generate_all_maps <- function(
   country_iso3,
   survey_year
 ) {
+  # Fail fast on missing suggested dependencies
+  .check_spatial_pkg("fs", "generate_all_maps")
+  .check_spatial_pkg("sf", "generate_all_maps")
+  .check_pkg(
+    c("glue", "ggplot2", "RColorBrewer"),
+    reason = "to build map filenames and render maps in `generate_all_maps()`"
+  )
+
   map_paths <- list()
 
   # Ensure output directory exists

@@ -195,6 +195,19 @@ calc_epi_dhs_core <- function(
 #' @param age_max_months Maximum age in months (default: 23).
 #' @param survey_vars Named list mapping DHS variable names.
 #' @param region_var Optional column name to use as grouping variable.
+#' @param gps_data Optional DHS GE (GPS) cluster dataset used to attach
+#'   admin-unit labels when `shapefile` is supplied. Default `NULL`.
+#' @param gps_vars Named list mapping cluster/lat/lon column names in
+#'   `gps_data`. Defaults to the standard DHS GE names
+#'   (`DHSCLUST`, `LATNUM`, `LONGNUM`).
+#' @param shapefile Optional `sf` polygon dataset whose attributes carry
+#'   admin labels for the cluster-to-admin spatial join. When `NULL`
+#'   (default) the spatial join step is skipped.
+#' @param admin_level Character vector of admin column names in `shapefile`
+#'   to retain (e.g. `c("adm1", "adm2")`). Default `NULL` (use all).
+#' @param join_nearest Logical. If `TRUE` (default), clusters that fall
+#'   outside any polygon are re-assigned to the nearest polygon. If
+#'   `FALSE`, unmatched clusters are left as `NA`.
 #' @param ci_method CI method for svyciprop. Default: "logit".
 #'
 #' @return Named list with `adm0` (national) and optionally `adm1` (regional)
@@ -234,6 +247,12 @@ calc_epi_dhs <- function(
   join_nearest = TRUE,
   ci_method    = "logit"
 ) {
+  # Fail fast on missing suggested dependencies
+  .check_pkg(
+    c("tibble"),
+    reason = "for `calc_epi_dhs()`"
+  )
+
   # ---- 1. Extract survey metadata ----
   survey_meta <- .extract_survey_meta(dhs_kr)
 
