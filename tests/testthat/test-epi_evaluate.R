@@ -12,9 +12,9 @@ test_that("epi_evaluate() grades a labelled run end-to-end", {
 
   eval <- epi_evaluate(
     detection_run = run,
-    truth_col = "truth",
+    labels = "truth",
     loo_method = TRUE,
-    cost = list(c_fp = 1, c_fn = 5)
+    cost = list(cost_per_fp = 1, cost_per_fn = 5)
   )
 
   expect_s3_class(eval, "epi_evaluation")
@@ -36,7 +36,7 @@ test_that("epi_evaluate() S3 methods do not error", {
     label_col = "truth"
   )
 
-  eval <- epi_evaluate(run, truth_col = "truth")
+  eval <- epi_evaluate(run, labels = "truth")
 
   expect_output(print(eval), "epi_evaluation")
   expect_s3_class(tibble::as_tibble(eval), "tbl_df")

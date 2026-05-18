@@ -445,30 +445,32 @@ fit_detector.epi_detector_threshold <- function(detector,
   aggregator <- detector$params$aggregator
   k <- detector$params$k
 
+  centre_fun <- switch(aggregator,
+    "mean"   = function(x) mean(x, na.rm = TRUE),
+    "median" = function(x) stats::median(x, na.rm = TRUE),
+    "q3"     = function(x) stats::quantile(
+      x, probs = 0.75, na.rm = TRUE, names = FALSE
+    )
+  )
+  spread_fun <- switch(aggregator,
+    "mean"   = function(x) stats::sd(x, na.rm = TRUE),
+    "median" = function(x) stats::mad(x, na.rm = TRUE),
+    "q3"     = function(x) 0
+  )
+
   summaries <- baseline_data |>
     dplyr::group_by(.data$iso_week) |>
     dplyr::summarise(
-      centre = dplyr::case_when(
-        aggregator == "mean" ~ mean(.data$cases, na.rm = TRUE),
-        aggregator == "median" ~ stats::median(.data$cases, na.rm = TRUE),
-        aggregator == "q3" ~ stats::quantile(
-          .data$cases, probs = 0.75, na.rm = TRUE, names = FALSE
-        )
-      ),
-      spread = dplyr::case_when(
-        aggregator == "mean" ~ stats::sd(.data$cases, na.rm = TRUE),
-        aggregator == "median" ~ stats::mad(.data$cases, na.rm = TRUE),
-        aggregator == "q3" ~ 0
-      ),
+      centre = centre_fun(.data$cases),
+      spread = spread_fun(.data$cases),
       .groups = "drop"
-    ) |>
-    dplyr::mutate(
-      upper = dplyr::if_else(
-        aggregator == "q3",
-        .data$centre,
-        .data$centre + k * .data$spread
-      )
     )
+
+  summaries$upper <- if (aggregator == "q3") {
+    summaries$centre
+  } else {
+    summaries$centre + k * summaries$spread
+  }
 
   detector$lookup <- summaries
   detector$fitted <- TRUE
@@ -1496,7 +1498,15 @@ predict_detector.epi_detector_bayesian_changepoint <- function(detector,
   }
 
   if (inherits(range, "Date")) {
-    idx <- which(data[[date_col]] %in% range)
+    # length-2 range is treated as (start, end) inclusive interval; longer
+    # vectors fall back to exact-match semantics.
+    if (length(range) == 2L) {
+      lo <- min(range)
+      hi <- max(range)
+      idx <- which(data[[date_col]] >= lo & data[[date_col]] <= hi)
+    } else {
+      idx <- which(data[[date_col]] %in% range)
+    }
     if (length(idx) == 0L) {
       cli::cli_abort(
         "No rows in {.arg data} match the dates supplied in {.arg {arg_name}}."
@@ -1923,6 +1933,7 @@ print.epi_detection_run <- function(x, ...) {
   n_failed <- sum(preds$failed, na.rm = TRUE)
   alarm_rate <- mean(preds$alarm, na.rm = TRUE)
 
+  cat("<epi_detection_run>\n")
   cli::cli_h2("epi_detection_run")
   cli::cli_bullets(c(
     "*" = "methods: {.val {x$methods}}",
@@ -1957,12 +1968,12 @@ summary.epi_detection_run <- function(object, ...) {
       .groups = "drop"
     )
 
-  structure(
+  invisible(structure(
     list(per_method = per_method,
          preprocessing = object$preprocessing,
          methods = object$methods),
     class = "summary.epi_detection_run"
-  )
+  ))
 }
 
 #' @export

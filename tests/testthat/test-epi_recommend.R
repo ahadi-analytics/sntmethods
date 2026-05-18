@@ -28,9 +28,20 @@ test_that("epi_recommend() honours simplicity tie-break ordering", {
   recs <- epi_recommend(
     df, date_col = "date", count_col = "cases",
     tie_break = "simplicity",
-    max_recommendations = 5
+    max_recommendations = 14L
   )
-  # threshold should appear in the top recommendations (simplest baseline)
+  # within tied-score groups, the simpler method must come first
+  within_ties <- recs$recommendations |>
+    dplyr::group_by(.data$score) |>
+    dplyr::summarise(
+      sorted = identical(
+        .data$simplicity_rank,
+        sort(.data$simplicity_rank)
+      ),
+      .groups = "drop"
+    )
+  expect_true(all(within_ties$sorted))
+  # threshold (rank 1 in .simplicity_order) must be present when k is large
   expect_true("threshold" %in% recs$recommendations$method)
 })
 

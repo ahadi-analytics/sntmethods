@@ -34,7 +34,7 @@ test_that("epi_ensemble() supports weighted strategy from epi_evaluation", {
     label_col = "truth"
   )
 
-  eval <- epi_evaluate(run, truth_col = "truth", loo_method = TRUE)
+  eval <- epi_evaluate(run, labels = "truth", loo_method = TRUE)
   ens <- epi_ensemble(run, strategy = "weighted_vote", weights = eval)
 
   expect_s3_class(ens, "epi_ensemble")

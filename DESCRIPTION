@@ -36,8 +36,8 @@ Imports:
     tidyr (>= 1.3.0),
     patchwork (>= 1.2.0),
     surveillance (>= 1.21.0),
-    trending (>= 0.1.0),
 Suggests:
+    trending (>= 0.1.0),
     here (>= 1.0.2),
     httr (>= 1.4.0),
     arrow (>= 22.0.0),

@@ -1005,6 +1005,7 @@ epi_evaluate <- function(detection_run,
 
 #' @export
 print.epi_evaluation <- function(x, ...) {
+  cat("<epi_evaluation>\n")
   cli::cli_h2("epi_evaluation ({x$mode} mode)")
 
   if (!is.null(x$per_method)) {

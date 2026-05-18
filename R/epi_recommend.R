@@ -323,23 +323,27 @@ profile_series <- function(data,
     return(.tie_break_simplicity(ranked))
   }
 
-  per_method <- evaluation$per_method
-  if (is.null(per_method) || !"cost" %in% names(per_method)) {
+  cost_tbl <- evaluation$cost
+  if (is.null(cost_tbl) || !"expected_cost" %in% names(cost_tbl)) {
     cli::cli_warn(c(
-      "`evaluation$per_method$cost` missing; falling back to simplicity.",
+      "`evaluation$cost` missing; falling back to simplicity.",
       "i" = "Re-run {.fn epi_evaluate} with a `cost` argument."
     ))
     return(.tie_break_simplicity(ranked))
   }
 
-  cost_tbl <- per_method |>
-    dplyr::select("method", "cost") |>
+  cost_tbl <- cost_tbl |>
+    dplyr::select("method", "expected_cost") |>
     dplyr::distinct()
 
   ranked |>
     dplyr::left_join(cost_tbl, by = "method") |>
-    dplyr::mutate(cost = dplyr::if_else(is.na(.data$cost), Inf, .data$cost)) |>
-    dplyr::arrange(dplyr::desc(.data$score), .data$cost)
+    dplyr::mutate(
+      expected_cost = dplyr::if_else(
+        is.na(.data$expected_cost), Inf, .data$expected_cost
+      )
+    ) |>
+    dplyr::arrange(dplyr::desc(.data$score), .data$expected_cost)
 }
 
 
@@ -423,7 +427,8 @@ epi_recommend <- function(data,
       ) |>
       dplyr::filter(.data$rank <= max_recommendations) |>
       dplyr::select("group_id", "rank", "method", "score", "reason",
-                    dplyr::any_of(c("simplicity_rank", "auc", "cost")))
+                    dplyr::any_of(c("simplicity_rank", "auc",
+                                    "expected_cost")))
   })
 
   out <- list(
@@ -446,6 +451,7 @@ epi_recommend <- function(data,
 
 #' @export
 print.epi_recommendation <- function(x, ...) {
+  cat("<epi_recommendation>\n")
   cli::cli_h2("epi_recommendation")
   cli::cli_text("Tie-break strategy: {.val {x$tie_break}}.")
   cli::cli_text("Top {.val {x$max_recommendations}} per group.")

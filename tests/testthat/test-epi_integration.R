@@ -11,7 +11,7 @@ test_that("the full epi_* pipeline composes: detect -> evaluate -> ensemble -> r
   )
   expect_s3_class(run, "epi_detection_run")
 
-  eval <- epi_evaluate(run, truth_col = "truth", loo_method = TRUE)
+  eval <- epi_evaluate(run, labels = "truth", loo_method = TRUE)
   expect_s3_class(eval, "epi_evaluation")
 
   ens <- epi_ensemble(run, strategy = "weighted_vote", weights = eval)
