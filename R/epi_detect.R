@@ -572,6 +572,722 @@ predict_detector.epi_detector_ears_c1 <- function(detector,
 }
 
 
+# ---- built-in detectors (step 17: remaining 12) ---------------------------
+
+# ---------------------------------------------------------------------------
+# built-in detector: ears_c2
+#
+# surveillance::earsC method = "C2": as C1 but with a 2-week guard band
+# between the current observation and the rolling baseline window.
+# ---------------------------------------------------------------------------
+
+#' @keywords internal
+#' @noRd
+new_detector_ears_c2 <- function(baseline = 7L, alpha = 0.001) {
+  new_epi_detector(
+    method = "ears_c2",
+    params = list(method = "C2", baseline = baseline, alpha = alpha)
+  )
+}
+
+#' @keywords internal
+#' @noRd
+fit_detector.epi_detector_ears_c2 <- function(detector, baseline_data, ...) {
+  detector$baseline <- baseline_data
+  detector$fitted <- TRUE
+  detector
+}
+
+#' @keywords internal
+#' @noRd
+predict_detector.epi_detector_ears_c2 <- function(detector, target_data, ...) {
+  .check_pkg("surveillance", reason = "for the EARS family of detectors.")
+  combined <- dplyr::bind_rows(detector$baseline, target_data) |>
+    dplyr::arrange(.data$date)
+  target_idx <- which(combined$date %in% target_data$date)
+  sts_object <- surveillance::sts(observed = combined$cases, frequency = 52L)
+  fit <- surveillance::earsC(
+    sts_object,
+    control = list(
+      range = target_idx,
+      method = "C2",
+      baseline = detector$params$baseline,
+      alpha = detector$params$alpha
+    )
+  )
+  tibble::tibble(
+    date = target_data$date,
+    alarm = as.logical(surveillance::alarms(fit)),
+    score = as.numeric(surveillance::upperbound(fit)),
+    upper_threshold = as.numeric(surveillance::upperbound(fit))
+  )
+}
+
+
+# ---------------------------------------------------------------------------
+# built-in detector: ears_c3
+#
+# surveillance::earsC method = "C3": cumulative score over the last three
+# weeks; sensitive to short, sustained signals.
+# ---------------------------------------------------------------------------
+
+#' @keywords internal
+#' @noRd
+new_detector_ears_c3 <- function(baseline = 7L, alpha = 0.001) {
+  new_epi_detector(
+    method = "ears_c3",
+    params = list(method = "C3", baseline = baseline, alpha = alpha)
+  )
+}
+
+#' @keywords internal
+#' @noRd
+fit_detector.epi_detector_ears_c3 <- function(detector, baseline_data, ...) {
+  detector$baseline <- baseline_data
+  detector$fitted <- TRUE
+  detector
+}
+
+#' @keywords internal
+#' @noRd
+predict_detector.epi_detector_ears_c3 <- function(detector, target_data, ...) {
+  .check_pkg("surveillance", reason = "for the EARS family of detectors.")
+  combined <- dplyr::bind_rows(detector$baseline, target_data) |>
+    dplyr::arrange(.data$date)
+  target_idx <- which(combined$date %in% target_data$date)
+  sts_object <- surveillance::sts(observed = combined$cases, frequency = 52L)
+  fit <- surveillance::earsC(
+    sts_object,
+    control = list(
+      range = target_idx,
+      method = "C3",
+      baseline = detector$params$baseline,
+      alpha = detector$params$alpha
+    )
+  )
+  tibble::tibble(
+    date = target_data$date,
+    alarm = as.logical(surveillance::alarms(fit)),
+    score = as.numeric(surveillance::upperbound(fit)),
+    upper_threshold = as.numeric(surveillance::upperbound(fit))
+  )
+}
+
+
+# ---------------------------------------------------------------------------
+# built-in detector: cusum_classical
+#
+# surveillance::cusum on a Poisson reference model fitted to the baseline.
+# Designed for detecting persistent step shifts of size `k_shift`.
+# ---------------------------------------------------------------------------
+
+#' @keywords internal
+#' @noRd
+new_detector_cusum_classical <- function(k_shift = 1.5, h = 5) {
+  new_epi_detector(
+    method = "cusum_classical",
+    params = list(k_shift = k_shift, h = h)
+  )
+}
+
+#' @keywords internal
+#' @noRd
+fit_detector.epi_detector_cusum_classical <- function(detector,
+                                                       baseline_data, ...) {
+  detector$lambda0 <- mean(baseline_data$cases, na.rm = TRUE)
+  detector$baseline <- baseline_data
+  detector$fitted <- TRUE
+  detector
+}
+
+#' @keywords internal
+#' @noRd
+predict_detector.epi_detector_cusum_classical <- function(detector,
+                                                           target_data, ...) {
+  .check_pkg("surveillance", reason = "for cusum_classical.")
+  combined <- dplyr::bind_rows(detector$baseline, target_data) |>
+    dplyr::arrange(.data$date)
+  target_idx <- which(combined$date %in% target_data$date)
+
+  sts_object <- surveillance::sts(observed = combined$cases, frequency = 52L)
+  fit <- surveillance::cusum(
+    sts_object,
+    control = list(
+      range = target_idx,
+      k = detector$params$k_shift,
+      h = detector$params$h,
+      m = detector$lambda0,
+      trans = "anscombe"
+    )
+  )
+  tibble::tibble(
+    date = target_data$date,
+    alarm = as.logical(surveillance::alarms(fit)),
+    score = as.numeric(surveillance::upperbound(fit)),
+    upper_threshold = as.numeric(surveillance::upperbound(fit))
+  )
+}
+
+
+# ---------------------------------------------------------------------------
+# built-in detector: farrington
+#
+# surveillance::farringtonFlexible: NB-GLM with iterative re-weighting of
+# past outbreaks, plus seasonality via lagged windows. The classical method
+# for endemic seasonal series with prior outbreak history.
+# ---------------------------------------------------------------------------
+
+#' @keywords internal
+#' @noRd
+new_detector_farrington <- function(b = 3L,
+                                     w = 3L,
+                                     alpha = 0.001,
+                                     reweight = TRUE) {
+  new_epi_detector(
+    method = "farrington",
+    params = list(b = b, w = w, alpha = alpha, reweight = reweight)
+  )
+}
+
+#' @keywords internal
+#' @noRd
+fit_detector.epi_detector_farrington <- function(detector,
+                                                  baseline_data, ...) {
+  detector$baseline <- baseline_data
+  detector$fitted <- TRUE
+  detector
+}
+
+#' @keywords internal
+#' @noRd
+predict_detector.epi_detector_farrington <- function(detector,
+                                                     target_data, ...) {
+  .check_pkg("surveillance", reason = "for farringtonFlexible.")
+  combined <- dplyr::bind_rows(detector$baseline, target_data) |>
+    dplyr::arrange(.data$date)
+  target_idx <- which(combined$date %in% target_data$date)
+
+  sts_object <- surveillance::sts(observed = combined$cases, frequency = 52L)
+  fit <- surveillance::farringtonFlexible(
+    sts_object,
+    control = list(
+      range = target_idx,
+      b = detector$params$b,
+      w = detector$params$w,
+      alpha = detector$params$alpha,
+      reweight = detector$params$reweight
+    )
+  )
+  tibble::tibble(
+    date = target_data$date,
+    alarm = as.logical(surveillance::alarms(fit)),
+    score = as.numeric(surveillance::upperbound(fit)),
+    upper_threshold = as.numeric(surveillance::upperbound(fit))
+  )
+}
+
+
+# ---------------------------------------------------------------------------
+# built-in detector: glrnb
+#
+# surveillance::glrnb: generalised likelihood-ratio detector with a
+# Negative Binomial reference model. Performs well on overdispersed counts.
+# ---------------------------------------------------------------------------
+
+#' @keywords internal
+#' @noRd
+new_detector_glrnb <- function(c_ARL = 5, theta = NULL,
+                                ret = c("cases", "value")) {
+  ret <- match.arg(ret)
+  new_epi_detector(
+    method = "glrnb",
+    params = list(c_ARL = c_ARL, theta = theta, ret = ret)
+  )
+}
+
+#' @keywords internal
+#' @noRd
+fit_detector.epi_detector_glrnb <- function(detector, baseline_data, ...) {
+  detector$baseline <- baseline_data
+  detector$fitted <- TRUE
+  detector
+}
+
+#' @keywords internal
+#' @noRd
+predict_detector.epi_detector_glrnb <- function(detector, target_data, ...) {
+  .check_pkg("surveillance", reason = "for glrnb.")
+  combined <- dplyr::bind_rows(detector$baseline, target_data) |>
+    dplyr::arrange(.data$date)
+  target_idx <- which(combined$date %in% target_data$date)
+
+  sts_object <- surveillance::sts(observed = combined$cases, frequency = 52L)
+  ctrl <- list(
+    range = target_idx,
+    c.ARL = detector$params$c_ARL,
+    ret   = detector$params$ret
+  )
+  if (!is.null(detector$params$theta)) ctrl$theta <- detector$params$theta
+
+  fit <- surveillance::glrnb(sts_object, control = ctrl)
+
+  tibble::tibble(
+    date = target_data$date,
+    alarm = as.logical(surveillance::alarms(fit)),
+    score = as.numeric(surveillance::upperbound(fit)),
+    upper_threshold = as.numeric(surveillance::upperbound(fit))
+  )
+}
+
+
+# ---------------------------------------------------------------------------
+# built-in detector: trending
+#
+# trending::glm_model() fitting a negative-binomial GLM with seasonal sin/cos
+# harmonics and a time trend. Prediction interval upper bound at level
+# `1 - alpha` is the alarm threshold.
+# ---------------------------------------------------------------------------
+
+#' @keywords internal
+#' @noRd
+new_detector_trending <- function(alpha = 0.001,
+                                   harmonics = 1L,
+                                   include_trend = TRUE) {
+  new_epi_detector(
+    method = "trending",
+    params = list(alpha = alpha,
+                  harmonics = harmonics,
+                  include_trend = include_trend)
+  )
+}
+
+#' @keywords internal
+#' @noRd
+fit_detector.epi_detector_trending <- function(detector,
+                                                baseline_data, ...) {
+  .check_pkg("trending", reason = "for the trending NB-GLM detector.")
+  .check_pkg("MASS", reason = "for trending::glm_nb_model().")
+
+  d <- baseline_data |>
+    dplyr::mutate(
+      t = as.numeric(.data$date - min(.data$date)) / 7,
+      doy = as.numeric(format(.data$date, "%j")),
+      sin1 = sin(2 * pi * .data$doy / 365.25),
+      cos1 = cos(2 * pi * .data$doy / 365.25)
+    )
+
+  rhs <- c(if (detector$params$include_trend) "t",
+           if (detector$params$harmonics >= 1L) c("sin1", "cos1"))
+  if (!length(rhs)) rhs <- "1"
+  form <- stats::as.formula(paste("cases ~", paste(rhs, collapse = " + ")))
+
+  model <- tryCatch(
+    trending::glm_nb_model(form),
+    error = function(e) trending::glm_model(form, family = "poisson")
+  )
+  fit <- trending::fit(model, d)
+
+  detector$model <- fit
+  detector$origin_date <- min(baseline_data$date)
+  detector$fitted <- TRUE
+  detector
+}
+
+#' @keywords internal
+#' @noRd
+predict_detector.epi_detector_trending <- function(detector,
+                                                    target_data, ...) {
+  .check_pkg("trending", reason = "for the trending NB-GLM detector.")
+
+  td <- target_data |>
+    dplyr::mutate(
+      t = as.numeric(.data$date - detector$origin_date) / 7,
+      doy = as.numeric(format(.data$date, "%j")),
+      sin1 = sin(2 * pi * .data$doy / 365.25),
+      cos1 = cos(2 * pi * .data$doy / 365.25)
+    )
+
+  preds <- trending::predict(
+    detector$model, td,
+    alpha = detector$params$alpha, simulate_pi = FALSE
+  )
+
+  pred_df <- as.data.frame(preds)
+  # trending returns columns "estimate", "lower_pi", "upper_pi"
+  upper_col <- intersect(c("upper_pi", "upper", "upper_ci"), names(pred_df))[1]
+  est_col   <- intersect(c("estimate", "pred", "fitted"), names(pred_df))[1]
+  upper_v <- pred_df[[upper_col]]
+  est_v   <- pred_df[[est_col]]
+
+  tibble::tibble(
+    date = target_data$date,
+    alarm = target_data$cases > upper_v,
+    score = as.numeric((target_data$cases - est_v) /
+                         pmax(est_v, 1)),
+    upper_threshold = as.numeric(upper_v)
+  )
+}
+
+
+# ---------------------------------------------------------------------------
+# built-in detector: endemic_channel
+#
+# Hand-rolled WHO-style endemic channel: per-iso-week median + Q3 of
+# baseline. Alarm raised when target exceeds Q3. Self-contained (no
+# external dependency).
+# ---------------------------------------------------------------------------
+
+#' @keywords internal
+#' @noRd
+new_detector_endemic_channel <- function(upper_quantile = 0.75) {
+  new_epi_detector(
+    method = "endemic_channel",
+    params = list(upper_quantile = upper_quantile)
+  )
+}
+
+#' @keywords internal
+#' @noRd
+fit_detector.epi_detector_endemic_channel <- function(detector,
+                                                       baseline_data, ...) {
+  q <- detector$params$upper_quantile
+  detector$lookup <- baseline_data |>
+    dplyr::mutate(iso_week = as.integer(format(.data$date, "%V"))) |>
+    dplyr::group_by(.data$iso_week) |>
+    dplyr::summarise(
+      centre = stats::median(.data$cases, na.rm = TRUE),
+      upper  = stats::quantile(.data$cases, probs = q,
+                               na.rm = TRUE, names = FALSE),
+      .groups = "drop"
+    )
+  detector$fitted <- TRUE
+  detector
+}
+
+#' @keywords internal
+#' @noRd
+predict_detector.epi_detector_endemic_channel <- function(detector,
+                                                           target_data, ...) {
+  td <- target_data |>
+    dplyr::mutate(iso_week = as.integer(format(.data$date, "%V"))) |>
+    dplyr::left_join(detector$lookup, by = "iso_week")
+
+  fallback_upper <- mean(detector$lookup$upper, na.rm = TRUE)
+  upper_v <- dplyr::if_else(is.na(td$upper), fallback_upper, td$upper)
+
+  tibble::tibble(
+    date = target_data$date,
+    alarm = target_data$cases > upper_v,
+    score = as.numeric(target_data$cases - upper_v),
+    upper_threshold = as.numeric(upper_v)
+  )
+}
+
+
+# ---------------------------------------------------------------------------
+# built-in detector: stl_residual
+#
+# stats::stl() seasonal-trend decomposition of the combined series; alarm if
+# the target-period residual exceeds `k` SDs of the baseline residuals.
+# ---------------------------------------------------------------------------
+
+#' @keywords internal
+#' @noRd
+new_detector_stl_residual <- function(k = 3, s_window = "periodic") {
+  new_epi_detector(
+    method = "stl_residual",
+    params = list(k = k, s_window = s_window)
+  )
+}
+
+#' @keywords internal
+#' @noRd
+fit_detector.epi_detector_stl_residual <- function(detector,
+                                                    baseline_data, ...) {
+  detector$baseline <- baseline_data
+  detector$fitted <- TRUE
+  detector
+}
+
+#' @keywords internal
+#' @noRd
+predict_detector.epi_detector_stl_residual <- function(detector,
+                                                       target_data, ...) {
+  combined <- dplyr::bind_rows(detector$baseline, target_data) |>
+    dplyr::arrange(.data$date)
+
+  if (nrow(combined) < 104L) {
+    cli::cli_abort("stl_residual needs >= 104 obs after combining baseline + target.")
+  }
+
+  series <- stats::ts(combined$cases, frequency = 52L)
+  fit <- stats::stl(series, s.window = detector$params$s_window,
+                    na.action = stats::na.exclude, robust = TRUE)
+
+  resid_vec <- as.numeric(fit$time.series[, "remainder"])
+  baseline_n <- nrow(detector$baseline)
+  baseline_resid <- resid_vec[seq_len(baseline_n)]
+  sd_b <- stats::sd(baseline_resid, na.rm = TRUE)
+
+  target_resid <- resid_vec[(baseline_n + 1):length(resid_vec)]
+  z <- target_resid / pmax(sd_b, 1e-9)
+  upper_v <- detector$params$k * sd_b
+
+  tibble::tibble(
+    date = target_data$date,
+    alarm = z > detector$params$k,
+    score = as.numeric(z),
+    upper_threshold = as.numeric(upper_v)
+  )
+}
+
+
+# ---------------------------------------------------------------------------
+# built-in detector: anomalize_stl
+#
+# Wraps anomalize::anomalize() pipeline (frequency-aware STL decomposition +
+# IQR/GESD anomaly classification). Anomaly direction "up" is reported as an
+# alarm; "down" or "none" are not.
+# ---------------------------------------------------------------------------
+
+#' @keywords internal
+#' @noRd
+new_detector_anomalize_stl <- function(alpha = 0.05,
+                                        method = c("iqr", "gesd"),
+                                        max_anomalies = 0.2) {
+  method <- match.arg(method)
+  new_epi_detector(
+    method = "anomalize_stl",
+    params = list(alpha = alpha, method = method,
+                  max_anomalies = max_anomalies)
+  )
+}
+
+#' @keywords internal
+#' @noRd
+fit_detector.epi_detector_anomalize_stl <- function(detector,
+                                                     baseline_data, ...) {
+  detector$baseline <- baseline_data
+  detector$fitted <- TRUE
+  detector
+}
+
+#' @keywords internal
+#' @noRd
+predict_detector.epi_detector_anomalize_stl <- function(detector,
+                                                        target_data, ...) {
+  .check_pkg("anomalize", reason = "for the anomalize_stl detector.")
+  .check_pkg("tibbletime", reason = "for anomalize's time tibbles.")
+
+  combined <- dplyr::bind_rows(detector$baseline, target_data) |>
+    dplyr::arrange(.data$date) |>
+    dplyr::select("date", "cases") |>
+    tibble::as_tibble()
+
+  decomp <- anomalize::time_decompose(combined, .data$cases,
+                                       method = "stl",
+                                       frequency = "auto",
+                                       trend = "auto")
+  anom <- anomalize::anomalize(decomp, .data$remainder,
+                                method = detector$params$method,
+                                alpha = detector$params$alpha,
+                                max_anoms = detector$params$max_anomalies)
+  recomp <- anomalize::time_recompose(anom)
+
+  target_rows <- recomp |>
+    dplyr::filter(.data$date %in% target_data$date)
+
+  alarm_v <- target_rows$anomaly == "Yes" &
+    target_rows$observed > target_rows$recomposed_l2
+  upper_v <- target_rows$recomposed_l2
+
+  tibble::tibble(
+    date = target_data$date,
+    alarm = as.logical(alarm_v),
+    score = as.numeric(target_rows$observed - target_rows$recomposed_l2),
+    upper_threshold = as.numeric(upper_v)
+  )
+}
+
+
+# ---------------------------------------------------------------------------
+# built-in detector: arima
+#
+# forecast::auto.arima on the baseline, then one-step-ahead forecasts over
+# the target window. Alarm if observed exceeds the upper prediction interval.
+# ---------------------------------------------------------------------------
+
+#' @keywords internal
+#' @noRd
+new_detector_arima <- function(alpha = 0.001,
+                                seasonal = TRUE,
+                                stepwise = TRUE) {
+  new_epi_detector(
+    method = "arima",
+    params = list(alpha = alpha, seasonal = seasonal, stepwise = stepwise)
+  )
+}
+
+#' @keywords internal
+#' @noRd
+fit_detector.epi_detector_arima <- function(detector, baseline_data, ...) {
+  .check_pkg("forecast", reason = "for the arima detector.")
+
+  series <- stats::ts(baseline_data$cases, frequency = 52L)
+  detector$model <- forecast::auto.arima(
+    series,
+    seasonal = detector$params$seasonal,
+    stepwise = detector$params$stepwise,
+    approximation = TRUE
+  )
+  detector$baseline <- baseline_data
+  detector$fitted <- TRUE
+  detector
+}
+
+#' @keywords internal
+#' @noRd
+predict_detector.epi_detector_arima <- function(detector, target_data, ...) {
+  .check_pkg("forecast", reason = "for the arima detector.")
+
+  n_target <- nrow(target_data)
+  level <- (1 - detector$params$alpha) * 100
+  fc <- forecast::forecast(detector$model, h = n_target, level = level)
+
+  upper_v <- as.numeric(fc$upper[, 1])
+  mean_v  <- as.numeric(fc$mean)
+
+  tibble::tibble(
+    date = target_data$date,
+    alarm = target_data$cases > upper_v,
+    score = as.numeric(target_data$cases - mean_v),
+    upper_threshold = upper_v
+  )
+}
+
+
+# ---------------------------------------------------------------------------
+# built-in detector: changepoint_pelt
+#
+# changepoint::cpt.meanvar with PELT. Alarm at every target observation
+# that falls *after* the last detected changepoint in the combined series.
+# ---------------------------------------------------------------------------
+
+#' @keywords internal
+#' @noRd
+new_detector_changepoint_pelt <- function(penalty = "BIC",
+                                           minseglen = 4L) {
+  new_epi_detector(
+    method = "changepoint_pelt",
+    params = list(penalty = penalty, minseglen = minseglen)
+  )
+}
+
+#' @keywords internal
+#' @noRd
+fit_detector.epi_detector_changepoint_pelt <- function(detector,
+                                                       baseline_data, ...) {
+  detector$baseline <- baseline_data
+  detector$fitted <- TRUE
+  detector
+}
+
+#' @keywords internal
+#' @noRd
+predict_detector.epi_detector_changepoint_pelt <- function(detector,
+                                                            target_data, ...) {
+  .check_pkg("changepoint", reason = "for changepoint_pelt.")
+
+  combined <- dplyr::bind_rows(detector$baseline, target_data) |>
+    dplyr::arrange(.data$date)
+  fit <- changepoint::cpt.meanvar(
+    combined$cases,
+    penalty = detector$params$penalty,
+    method = "PELT",
+    minseglen = detector$params$minseglen
+  )
+  cps <- changepoint::cpts(fit)
+  baseline_n <- nrow(detector$baseline)
+
+  # target rows
+  idx <- seq(baseline_n + 1, nrow(combined))
+  # alarm if a changepoint lies at or before this row in the target range
+  # OR if any changepoint was detected after the baseline window.
+  cps_in_target <- cps[cps > baseline_n]
+  alarm_v <- vapply(idx, function(i) any(cps_in_target <= i), logical(1))
+  score_v <- vapply(idx, function(i) sum(cps_in_target <= i),
+                    numeric(1))
+
+  tibble::tibble(
+    date = target_data$date,
+    alarm = alarm_v,
+    score = as.numeric(score_v),
+    upper_threshold = rep(NA_real_, length(idx))
+  )
+}
+
+
+# ---------------------------------------------------------------------------
+# built-in detector: bayesian_changepoint
+#
+# Rbeast::beast on the combined series; alarm if posterior probability of
+# a changepoint at the target date exceeds `prob_threshold`.
+# ---------------------------------------------------------------------------
+
+#' @keywords internal
+#' @noRd
+new_detector_bayesian_changepoint <- function(prob_threshold = 0.5) {
+  new_epi_detector(
+    method = "bayesian_changepoint",
+    params = list(prob_threshold = prob_threshold)
+  )
+}
+
+#' @keywords internal
+#' @noRd
+fit_detector.epi_detector_bayesian_changepoint <- function(detector,
+                                                            baseline_data,
+                                                            ...) {
+  detector$baseline <- baseline_data
+  detector$fitted <- TRUE
+  detector
+}
+
+#' @keywords internal
+#' @noRd
+predict_detector.epi_detector_bayesian_changepoint <- function(detector,
+                                                                target_data,
+                                                                ...) {
+  .check_pkg("Rbeast", reason = "for bayesian_changepoint.")
+
+  combined <- dplyr::bind_rows(detector$baseline, target_data) |>
+    dplyr::arrange(.data$date)
+  baseline_n <- nrow(detector$baseline)
+
+  fit <- Rbeast::beast(combined$cases, season = "none",
+                       print.progress = FALSE,
+                       print.options = FALSE, quiet = TRUE)
+
+  # cpOccPr is the posterior probability vector of a changepoint at each t
+  prob_vec <- as.numeric(fit$trend$cpOccPr)
+  if (length(prob_vec) != nrow(combined)) {
+    # Rbeast occasionally returns a shorter vector; pad with zeros
+    prob_vec <- c(prob_vec, rep(0, nrow(combined) - length(prob_vec)))
+  }
+
+  target_idx <- seq(baseline_n + 1, nrow(combined))
+  prob_target <- prob_vec[target_idx]
+  thr <- detector$params$prob_threshold
+
+  tibble::tibble(
+    date = target_data$date,
+    alarm = prob_target >= thr,
+    score = as.numeric(prob_target),
+    upper_threshold = rep(thr, length(target_idx))
+  )
+}
+
+
 # ---------------------------------------------------------------------------
 # built-in registration hook
 # ---------------------------------------------------------------------------
@@ -615,7 +1331,24 @@ predict_detector.epi_detector_ears_c1 <- function(detector,
     envir = ns
   )
 
-  # step 17 detectors will be appended here once each lands.
+  # step 17 detectors
+  step17 <- c(
+    "ears_c2", "ears_c3", "cusum_classical", "farrington", "glrnb",
+    "trending", "endemic_channel", "stl_residual", "anomalize_stl",
+    "arima", "changepoint_pelt", "bayesian_changepoint"
+  )
+  for (nm in step17) {
+    ctor <- get(paste0("new_detector_", nm), envir = ns,
+                inherits = FALSE)
+    assign(nm, ctor, envir = .epi_registry)
+    cls <- paste0("epi_detector_", nm)
+    fit_fn <- get(paste0("fit_detector.", cls),
+                  envir = ns, inherits = FALSE)
+    pred_fn <- get(paste0("predict_detector.", cls),
+                   envir = ns, inherits = FALSE)
+    registerS3method("fit_detector", cls, fit_fn, envir = ns)
+    registerS3method("predict_detector", cls, pred_fn, envir = ns)
+  }
 
   invisible(available_detectors())
 }
