@@ -1,0 +1,183 @@
+---
+title: "Outbreak detection with sntmethods (epi_* verbs)"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Outbreak detection with sntmethods (epi_* verbs)}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 4,
+  eval = FALSE
+)
+```
+
+# Overview
+
+`sntmethods` exposes a four-verb framework for univariate outbreak
+detection:
+
+* **`epi_detect()`** — fit one or more detectors against a baseline /
+  target split.
+* **`epi_evaluate()`** — grade detectors against labelled, simulated, or
+  unlabelled ground truth.
+* **`epi_ensemble()`** — combine detectors via majority, weighted, or
+  score-average voting.
+* **`epi_recommend()`** — profile a series and rank candidate detectors.
+
+All four verbs share a single registry of built-in detectors, accessed via
+`available_detectors()`. Users can extend the registry via
+`register_detector()`.
+
+# A worked example
+
+We simulate a single province's weekly malaria count series over four
+years, then inject a synthetic outbreak in the final year. The first three
+years are the baseline; the fourth year is the target window we want to
+score.
+
+```{r simulate}
+library(sntmethods)
+library(dplyr)
+library(ggplot2)
+
+set.seed(42)
+
+dates <- seq.Date(as.Date("2021-01-04"),
+                  as.Date("2024-12-30"),
+                  by = "week")
+n_w   <- length(dates)
+doy   <- as.numeric(format(dates, "%j"))
+seasonal <- 100 + 60 * sin(2 * pi * doy / 365.25)
+counts   <- rpois(n_w, lambda = seasonal)
+
+# inject a 6-week spike in mid-2024
+spike_idx <- which(dates >= as.Date("2024-06-01") &
+                   dates <= as.Date("2024-07-15"))
+counts[spike_idx] <- counts[spike_idx] +
+  rpois(length(spike_idx), lambda = 80)
+
+# truth labels for evaluation
+is_outbreak <- rep(FALSE, n_w)
+is_outbreak[spike_idx] <- TRUE
+
+df <- tibble::tibble(
+  date  = dates,
+  cases = counts,
+  truth = is_outbreak
+)
+
+ggplot(df, aes(date, cases, colour = truth)) +
+  geom_line(colour = "grey60") +
+  geom_point() +
+  theme_minimal()
+```
+
+## Step 1: detect
+
+```{r detect}
+target_range  <- c(as.Date("2024-01-01"), as.Date("2024-12-30"))
+baseline_range <- c(as.Date("2021-01-04"), as.Date("2023-12-25"))
+
+run <- epi_detect(
+  data           = df,
+  date_col       = "date",
+  count_col      = "cases",
+  methods        = c("threshold", "ears_c1", "ears_c2",
+                     "farrington", "trending"),
+  target_range   = target_range,
+  baseline_range = baseline_range
+)
+
+print(run)
+autoplot(run)
+```
+
+## Step 2: evaluate
+
+```{r evaluate}
+eval <- epi_evaluate(
+  detection_run = run,
+  truth_col     = "truth",
+  loo_method    = TRUE,
+  k_sweep       = TRUE,
+  cost          = list(c_fp = 1, c_fn = 5)
+)
+
+summary(eval)
+autoplot(eval)
+```
+
+## Step 3: ensemble
+
+```{r ensemble}
+ens <- epi_ensemble(
+  detection_run = run,
+  strategy      = "weighted_vote",
+  weights       = eval,
+  na_handling   = "as_false"
+)
+
+print(ens)
+autoplot(ens)
+```
+
+## Step 4: recommend
+
+```{r recommend}
+recs <- epi_recommend(
+  data       = df,
+  date_col   = "date",
+  count_col  = "cases",
+  evaluation = eval,
+  tie_break  = "evidence"
+)
+
+print(recs)
+autoplot(recs)
+```
+
+# Extending the framework
+
+Third-party detectors plug in via `register_detector()`. The detector only
+needs to honour the four-column predict contract (`date`, `alarm`,
+`score`, `upper_threshold`); failure isolation and `method` / `group_id`
+columns are added by the framework.
+
+```{r extend}
+new_my_zscore <- function(k = 3) {
+  sntmethods:::new_epi_detector(method = "my_zscore",
+                                params = list(k = k))
+}
+
+fit_detector.epi_detector_my_zscore <- function(detector, baseline_data, ...) {
+  detector$mu <- mean(baseline_data$cases, na.rm = TRUE)
+  detector$sd <- sd(baseline_data$cases, na.rm = TRUE)
+  detector$fitted <- TRUE
+  detector
+}
+
+predict_detector.epi_detector_my_zscore <- function(detector, target_data, ...) {
+  z <- (target_data$cases - detector$mu) / detector$sd
+  tibble::tibble(
+    date            = target_data$date,
+    alarm           = z > detector$params$k,
+    score           = as.numeric(z),
+    upper_threshold = detector$mu + detector$params$k * detector$sd
+  )
+}
+
+register_detector(
+  name              = "my_zscore",
+  constructor       = new_my_zscore,
+  fit_method        = fit_detector.epi_detector_my_zscore,
+  predict_method    = predict_detector.epi_detector_my_zscore
+)
+
+available_detectors()
+```

@@ -1,0 +1,134 @@
+title: "Outbreak Detection Framework (epi_*)"
+version: "1.1.0"
+author: "AHADI Analytics Team"
+context: "Subnational Tailoring – Surveillance Outbreak Detection"
+description: >
+  Defines the framework for detecting, evaluating, ensembling, and recommending
+  outbreak detection algorithms for univariate count time-series. The
+  framework exposes four composable verbs (epi_detect, epi_evaluate,
+  epi_ensemble, epi_recommend) backed by a registry of built-in detectors
+  and an extension API (register_detector).
+
+  Each detector follows a fit/predict generic contract and is wrapped in a
+  failure-isolation shell: when a single detector errors on one (group, date)
+  cell, the framework records the error and continues so that downstream
+  ensembling, grading, and reporting remain operational.
+
+institutional_context: >
+  Routine malaria surveillance increasingly relies on weekly count series at
+  health-facility or admin level. SNT analyses need a defensible way to
+  raise outbreak alarms while accounting for noisy reporting, seasonality,
+  low counts, and missing data. This module replaces ad-hoc threshold rules
+  with an audited family of methods, a labelled-truth or simulation-based
+  evaluation harness, and a recommendation step that picks detectors
+  appropriate to the series' statistical profile.
+
+principles:
+  - "Four composable verbs: detect → evaluate → ensemble / recommend."
+  - "Detectors honour a four-column predict contract (date, alarm, score,
+     upper_threshold). The framework adds failure metadata."
+  - "Failure isolation: a detector that errors on one cell never crashes the
+     run; failed cells are NA-flagged for downstream verbs."
+  - "Evaluation is mode-aware (labelled, simulation, unlabelled) and reports
+     both statistical (sens/spec/AUC) and surveillance (TTD/FAR/persistence)
+     metrics."
+  - "Leave-one-method-out (LOO) ensembling is the headline diagnostic: it
+     measures each detector's marginal contribution to the consensus."
+  - "Recommendations are profile-driven and rationalised; ties are broken by
+     simplicity, evidence (AUC), or cost."
+
+key_concepts:
+  detector_registry: "Named environment of detector constructors. Built-ins
+    are registered at .onLoad(); users can extend via register_detector()."
+  baseline_target_split: "Each run defines an explicit baseline window (the
+    reference history) and a target window (the cells being scored)."
+  preprocessing_trace: "epi_detect() stores its preprocessing choices on the
+    output object so epi_evaluate() can faithfully reproduce them when
+    running operating-point simulations."
+  failure_contract: "Detectors return a 4-column tibble; the framework adds
+    `method`, `group_id`, `failed`, `error_message`."
+  cost_aware_evaluation: "Per-method cost = c_fp * FP + c_fn * FN, optionally
+    extended with a F-beta metric prioritising recall."
+  operating_point_grid: "Simulated outbreaks at multiple sizes / durations
+    are injected to estimate sensitivity at a target false-alarm rate."
+
+built_in_detectors:
+  hand_rolled:
+    - threshold: "Per-iso-week mean/median/Q3 baseline + k-sigma envelope."
+    - endemic_channel: "Per-iso-week percentile (default Q3) baseline; WHO-style."
+    - stl_residual: "stats::stl() decomposition + baseline residual z-score."
+  surveillance_wrappers:
+    - ears_c1: "surveillance::earsC method = C1 (no guard band)."
+    - ears_c2: "surveillance::earsC method = C2 (2-week guard band)."
+    - ears_c3: "surveillance::earsC method = C3 (3-week cumulative)."
+    - cusum_classical: "surveillance::cusum with anscombe transform."
+    - farrington: "surveillance::farringtonFlexible (NB-GLM + outbreak reweighting)."
+    - glrnb: "surveillance::glrnb generalised likelihood ratio (NB reference)."
+  external_wrappers:
+    - trending: "trending::glm_nb_model() with sin/cos harmonics + trend."
+    - arima: "forecast::auto.arima with upper PI exceedance."
+    - anomalize_stl: "anomalize::anomalize IQR/GESD pipeline."
+    - changepoint_pelt: "changepoint::cpt.meanvar with PELT."
+    - bayesian_changepoint: "Rbeast::beast posterior changepoint probability."
+
+evaluation_metrics:
+  classification:
+    - sensitivity: "TP / (TP + FN)"
+    - specificity: "TN / (TN + FP)"
+    - ppv: "TP / (TP + FP)"
+    - npv: "TN / (TN + FN)"
+    - accuracy: "(TP + TN) / N"
+    - f1: "Harmonic mean of precision and recall."
+    - f_beta: "Configurable beta (recall-weighted F)."
+  ranking:
+    - auc: "Mann–Whitney AUC of score vs. label."
+    - auprc: "Trapezoidal area under precision-recall curve."
+  surveillance:
+    - time_to_detect: "Median weeks from outbreak start to first alarm."
+    - false_alarm_rate: "Fraction of quiet weeks with an alarm."
+    - persistence: "Mean run-length of consecutive alarms within outbreaks."
+    - shoulder_fraction: "Fraction of FPs adjacent to a true outbreak."
+  cost:
+    - expected_cost: "c_fp * FP + c_fn * FN with user-supplied weights."
+
+diagnostic_plots:
+  - loo_delta: "Bars of delta_auc per left-out method."
+  - roc: "Per-method ROC overlay."
+  - pr: "Per-method PR curve overlay."
+  - calibration: "Score quantile vs. observed positive rate."
+  - agreement: "Cohen's kappa heatmap across method pairs."
+  - ttd: "Time-to-detect distribution by method."
+  - fp_shoulder: "FP density vs. distance to nearest true outbreak."
+  - operating_grid: "Sensitivity at fixed FAR over outbreak size grid."
+  - cost: "Per-method cost bars at the configured (c_fp, c_fn)."
+
+tie_break_strategies:
+  - simplicity: "Default. Prefers simpler methods (threshold > ears > cusum >
+      farrington > stl > arima > bayesian)."
+  - evidence: "Requires an epi_evaluation; breaks ties by per-method AUC."
+  - cost_minimising: "Requires an epi_evaluation with cost; lowest expected
+      cost wins."
+
+dependencies:
+  imports:
+    - surveillance
+    - trending
+    - ggplot2
+    - patchwork
+  suggests_gated_at_runtime:
+    - MASS
+    - forecast
+    - anomalize
+    - tibbletime
+    - changepoint
+    - Rbeast
+
+references:
+  - "Farrington CP et al. (1996) A statistical algorithm for the early
+     detection of outbreaks of infectious disease. JRSS-A."
+  - "Hutwagner L, Thompson W, Seeman GM, Treadwell T (2003) The bioterrorism
+     preparedness and response Early Aberration Reporting System (EARS). J
+     Urban Health."
+  - "Höhle M, Mazick A (2010) Aberration detection in R illustrated by
+     Danish mortality monitoring. surveillance R package vignette."
+  - "WHO (2017) WHO Outbreak Toolkit – endemic channels."

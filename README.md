@@ -99,6 +99,34 @@ install.packages("INLA",
 remotes::install_github("ihmeuw/mbg")
 ```
 
+### Outbreak detection dependencies (optional)
+
+The `epi_*` outbreak detection module ships with 14 built-in detectors.
+The core framework (`epi_detect`, `epi_evaluate`, `epi_ensemble`,
+`epi_recommend`) and the `surveillance` / `trending` family of detectors
+install with the package. Heavier detectors are declared in `Suggests`
+and gated at runtime with an actionable error message. To enable them,
+install the corresponding package on demand:
+
+```r
+# negative-binomial GLM detectors (trending)
+install.packages("MASS")          # NB family
+
+# ARIMA detector
+install.packages("forecast")
+
+# anomalize pipeline (STL + IQR/GESD)
+install.packages(c("anomalize", "tibbletime"))
+
+# changepoint detectors
+install.packages("changepoint")
+install.packages("Rbeast")        # Bayesian changepoint (C++; may need
+                                  # a working compiler toolchain)
+```
+
+See `vignette("epi_outbreak_detection", package = "sntmethods")` for a
+worked end-to-end example covering the four verbs.
+
 ## Quick start
 
 ### DHS survey analysis

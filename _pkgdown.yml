@@ -1,0 +1,24 @@
+url: https://ahadi-analytics.github.io/sntmethods
+
+template:
+  bootstrap: 5
+
+reference:
+  - title: "Outbreak detection (epi_*)"
+    desc: >
+      A tidymodels-style framework for univariate outbreak detection.
+      Four composable verbs backed by a registry of built-in detectors.
+    contents:
+      - epi_detect
+      - epi_evaluate
+      - epi_ensemble
+      - epi_recommend
+      - profile_series
+      - register_detector
+      - available_detectors
+
+articles:
+  - title: "Outbreak detection"
+    navbar: ~
+    contents:
+      - epi_outbreak_detection
