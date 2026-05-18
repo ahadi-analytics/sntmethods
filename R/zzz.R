@@ -89,6 +89,13 @@
 
 # Package load hook - kept minimal to avoid check issues
 .onLoad <- function(libname, pkgname) {
-  # Nothing needed here - dependency checks happen when functions are called
+  # register built-in outbreak detectors into the epi_* registry env;
+  # the function itself is defined in R/epi_detect.R and is safe to call
+  # repeatedly (existing entries are overwritten).
+  if (exists(".register_builtin_detectors",
+             envir = asNamespace(pkgname),
+             inherits = FALSE)) {
+    .register_builtin_detectors()
+  }
   invisible()
 }
