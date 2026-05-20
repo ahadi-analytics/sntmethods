@@ -30,6 +30,8 @@ run_mbg_pipeline(
   aggregation_level = c("adm2", "adm3"),
   run_mbg = TRUE,
   save_rasters = TRUE,
+  save_cluster_points = TRUE,
+  cluster_points_out_path = NULL,
   cache = TRUE,
   csb_priority_method = c("all", "first", "public", "private"),
   custom_csb_indicator = NULL,
@@ -143,6 +145,16 @@ auto-adds "csb" and "act" as dependencies)
 \item{run_mbg}{Logical. If TRUE, runs MBG models. Default: TRUE.}
 
 \item{save_rasters}{Logical. If TRUE, saves output rasters. Default: TRUE.}
+
+\item{save_cluster_points}{Logical. If TRUE (default), saves the
+coordinate-level (cluster-point) datasets produced by
+\verb{calc_*_mbg()} to disk in addition to the aggregated admin-level
+outputs. Set to FALSE to skip saving cluster-point files.}
+
+\item{cluster_points_out_path}{Output directory for cluster-point
+(coordinate-level) datasets. If NULL (default), falls back to
+\code{table_out_path}. Use this to keep the per-cluster point files in a
+separate location from the combined admin-level outputs.}
 
 \item{cache}{Logical. If TRUE (default), reuses cached intermediate outputs
 (aggregation tables, ID rasters) when available. Set to FALSE to force

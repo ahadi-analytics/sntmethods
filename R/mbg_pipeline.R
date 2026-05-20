@@ -103,6 +103,14 @@ NULL
 #'   }
 #' @param run_mbg Logical. If TRUE, runs MBG models. Default: TRUE.
 #' @param save_rasters Logical. If TRUE, saves output rasters. Default: TRUE.
+#' @param save_cluster_points Logical. If TRUE (default), saves the
+#'   coordinate-level (cluster-point) datasets produced by
+#'   `calc_*_mbg()` to disk in addition to the aggregated admin-level
+#'   outputs. Set to FALSE to skip saving cluster-point files.
+#' @param cluster_points_out_path Output directory for cluster-point
+#'   (coordinate-level) datasets. If NULL (default), falls back to
+#'   `table_out_path`. Use this to keep the per-cluster point files in a
+#'   separate location from the combined admin-level outputs.
 #' @param cache Logical. If TRUE (default), reuses cached intermediate outputs
 #'   (aggregation tables, ID rasters) when available. Set to FALSE to force
 #'   regeneration of all intermediate outputs.
@@ -218,6 +226,8 @@ run_mbg_pipeline <- function(
   aggregation_level = c("adm2", "adm3"),
   run_mbg = TRUE,
   save_rasters = TRUE,
+  save_cluster_points = TRUE,
+  cluster_points_out_path = NULL,
   cache = TRUE,
   csb_priority_method = c("all", "first", "public", "private"),
   custom_csb_indicator = NULL,
@@ -392,9 +402,20 @@ run_mbg_pipeline <- function(
     }
   }
 
+  # Resolve cluster-point output path (defaults to table_out_path when NULL
+  # or empty) so callers can keep coordinate-level files separate from the
+  # combined admin-level outputs.
+  if (is.null(cluster_points_out_path) || cluster_points_out_path == "") {
+    cluster_points_out_path <- table_out_path
+  }
+
   # Validate/create output directories
-  output_paths <- c(table_out_path, raster_out_path, intermediate_out_path)
+  output_paths <- c(
+    table_out_path, raster_out_path, intermediate_out_path,
+    cluster_points_out_path
+  )
   output_paths <- output_paths[!is.null(output_paths) & output_paths != ""]
+  output_paths <- unique(output_paths)
   for (out_path in output_paths) {
     tryCatch({
       fs::dir_create(out_path, recurse = TRUE)
@@ -424,7 +445,8 @@ run_mbg_pipeline <- function(
   output_dirs <- list(
     tables = table_out_path,
     rasters = raster_out_path,
-    intermediate = intermediate_out_path
+    intermediate = intermediate_out_path,
+    cluster_points = cluster_points_out_path
   )
 
   # Debug: Show configured output paths
@@ -433,6 +455,7 @@ run_mbg_pipeline <- function(
     cli::cli_alert_info("Tables: {.file {output_dirs$tables}}")
     cli::cli_alert_info("Rasters: {.file {output_dirs$rasters}}")
     cli::cli_alert_info("Intermediate: {.file {output_dirs$intermediate}}")
+    cli::cli_alert_info("Cluster points: {.file {output_dirs$cluster_points}}")
   }
 
   # Validate required output paths
@@ -972,11 +995,14 @@ run_mbg_pipeline <- function(
       }
     }
 
-    # Save cluster data (after summary header so path appears under summary)
-    if (length(year_results$cluster_data) > 0) {
+    # Save cluster data (after summary header so path appears under summary).
+    # Gated on `save_cluster_points` so callers can opt out, and routed to
+    # `cluster_points_out_path` so coordinate-level files can be kept
+    # separate from the combined admin-level outputs.
+    if (isTRUE(save_cluster_points) && length(year_results$cluster_data) > 0) {
       .save_cluster_data(
         cluster_data = year_results$cluster_data,
-        output_dir = output_dirs$tables,
+        output_dir = output_dirs$cluster_points,
         country_iso3 = country_iso3,
         survey_year = current_year,
         survey_type = current_survey_type
@@ -1198,6 +1224,13 @@ run_mbg_pipeline <- function(
   }
 
   cli::cli_alert_success("Pipeline complete!")
+
+  # Safety net: ensure no parallel workers are left running after the MBG
+  # pipeline. INLA / mbg internals can spawn worker processes; claiming an
+  # explicit cluster here and registering `on.exit(stopCluster)` guarantees
+  # those workers are shut down before the function returns.
+  cluster <- parallel::makeCluster(parallel::detectCores() - 1)
+  on.exit(parallel::stopCluster(cluster), add = TRUE)
 
   results
 }
