@@ -1168,6 +1168,9 @@ run_seasonality_pipeline <- function(
       dpi       = dpi,
       limitsize = FALSE
     )
+    sntutils::compress_png(
+      path = file.path(graphs_dir, paste0(gsub(" ", "_", prov), "_seasonality_comparison.png"))
+    )
 
     cli::cli_alert_success("Overlay graph saved: {.val {prov}}")
     p
@@ -1196,7 +1199,7 @@ run_seasonality_pipeline <- function(
       date_labels = "%b %Y"
     ) +
     ggplot2::labs(
-      title    = glue::glue("{adm0_name}: Average Seasonality \u2014 All Provinces"),
+      title    = glue::glue("{adm0_name}: Average Seasonality - All Provinces"),
       subtitle = "Mean Percent Seasonality of Cases vs Rainfall",
       x = NULL, y = "Mean Percent Seasonality (%)", color = "Type"
     ) +
@@ -1208,6 +1211,9 @@ run_seasonality_pipeline <- function(
     path      = graphs_dir,
     width     = 14, height = 12, dpi = dpi,
     limitsize = FALSE
+  )
+  sntutils::compress_png(
+    path = file.path(graphs_dir, glue::glue("{iso3}_ALL_PROVINCES_summary_comparison.png"))
   )
 
   cli::cli_alert_success("Summary overlay graph saved \u2192 {.path { .relative_path(graphs_dir)}}")
@@ -1247,7 +1253,6 @@ run_seasonality_pipeline <- function(
   smc_fig_dir <- file.path(fig_root, .type_smc_subdir(type))
   .ensure_dir(smc_fig_dir)
 
-  # \u2500\u2500 responsive dimensions \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
   dims <- .compute_map_dims(adm2_sp)
 
   month_lkp <- c(apr = 4L, may = 5L, jun = 6L, jul = 7L, aug = 8L, sep = 9L)
@@ -1282,7 +1287,6 @@ run_seasonality_pipeline <- function(
       median_cats = .categorise_median_prop(median_max_prop)
     )
 
-  # \u2500\u2500 shared palettes \u2014 colours unchanged \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
   month_pal <- c(
     "4" = "#7c4aa5ff", "5" = "#4169E1", "6" = "#32CD32",
     "7" = "#FFA500",   "8" = "#FFFF00", "9" = "#FF0000"
@@ -1300,7 +1304,6 @@ run_seasonality_pipeline <- function(
     "4" = "60-70%", "5" = "70-80%", "6" = "80-100%"
   )
 
-  # \u2500\u2500 per-duration timing + coverage maps \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
   durations     <- sort(unique(block_data$duration))
   timing_maps   <- list()
   coverage_maps <- list()
@@ -1321,7 +1324,7 @@ run_seasonality_pipeline <- function(
       fill_values = month_pal[present_months],
       fill_labels = month_lbl[present_months],
       adm1_sf     = adm1_sp,
-      title       = glue::glue("Ideal first month \u2014 {dur} cycles ({type})"),
+      title       = glue::glue("Ideal first month {dur} cycles ({type})"),
       fill_label  = "First Month"
     )
     timing_maps[[as.character(dur)]] <- tm
@@ -1335,7 +1338,7 @@ run_seasonality_pipeline <- function(
       fill_values = cov_pal[present_cats],
       fill_labels = cov_lbl[present_cats],
       adm1_sf     = adm1_sp,
-      title       = glue::glue("% of {type} covered \u2014 {dur}-month window"),
+      title       = glue::glue("% of {type} covered {dur}-month window"),
       fill_label  = "% Covered"
     )
     coverage_maps[[as.character(dur)]] <- cm
@@ -1347,7 +1350,6 @@ run_seasonality_pipeline <- function(
     )
   }
 
-  # \u2500\u2500 minimum best block computation \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
   cli::cli_alert_info("Computing minimum best blocks...")
 
   min_summary <- block_data |>
@@ -1410,7 +1412,6 @@ run_seasonality_pipeline <- function(
     "Minimum best block table saved \u2192 {.path { .relative_path(tbl_sub)}}"
   )
 
-  # \u2500\u2500 minimum best block maps \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
   min_final   <- min_summary |> dplyr::filter(minimum_best == 1L)
   min_spatial <- adm2_sp |>
     dplyr::left_join(min_final, by = "adm2") |>
@@ -1654,6 +1655,9 @@ run_seasonality_pipeline <- function(
       width = ppr * 5, height = 3.5 * n_rows + 1.5,
       dpi = dpi, bg = "white", limitsize = FALSE
     )
+    sntutils::compress_png(
+      path = file.path(median_dir, glue::glue("Cases_v_rainfall_median_{region}.png"))
+    )
     cli::cli_alert_success("Median plot saved: {.val {region}}")
     p
   })
@@ -1692,6 +1696,9 @@ run_seasonality_pipeline <- function(
       width = ppr * 5, height = 3.5 * n_rows + 1.5,
       dpi = dpi, bg = "white", limitsize = FALSE
     )
+    sntutils::compress_png(
+      path = file.path(crude_dir, glue::glue("Cases_v_rainfall_crude_{region}.png"))
+    )
     cli::cli_alert_success("Crude plot saved: {.val {region}}")
     p
   })
@@ -1718,15 +1725,13 @@ run_seasonality_pipeline <- function(
     )
 }
 
-#' Company-standard map theme
-#'
-#' Aligns with \code{facetted_map_bins}: \code{theme_void()} base, bottom
+#' \code{theme_void()} base, bottom
 #' horizontal legend, strip text with breathing room, tight plot margins.
 #'
 #' @param title_size,subtitle_size,legend_title_size Font sizes.
 #' @keywords internal
-.snt_theme_map <- function(title_size = 14, subtitle_size = 11,
-                           legend_title_size = 10) {
+.snt_theme_map <- function(title_size = 18, subtitle_size = 14,
+                           legend_title_size = 16, legend_text_size = 14) {
   ggplot2::theme_void() +
     ggplot2::theme(
       # ── titles ───────────────────────────────────────────────────────────────
@@ -1755,8 +1760,8 @@ run_seasonality_pipeline <- function(
         face   = "bold",
         margin = ggplot2::margin(b = 6)
       ),
-      legend.text          = ggplot2::element_text(size = 9),
-      legend.box.margin    = ggplot2::margin(t = 8),
+      legend.text          = ggplot2::element_text(size = legend_text_size),
+      legend.box.margin    = ggplot2::margin(t = 10),
       # ── facet strips (for any multi-panel map) ───────────────────────────────
       strip.text   = ggplot2::element_text(
         face   = "bold",
@@ -1813,7 +1818,7 @@ run_seasonality_pipeline <- function(
 #' Build a single SNT choropleth map (company standard)
 #'
 #' Central factory used by \code{.build_seasonality_maps()} and
-#' \code{.run_smc_maps_step()}. Applies \code{facetted_map_bins} principles:
+#' \code{.run_smc_maps_step()}. 
 #' \code{theme_void()} base, white district borders at \code{linewidth = 0.15},
 #' \code{inherit.aes = FALSE} on the ADM1 overlay, and a bottom horizontal
 #' legend via \code{guide_legend(nrow = 1, label.position = "bottom")}.
@@ -1880,7 +1885,8 @@ run_seasonality_pipeline <- function(
     ) +
     ggplot2::coord_sf(datum = NA) +
     ggplot2::labs(title = title, subtitle = subtitle, caption = caption) +
-    .snt_theme_map()
+    .snt_theme_map(title_size = 18, subtitle_size = 14,
+      legend_title_size = 16, legend_text_size = 14)
 }
 
 
@@ -1902,6 +1908,9 @@ run_seasonality_pipeline <- function(
     height    = dims[["height"]],
     dpi       = dpi,
     limitsize = FALSE
+  )
+  sntutils::compress_png(
+    path = path
   )
   cli::cli_alert_success("Map saved \u2192 {.path { .relative_path(path)}}")
   invisible(path)
@@ -2676,7 +2685,7 @@ run_seasonality_pipeline <- function(
       fill_values = t_pal,
       fill_labels = t_lbl,
       adm1_sf     = adm1_sp,
-      title       = glue::glue("Malaria Seasonality \u2014 {thresh_label} years"),
+      title       = glue::glue("Malaria Seasonality {thresh_label} years"),
       subtitle    = glue::glue("Based on {tolower(type_label)} ({yr_range})")
     )
 
@@ -3232,6 +3241,9 @@ run_heatmap_analysis <- function(
   output_path <- file.path(output_dir, filename)
   ggplot2::ggsave(filename = output_path, plot = plot,
                   width = width, height = height, dpi = dpi)
+  sntutils::compress_png(
+    path = output_path
+  )
   cli::cli_alert_success("Heatmap saved: {.path { .relative_path(output_path)}}")
   invisible(output_path)
 }
