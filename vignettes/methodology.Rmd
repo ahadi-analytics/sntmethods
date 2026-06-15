@@ -1,0 +1,119 @@
+---
+title: "Methodology & conventions"
+description: >
+  How indicators are defined, where the variable mappings live, the function
+  naming scheme, and how to inspect dictionaries.
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Methodology & conventions}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  eval = FALSE
+)
+```
+
+This article is the reference layer: it explains how indicators are specified,
+where to look up variable mappings, the function naming scheme, and the two
+kinds of dictionaries the package provides.
+
+## Function naming conventions
+
+| Pattern | Purpose | Example |
+|---------|---------|---------|
+| `calc_*_dhs()` | Survey-weighted DHS estimates (long format) | `calc_itn_dhs()` |
+| `calc_*_mbg()` | Run MBG model for an indicator family | `calc_itn_mbg()` |
+| `prep_*_mbg()` | Prepare cluster-level data for MBG | `prep_itn_mbg()` |
+| `fit_mbg_indicator()` | All-in-one MBG fit + admin aggregation | `fit_mbg_indicator()` |
+| `run_mbg_pipeline()` | Full MBG pipeline (all indicators) | `run_mbg_pipeline()` |
+| `dhs_dictionary()` | Unified dictionary across all DHS domains | `dhs_dictionary()` |
+| `calc_incidence()` | Routine-data incidence (N0-N5 cascade) | `calc_incidence()` |
+| `calc_tpr()` | Test positivity rate with fallbacks | `calc_tpr()` |
+
+## Two kinds of dictionaries
+
+**Indicator dictionaries** describe the *outputs* - each indicator's numerator,
+denominator, codes, and metadata. Use `dhs_dictionary()` for the unified view,
+or per-domain helpers (`itn_dictionary()`, `act_dictionary()`,
+`pfpr_dictionary()`, ...):
+
+```r
+library(sntmethods)
+dhs_dictionary()
+```
+
+**Raw variable dictionaries** describe the *inputs* - every variable present in
+a specific DHS recode, with its label. Build these with
+`make_dhs_raw_dictionary()` (or spot-check with `list_dhs_var_labels()`)
+**before** computing indicators, to confirm a survey actually carries the
+variables an indicator needs:
+
+```r
+kr <- dhs_read(path = path_dhs_parquet, file_type = "KR",
+               country_code = "TG", survey_year = 2017)
+make_dhs_raw_dictionary(kr)     # full variable list for this recode
+```
+
+See [DHS survey analysis → inspect the variables](dhs-survey-analysis.html#step-0b-inspect-the-variables-before-building-indicators)
+for the recommended "Step 0" workflow.
+
+## Methodology specifications (`inst/methods/`)
+
+Detailed methodology for each indicator lives in machine-readable YAML at
+[`inst/methods/`](https://github.com/ahadi-analytics/sntmethods/tree/master/inst/methods).
+Each file documents DHS variable mappings, inclusion criteria, calculation
+logic, and references to WHO / World Malaria Report standards.
+
+| File | Domain |
+|------|--------|
+| `pfpr_dhs.yml` | Parasite prevalence |
+| `itn_dhs.yml` | ITN ownership/access/use |
+| `irs_dhs.yml` | Indoor residual spraying |
+| `fever_dhs.yml` | Fever prevalence |
+| `csb_dhs.yml` | Care-seeking behaviour |
+| `malaria_dx_dhs.yml` | Malaria diagnostic testing |
+| `antimalarial_dhs.yml` | Antimalarial treatment |
+| `act_dhs.yml` | ACT treatment |
+| `anc_dhs.yml` | Antenatal care |
+| `iptp_dhs.yml` | IPTp dosing |
+| `epi_dhs.yml` | EPI vaccination |
+| `u5mr_dhs.yml` | Under-5 mortality |
+| `anemia_dhs.yml` | Anemia prevalence |
+| `smc_dhs.yml` | SMC coverage |
+| `wealth_dhs.yml` | Wealth index |
+| `incidence.yml` | Incidence cascade (N0-N5) |
+| `tpr.yml` | Test positivity rate |
+| `reporting_rate.yml` | Reporting-rate calculations |
+| `outlier_detection.yml` | Outlier detection methods |
+| `active_status.yml` | Facility activity classification |
+
+## Methodological notes
+
+- **Direct survey estimates stay at adm0/adm1.** DHS/MIS weights are
+  representative at region level; sub-region estimates come from the
+  [MBG pipeline](spatial-modeling.html), not direct aggregation.
+- **ACT** is a drug *class* across multiple variables - only artemisinin-based
+  *combination* therapies count; monotherapies are excluded.
+- **U5MR** is reported per 1,000 live births; intervention-coverage indicators
+  are percentages (0-100).
+- **ITN `use_if_access`** (use among those with access) is computed by default
+  with standard age groups (`u5`, `5_14`, `ov15`).
+
+## Country configuration
+
+Country-specific survey settings (variable overrides, eligibility notes) live
+in
+[`inst/countries/`](https://github.com/ahadi-analytics/sntmethods/tree/master/inst/countries).
+
+## See also
+
+- [Get started](getting-started.html) · [DHS survey analysis](dhs-survey-analysis.html)
+  · [Spatial modeling](spatial-modeling.html) ·
+  [Routine data](routine-incidence.html) · [Trend analysis](trend-analysis.html)
+- [Reference](../reference/index.html) for every exported function.
+```

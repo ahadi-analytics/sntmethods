@@ -1,0 +1,146 @@
+---
+title: "Get started"
+description: >
+  A short tour of what sntmethods does, how the three workflows fit together,
+  and how to install it - including the optional spatial-modeling stack.
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Get started}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  eval = FALSE
+)
+```
+
+## What is `sntmethods`?
+
+`sntmethods` is an R package developed by AHADI that turns raw survey and
+routine health data into the sub-national estimates used to plan malaria
+control. It is the analytical companion to
+[`sntutils`](https://ahadi-analytics.github.io/sntutils/): where `sntutils`
+reads, cleans, and harmonises data, `sntmethods` runs the epidemiological
+methods on top of it.
+
+The package is organised around **three workflows**, each covered by its own
+article:
+
+- **[DHS survey analysis](dhs-survey-analysis.html)** - survey-weighted,
+  design-correct estimates for 100+ indicators across 16 domains, straight
+  from DHS/MIS microdata.
+- **[Spatial modeling (MBG)](spatial-modeling.html)** - model-based
+  geostatistics that turns cluster-level survey data into continuous raster
+  surfaces and population-weighted admin estimates.
+- **[Routine data: incidence & TPR](routine-incidence.html)** - malaria
+  incidence from health-facility data via the N0-N5 cascade, test positivity
+  with structured fallbacks, and trend detection.
+
+Two ideas run through all three:
+
+- **Long-format, admin-stratified outputs.** Every estimator returns tidy
+  tibbles keyed by admin level (`adm0`, `adm1`, `adm2`) with `point`, `ci_l`,
+  `ci_u`, `numerator`, `denominator`, and indicator metadata - never a nested
+  list you have to unpack.
+- **Documented methods.** Each indicator family ships a machine-readable data
+  dictionary and a methodology spec under
+  [`inst/methods/`](https://github.com/ahadi-analytics/sntmethods/tree/master/inst/methods).
+  See the [Methodology & conventions](methodology.html) article.
+
+::: {.alert .alert-info}
+**New to Subnational Tailoring?** The
+[AHADI SNT Code Library](https://ahadi-analytics.github.io/snt-code-library/)
+is the methodology-level companion - country examples and the analytical
+reasoning behind every step these functions automate.
+:::
+
+## Install
+
+```r
+# install pak if needed
+install.packages("pak")
+
+# install sntmethods from GitHub (pulls sntutils automatically)
+pak::pkg_install("ahadi-analytics/sntmethods")
+```
+
+Or with `remotes`:
+
+```r
+remotes::install_github("ahadi-analytics/sntmethods")
+```
+
+### System dependencies (spatial features)
+
+The MBG and spatial functions use `sf` and `terra`, which require GDAL, GEOS,
+and PROJ:
+
+```bash
+# macOS
+brew install gdal geos proj
+
+# Ubuntu/Debian
+sudo apt-get install -y libgdal-dev libgeos-dev libproj-dev libudunits2-dev
+```
+
+### MBG dependencies (optional)
+
+Spatial modeling additionally needs INLA (from its own repository) and the
+`mbg` engine. These are only required if you run the
+[MBG workflow](spatial-modeling.html):
+
+```r
+install.packages(
+  "INLA",
+  repos = c(
+    INLA = "https://inla.r-inla-download.org/R/stable",
+    CRAN = "https://cloud.r-project.org"
+  )
+)
+
+remotes::install_github("ihmeuw/mbg")
+```
+
+The DHS-survey and routine-data workflows have no spatial dependencies - you
+can use them without INLA, `mbg`, or even `sf`.
+
+## A 60-second taste
+
+Read a DHS recode and compute a survey-weighted indicator:
+
+```r
+library(sntmethods)
+
+# Household and person recodes for one survey
+hr <- dhs_read(path = "path/to/parquet", file_type = "HR",
+               country_code = "BU", survey_year = 2016)
+pr <- dhs_read(path = "path/to/parquet", file_type = "PR",
+               country_code = "BU", survey_year = 2016)
+
+# ITN ownership/access/use - survey-weighted, with CIs and design effects
+itn <- calc_itn_dhs(dhs_hr = hr, dhs_pr = pr)
+
+itn$adm1
+#> # a long-format tibble: indicator, indicator_code, point, ci_l, ci_u,
+#> #   numerator, denominator, adm1, survey_year, ...
+```
+
+Every `calc_*_dhs()` function follows the same shape, so once you have read
+one indicator you have read them all. Continue with the
+[DHS survey analysis](dhs-survey-analysis.html) article.
+
+## Where to next?
+
+| If you want to...                                   | Read                                            |
+|-----------------------------------------------------|-------------------------------------------------|
+| Compute survey indicators from DHS/MIS microdata    | [DHS survey analysis](dhs-survey-analysis.html) |
+| Produce continuous maps / model-based estimates     | [Spatial modeling (MBG)](spatial-modeling.html) |
+| Estimate incidence or TPR from routine data         | [Routine data](routine-incidence.html)          |
+| Detect trends in monthly time series                | [Trend analysis](trend-analysis.html)           |
+| Understand the methods and naming conventions       | [Methodology & conventions](methodology.html)   |
+| Look up a specific function                          | [Reference](../reference/index.html)            |
+```

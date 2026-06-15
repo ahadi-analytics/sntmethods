@@ -64,9 +64,31 @@ home:
 navbar:
   bg: primary
   structure:
-    left:  [reference, news]
+    left:  [intro, articles, reference, news]
     right: [search, lightswitch, github]
   components:
+    intro:
+      text: Get started
+      href: articles/getting-started.html
+    articles:
+      text: Articles
+      menu:
+      - text: Get started
+        href: articles/getting-started.html
+      - text: "---"
+      - text: "Workflows"
+      - text: DHS survey analysis
+        href: articles/dhs-survey-analysis.html
+      - text: Spatial modeling (MBG)
+        href: articles/spatial-modeling.html
+      - text: Routine data - incidence & TPR
+        href: articles/routine-incidence.html
+      - text: Trend analysis
+        href: articles/trend-analysis.html
+      - text: "---"
+      - text: "Reference"
+      - text: Methodology & conventions
+        href: articles/methodology.html
     reference:
       text: Reference
       href: reference/index.html
@@ -196,9 +218,28 @@ reference:
 - title: Utilities
   desc: Small shared helpers used across SNT pipelines.
   contents:
-  - ahadi_path
+  - dhs_data_path
   - cmc_to_date
   - normalize_zscore
+
+articles:
+- title: Get started
+  navbar: ~
+  contents:
+  - getting-started
+
+- title: Workflows
+  navbar: Workflows
+  contents:
+  - dhs-survey-analysis
+  - spatial-modeling
+  - routine-incidence
+  - trend-analysis
+
+- title: Reference
+  navbar: Reference
+  contents:
+  - methodology
 
 footer:
   structure:
