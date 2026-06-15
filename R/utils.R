@@ -1,7 +1,7 @@
 #' Resolve path inside AHADI OneDrive shared library
 #'
 #' @description
-#' `ahadi_path()` builds a robust, OS-aware path to a file or folder inside
+#' `dhs_data_path()` builds a robust, OS-aware path to a file or folder inside
 #' the AHADI OneDrive "Shared Library". It:
 #'
 #' * detects the OS (Windows or macOS)
@@ -53,25 +53,25 @@
 #' @examples
 #' \dontrun{
 #' # get the base DHS data directory
-#' base_path <- ahadi_path()
+#' base_path <- dhs_data_path()
 #'
 #' # get a specific file inside the base folder
-#' file_path <- ahadi_path("surveys/2020/survey_data.csv")
+#' file_path <- dhs_data_path("surveys/2020/survey_data.csv")
 #'
 #' # use a different library and base folder
-#' other_path <- ahadi_path(
+#' other_path <- dhs_data_path(
 #'   relative = "my_file.xlsx",
 #'   library = "AHADI Operations",
 #'   base = "SOPs"
 #' )
 #'
 #' # force re-detection if the OneDrive setup changed
-#' ahadi_path(refresh = TRUE, verbose = TRUE)
+#' dhs_data_path(refresh = TRUE, verbose = TRUE)
 #' }
 #'
 #' @importFrom utils head
 #' @export
-ahadi_path <- function(
+dhs_data_path <- function(
   relative = NULL,
   org = "Applied Health Analytics for Delivery and Innovation Inc",
   library = "AHADI Information - technical",
@@ -830,7 +830,7 @@ dhs_read <- function(
 #' \dontrun{
 #' # Load a DHS dataset
 #' pr_data <- dhs_read(
-#'   path = ahadi_path("01_data/parquet"),
+#'   path = dhs_data_path("01_data/parquet"),
 #'   file_type = "PR",
 #'   country_code = "KE",
 #'   survey_year = 2022

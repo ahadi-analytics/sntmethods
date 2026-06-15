@@ -129,11 +129,11 @@ pop_worldpop/
 
 ### 3.2 DHS data path
 
-DHS data lives as partitioned parquet on Ahadi OneDrive. Use `ahadi_path()` to build an
+DHS data lives as partitioned parquet on Ahadi OneDrive. Use `dhs_data_path()` to build an
 OS-agnostic path:
 
 ```r
-path_dhs_parquet <- here::here(ahadi_path(), "01_data/parquet")
+path_dhs_parquet <- here::here(dhs_data_path(), "01_data/parquet")
 ```
 
 > **Windows path-length note:** Windows has a 256-character path limit that can block

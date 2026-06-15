@@ -30,7 +30,7 @@ paths <- sntutils::setup_project_paths(
   )
 )
 
-path_dhs_parquet <- here::here(ahadi_path(), "01_data/parquet")
+path_dhs_parquet <- here::here(dhs_data_path(), "01_data/parquet")
 path_output <- here::here(paths$pfpr_est, "processed")
 
 ## ---------------------------------------------------------------------------##

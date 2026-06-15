@@ -12,7 +12,7 @@ survey_year <- 2016
 survey_type <- "DHS"
 
 paths <- sntutils::setup_project_paths()
-path_dhs_parquet <- here::here(ahadi_path(), "01_data/parquet")
+path_dhs_parquet <- here::here(dhs_data_path(), "01_data/parquet")
 path_output <- here::here(paths$itn, "processed")
 
 fs::dir_create(path_output)

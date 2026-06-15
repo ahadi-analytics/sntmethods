@@ -47,7 +47,7 @@ The function extracts:
 \dontrun{
 # Load a DHS dataset
 pr_data <- dhs_read(
-  path = ahadi_path("01_data/parquet"),
+  path = dhs_data_path("01_data/parquet"),
   file_type = "PR",
   country_code = "KE",
   survey_year = 2022

@@ -20,7 +20,7 @@ country_iso3 <- "tgo"
 # (fit_mbg_indicator) rather than direct survey aggregation.
 admin_levels <- c("adm1")
 
-path_dhs_parquet <- here::here(sntmethods::ahadi_path(), "01_data/parquet")
+path_dhs_parquet <- here::here(sntmethods::dhs_data_path(), "01_data/parquet")
 
 paths <-
   sntutils::setup_project_paths(
