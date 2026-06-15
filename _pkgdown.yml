@@ -1,0 +1,209 @@
+url: https://ahadi-analytics.github.io/sntmethods/
+
+template:
+  bootstrap: 5
+  bootswatch: flatly
+  light-switch: true
+  includes:
+    in_header: |
+      <script>
+        (function() {
+          try {
+            if (!localStorage.getItem('pkgdown-theme')) {
+              localStorage.setItem('pkgdown-theme', 'dark');
+            }
+            document.documentElement.dataset.bsTheme =
+              localStorage.getItem('pkgdown-theme');
+          } catch (e) {
+            document.documentElement.dataset.bsTheme = 'dark';
+          }
+        })();
+      </script>
+  bslib:
+    primary: "#0F2333"
+    secondary: "#628DA5"
+    success: "#B3CB72"
+    info: "#5EAADD"
+    warning: "#FFC225"
+    danger: "#ff7a7a"
+    link-color: "#4682B4"
+    link-hover-color: "#FFC225"
+    navbar-bg: "#0F2333"
+    navbar-fg: "#FFFFFF"
+    headings-color: "#0F2333"
+    base_font: {google: "Inter"}
+    heading_font: {google: "Inter"}
+    code_font: {google: "JetBrains Mono"}
+
+development:
+  mode: auto
+
+opengraph:
+  image:
+    src: man/figures/logo.png
+    alt: "sntmethods - analytical methods for Subnational Tailoring of malaria interventions"
+
+home:
+  title: sntmethods - analytical methods for Subnational Tailoring
+  description: >
+    R package developed by AHADI providing epidemiologically grounded analytical
+    methods for the Subnational Tailoring (SNT) of malaria control strategies.
+    Transforms DHS survey microdata and routine health facility data into
+    survey-weighted indicators, model-based geostatistical surfaces and
+    incidence estimates for district-level program planning.
+  sidebar:
+    structure: [links, license, community, citation, authors, dev]
+  links:
+    - text: AHADI website
+      href: https://appliedhealthanalytics.org
+    - text: sntutils (companion package)
+      href: https://ahadi-analytics.github.io/sntutils/
+    - text: Subnational Tailoring code library
+      href: https://ahadi-analytics.github.io/snt-code-library/
+
+navbar:
+  bg: primary
+  structure:
+    left:  [reference, news]
+    right: [search, lightswitch, github]
+  components:
+    reference:
+      text: Reference
+      href: reference/index.html
+    news:
+      text: Changelog
+      href: news/index.html
+    github:
+      icon: fa-github fa-lg
+      href: https://github.com/ahadi-analytics/sntmethods
+      aria-label: GitHub
+
+reference:
+- title: DHS survey indicators
+  desc: >
+    Survey-weighted, design-correct estimates from DHS/MIS microdata. Each
+    returns long-format admin-level tables with confidence intervals and design
+    effects.
+  contents:
+  - calc_itn_dhs
+  - calc_irs_dhs
+  - calc_pfpr_dhs
+  - calc_act_dhs
+  - calc_antimalarial_dhs
+  - calc_fever_dhs
+  - calc_malaria_dx_dhs
+  - calc_case_management_dhs
+  - calc_anc_dhs
+  - calc_iptp_dhs
+  - calc_epi_dhs
+  - calc_smc_dhs
+  - calc_severe_anemia_dhs
+  - calc_u5mr_dhs
+  - calc_csb_dhs
+  - calc_csb_by_wealth_dhs
+  - calc_wealth_dhs
+  - calculate_dhs_gini
+
+- title: DHS data access and dictionaries
+  desc: Read DHS parquet archives, inspect variable labels, and look up indicator metadata.
+  contents:
+  - dhs_read
+  - dhs_dictionary
+  - dhs_model_datasets
+  - make_dhs_raw_dictionary
+  - list_dhs_var_labels
+  - join_dhs_coords
+
+- title: MBG pipeline and modeling
+  desc: >
+    Model-based geostatistics workflow - from cluster data to fitted models,
+    prediction rasters and population-weighted admin estimates.
+  contents:
+  - run_mbg_pipeline
+  - run_mbg_indicator_pipeline
+  - fit_mbg_indicator
+  - build_final_dataset
+  - aggregate_raster_to_admin
+  - save_mbg_cluster_data
+  - save_mbg_rasters
+
+- title: MBG cluster-data preparation
+  desc: Prepare cluster-level inputs for each indicator family used by the MBG pipeline.
+  contents:
+  - calc_itn_mbg
+  - calc_irs_mbg
+  - calc_pfpr_mbg
+  - calc_act_mbg
+  - calc_antimalarial_mbg
+  - calc_fever_mbg
+  - calc_malaria_dx_mbg
+  - calc_anc_mbg
+  - calc_iptp_mbg
+  - calc_epi_mbg
+  - calc_smc_mbg
+  - calc_anemia_mbg
+  - calc_u5mr_mbg
+  - calc_csb_mbg
+  - calc_csb_by_wealth_mbg
+  - calc_wealth_mbg
+  - prep_itn_mbg
+  - prep_irs_mbg
+  - prep_pfpr_mbg
+  - prep_act_mbg
+  - prep_antimalarial_mbg
+  - prep_fever_mbg
+  - prep_malaria_dx_mbg
+  - prep_anc_mbg
+  - prep_iptp_mbg
+  - prep_epi_mbg
+  - prep_smc_mbg
+  - prep_anemia_mbg
+  - prep_csb_mbg
+  - prep_csb_by_wealth_mbg
+  - prep_wealth_mbg
+
+- title: MBG mapping and visualization
+  desc: Render indicator surfaces and cluster diagnostics from MBG outputs.
+  contents:
+  - generate_all_maps
+  - generate_indicator_map
+  - save_indicator_map
+  - plot_mbg_clusters
+  - plot_mbg_clusters_all
+
+- title: Routine data - incidence
+  desc: Test positivity and the N0-N5 malaria incidence cascade from routine surveillance.
+  contents:
+  - calc_tpr
+  - validate_tpr_proxies
+  - calc_incidence
+  - create_incidence
+  - check_incidence
+
+- title: Routine data - reporting and quality
+  desc: Reporting-rate metrics, facility activity classification and outlier detection.
+  contents:
+  - calculate_reporting_metrics
+  - classify_facility_activity
+  - get_active_facilities
+  - detect_outliers
+
+- title: Trend analysis
+  desc: Seasonal-trend decomposition with non-parametric trend testing.
+  contents:
+  - run_grouped_stl_trend
+
+- title: Utilities
+  desc: Small shared helpers used across SNT pipelines.
+  contents:
+  - ahadi_path
+  - cmc_to_date
+  - normalize_zscore
+
+footer:
+  structure:
+    left: developed_by
+    right: built_with
+  components:
+    developed_by: |
+      Developed by [Applied Health Analytics for Delivery and Innovation (AHADI)](https://appliedhealthanalytics.org).
