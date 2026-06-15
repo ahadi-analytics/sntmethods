@@ -1,0 +1,465 @@
+// =============================================================================
+// sntmethods pkgdown — AHADI brand styling
+// Mirrors the palette and feel of sntutils and the SNT code library
+// (https://ahadi-analytics.github.io/snt-code-library/).
+// =============================================================================
+
+$ahadi-navy:   #0F2333; // deep navy — h1, titles, navbar bg
+$ahadi-steel:  #628DA5; // muted steel blue — h2, secondary
+$ahadi-sky:    #5EAADD; // soft sky — h3
+$ahadi-azure:  #70B0CC; // light azure — h4
+$ahadi-corn:   #96C8E2; // pale cornflower — h5
+$ahadi-ice:    #BEDFF0; // very light ice — h6
+$ahadi-link:   #4682B4; // link colour
+$ahadi-gold:   #FFC225; // accent / hover
+$ahadi-green:  #B3CB72; // accent green
+$ahadi-coral:  #ff7a7a; // caution
+
+// -----------------------------------------------------------------------------
+// Navbar
+// -----------------------------------------------------------------------------
+
+.navbar {
+  background-color: $ahadi-navy !important;
+}
+
+.navbar .navbar-brand,
+.navbar .navbar-nav .nav-link {
+  color: #FFFFFF !important;
+}
+
+.navbar .navbar-nav .nav-link:hover,
+.navbar .navbar-nav .nav-link:focus,
+.navbar .navbar-nav .nav-link.active {
+  color: $ahadi-gold !important;
+}
+
+.navbar-brand img {
+  max-height: 38px;
+  width: auto;
+}
+
+// Navbar dropdown — Articles menu items and group dividers.
+// Default Bootstrap renders these on a white background, but they
+// inherited the generic light-blue `a` colour and were too pale to read.
+.navbar .dropdown-menu {
+  background-color: #FFFFFF;
+  border: 1px solid lighten($ahadi-steel, 25%);
+  box-shadow: 0 4px 12px rgba(15, 35, 51, 0.08);
+}
+
+.navbar .dropdown-menu .dropdown-item,
+.navbar .dropdown-menu a.dropdown-item {
+  color: $ahadi-navy !important;
+  font-weight: 500;
+}
+
+.navbar .dropdown-menu .dropdown-item:hover,
+.navbar .dropdown-menu .dropdown-item:focus,
+.navbar .dropdown-menu a.dropdown-item:hover,
+.navbar .dropdown-menu a.dropdown-item:focus {
+  color: $ahadi-gold !important;
+  background-color: rgba($ahadi-navy, 0.04);
+}
+
+// Group labels (the "---" / section headings in the dropdown)
+.navbar .dropdown-menu .dropdown-header {
+  color: $ahadi-steel !important;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  padding-top: 0.6rem;
+}
+
+// -----------------------------------------------------------------------------
+// Typography
+// -----------------------------------------------------------------------------
+
+h1, .h1, .template-title h1 { color: $ahadi-navy  !important; }
+h2, .h2                     { color: $ahadi-steel !important; }
+h3, .h3                     { color: $ahadi-sky   !important; }
+h4, .h4                     { color: $ahadi-azure !important; }
+h5, .h5                     { color: $ahadi-corn  !important; }
+h6, .h6                     { color: $ahadi-ice   !important; }
+
+// page title block
+.template-home .page-header,
+.template-article .page-header,
+.template-reference-index .page-header,
+.template-reference-topic .page-header {
+  border-bottom: 2px solid $ahadi-steel;
+  padding-bottom: 0.4rem;
+  margin-bottom: 1.2rem;
+}
+
+// -----------------------------------------------------------------------------
+// Links
+// -----------------------------------------------------------------------------
+
+a,
+.contents a {
+  color: $ahadi-link;
+}
+
+a:hover,
+.contents a:hover {
+  color: $ahadi-gold;
+  text-decoration: underline;
+}
+
+// reference index — section cards
+.section h2 {
+  color: $ahadi-steel !important;
+  border-bottom: 1px solid lighten($ahadi-steel, 25%);
+  padding-bottom: 0.25rem;
+}
+
+// -----------------------------------------------------------------------------
+// Sidebar / TOC
+// -----------------------------------------------------------------------------
+
+#toc .nav > li > a,
+.aside .toc-action,
+.contents .nav > li > a {
+  color: $ahadi-navy !important;
+  font-weight: 500;
+}
+
+#toc .nav > li > a:hover,
+#toc .nav > li > a.active {
+  color: $ahadi-gold !important;
+  border-left-color: $ahadi-gold !important;
+}
+
+// Article side-nav (the article list on /articles/index.html and the
+// in-page TOC) — darken from steel to navy so titles read clearly on the
+// white sidebar.
+aside .nav-link,
+aside a.nav-link,
+.template-articles .nav-link {
+  color: $ahadi-navy !important;
+  font-weight: 500;
+}
+
+aside .nav-link:hover,
+aside a.nav-link:hover,
+.template-articles .nav-link:hover {
+  color: $ahadi-gold !important;
+}
+
+// -----------------------------------------------------------------------------
+// Code blocks
+// -----------------------------------------------------------------------------
+
+pre, code {
+  font-size: 0.875em;
+}
+
+pre {
+  background-color: #f7f9fb;
+  border: 1px solid #e3e9ee;
+  border-radius: 6px;
+  padding: 0.85rem 1rem;
+}
+
+code {
+  color: $ahadi-navy;
+  background-color: #f1f5f8;
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+}
+
+pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+// inline R output
+.sourceCode + pre,
+pre.r + pre,
+.cell-output pre {
+  background-color: #fafbfc;
+  border-left: 4px solid $ahadi-steel;
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
+  border-radius: 0 6px 6px 0;
+}
+
+// -----------------------------------------------------------------------------
+// Tables
+// -----------------------------------------------------------------------------
+
+table {
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1.25px solid #d0d7de;
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.92rem;
+}
+
+table thead th {
+  background-color: #eef2f5 !important;
+  color: $ahadi-navy !important;
+  border-bottom: 1.5px solid #c5cdd4 !important;
+  font-weight: 600;
+}
+
+table td, table th {
+  padding: 6px 10px;
+}
+
+// -----------------------------------------------------------------------------
+// Callouts (Bootstrap alerts as used by pkgdown / rmarkdown)
+// -----------------------------------------------------------------------------
+
+.alert-primary,
+.alert-info {
+  border-left: 5px solid $ahadi-sky !important;
+  background: rgba($ahadi-sky, 0.08);
+  border-top: none; border-right: none; border-bottom: none;
+  color: $ahadi-navy !important;          // readable in both light and dark mode
+  padding: 0.85rem 1rem;
+  margin: 1.2rem 0;
+}
+
+.alert-primary p,
+.alert-info p,
+.alert-primary li,
+.alert-info li {
+  color: $ahadi-navy !important;
+  margin-bottom: 0.25rem;
+}
+
+.alert-primary strong,
+.alert-info strong {
+  color: $ahadi-navy !important;
+  font-weight: 600;
+}
+
+.alert-primary a,
+.alert-info a {
+  color: $ahadi-link !important;
+  text-decoration: underline;
+}
+
+.alert-primary a:hover,
+.alert-info a:hover {
+  color: $ahadi-gold !important;
+}
+
+.alert-success,
+.alert-tip {
+  border-left: 5px solid $ahadi-steel !important;
+  background: rgba($ahadi-steel, 0.08);
+  border-top: none; border-right: none; border-bottom: none;
+}
+
+.alert-warning {
+  border-left: 5px solid $ahadi-gold !important;
+  background: rgba($ahadi-gold, 0.08);
+  border-top: none; border-right: none; border-bottom: none;
+}
+
+.alert-danger {
+  border-left: 5px solid $ahadi-coral !important;
+  background: rgba($ahadi-coral, 0.08);
+  border-top: none; border-right: none; border-bottom: none;
+}
+
+// -----------------------------------------------------------------------------
+// Home page
+// -----------------------------------------------------------------------------
+
+.template-home .row > main {
+  font-size: 1rem;
+  line-height: 1.55;
+}
+
+.template-home img.logo {
+  max-width: 180px;
+  float: right;
+  margin: 0 0 1rem 1.5rem;
+}
+
+// pkgdown sidebar
+aside .roxygen .dont-index { display: none; }
+
+// Hide the "Source: vignettes/foo.Rmd" link that pkgdown shows right under
+// the page title on articles. GitHub is the right entry point for source.
+.template-article small.dont-index,
+.template-reference-topic small.dont-index,
+.template-article .page-header + p.text-muted,
+.template-article .ref-source,
+.template-reference-topic .ref-source {
+  display: none !important;
+}
+
+// footer
+footer {
+  border-top: 2px solid lighten($ahadi-steel, 30%);
+  padding-top: 1rem;
+  color: $ahadi-steel;
+  font-size: 0.9rem;
+}
+
+footer a { color: $ahadi-link; }
+footer a:hover { color: $ahadi-gold; }
+
+// =============================================================================
+// Dark mode overrides
+// pkgdown's light-switch toggles [data-bs-theme="dark"] on <html>.
+// The rules above use !important + light-bg colours, so we re-state them
+// here for the dark theme. Light mode is untouched.
+// =============================================================================
+
+$dark-surface:   #1a242f; // raised surface (code blocks, table headers, dropdowns)
+$dark-surface-2: #161e27; // sunken surface (R output blocks)
+$dark-border:    #2a3845;
+$dark-text:      #E6EEF5; // primary text on dark bg
+
+[data-bs-theme="dark"] {
+
+  // Body text + muted text — make sure default copy and "text-muted"
+  // (used by tables, captions, list descriptions) read on the dark bg.
+  --bs-body-color: #{$dark-text};
+  --bs-secondary-color: #{$ahadi-corn};
+  --bs-tertiary-color: #{$ahadi-steel};
+
+  color: $dark-text;
+
+  .text-muted,
+  .text-secondary,
+  p, li, td, dd, dt {
+    color: $dark-text !important;
+  }
+
+  // Headings — flip the cool-blue ramp so lighter shades sit on top.
+  h1, .h1, .template-title h1 { color: $dark-text   !important; }
+  h2, .h2                     { color: $ahadi-corn  !important; }
+  h3, .h3                     { color: $ahadi-sky   !important; }
+  h4, .h4                     { color: $ahadi-azure !important; }
+  h5, .h5                     { color: $ahadi-steel !important; }
+  h6, .h6                     { color: $ahadi-steel !important; }
+
+  // Code blocks
+  pre {
+    background-color: $dark-surface;
+    border: 1px solid $dark-border;
+  }
+
+  code {
+    color: $ahadi-corn;
+    background-color: rgba($ahadi-sky, 0.12);
+  }
+
+  // R output (the `#>` block after a code chunk)
+  .sourceCode + pre,
+  pre.r + pre,
+  .cell-output pre {
+    background-color: $dark-surface-2;
+    border-left: 4px solid $ahadi-sky;
+  }
+
+  // Tables
+  table {
+    border: 1.25px solid $dark-border;
+  }
+
+  table thead th {
+    background-color: $dark-surface !important;
+    color: $ahadi-corn !important;
+    border-bottom: 1.5px solid $dark-border !important;
+  }
+
+  table td, table th {
+    color: $dark-text !important;
+  }
+
+  // Navbar dropdown (Articles menu)
+  .navbar .dropdown-menu {
+    background-color: $dark-surface;
+    border: 1px solid $dark-border;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  }
+
+  .navbar .dropdown-menu .dropdown-item,
+  .navbar .dropdown-menu a.dropdown-item {
+    color: $dark-text !important;
+  }
+
+  .navbar .dropdown-menu .dropdown-item:hover,
+  .navbar .dropdown-menu .dropdown-item:focus,
+  .navbar .dropdown-menu a.dropdown-item:hover,
+  .navbar .dropdown-menu a.dropdown-item:focus {
+    color: $ahadi-gold !important;
+    background-color: rgba($ahadi-gold, 0.08);
+  }
+
+  .navbar .dropdown-menu .dropdown-header {
+    color: $ahadi-corn !important;
+  }
+
+  // Sidebar / TOC / article side-nav
+  #toc .nav > li > a,
+  .aside .toc-action,
+  .contents .nav > li > a,
+  aside .nav-link,
+  aside a.nav-link,
+  .template-articles .nav-link {
+    color: $dark-text !important;
+  }
+
+  #toc .nav > li > a:hover,
+  #toc .nav > li > a.active,
+  aside .nav-link:hover,
+  aside a.nav-link:hover,
+  .template-articles .nav-link:hover {
+    color: $ahadi-gold !important;
+  }
+
+  // Reference-index section headers
+  .section h2 {
+    color: $ahadi-corn !important;
+    border-bottom: 1px solid $dark-border;
+  }
+
+  // Links
+  a, .contents a { color: $ahadi-sky; }
+  a:hover, .contents a:hover { color: $ahadi-gold; }
+
+  // Alerts / callouts — invert the forced-navy text
+  .alert-primary,
+  .alert-info {
+    color: $dark-text !important;
+    background: rgba($ahadi-sky, 0.12);
+  }
+
+  .alert-primary p,
+  .alert-info p,
+  .alert-primary li,
+  .alert-info li {
+    color: $dark-text !important;
+  }
+
+  .alert-primary strong,
+  .alert-info strong {
+    color: #FFFFFF !important;
+  }
+
+  .alert-success,
+  .alert-tip   { background: rgba($ahadi-steel, 0.14); }
+  .alert-warning { background: rgba($ahadi-gold,  0.12); }
+  .alert-danger  { background: rgba($ahadi-coral, 0.12); }
+
+  // Footer
+  footer {
+    border-top: 2px solid $dark-border;
+    color: $ahadi-corn;
+  }
+  footer a { color: $ahadi-sky; }
+  footer a:hover { color: $ahadi-gold; }
+}
