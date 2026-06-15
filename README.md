@@ -1,4 +1,4 @@
-# sntmethods
+# sntmethods <img src="man/figures/logo.png" align="right" height="139" alt="sntmethods logo" />
 
 <!-- badges: start -->
 [![R-CMD-check](https://github.com/ahadi-analytics/sntmethods/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/ahadi-analytics/sntmethods/actions/workflows/R-CMD-check.yaml)
