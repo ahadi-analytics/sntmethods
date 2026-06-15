@@ -19,3 +19,4 @@ Provides summary statistics for each incidence level including
 number of valid records, mean, median, range, and missing counts,
 plus overall data quality metrics.
 }
+\keyword{internal}

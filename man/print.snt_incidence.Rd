@@ -17,3 +17,4 @@ Invisibly returns \code{x}.
 \description{
 Print Method for SNT Incidence Objects
 }
+\keyword{internal}

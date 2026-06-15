@@ -18,3 +18,4 @@ A tibble with incidence data.
 Extracts the data component from an \code{snt_incidence} object and
 returns it as a tibble, discarding metadata.
 }
+\keyword{internal}

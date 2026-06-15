@@ -2969,6 +2969,7 @@ create_incidence <- function(
 #'
 #' @return Invisibly returns `x`.
 #'
+#' @keywords internal
 #' @export
 print.snt_incidence <- function(x, ...) {
   cli::cli_h1("SNT Incidence Object")
@@ -3033,6 +3034,7 @@ print.snt_incidence <- function(x, ...) {
 #'
 #' @return Invisibly returns a list of summary statistics.
 #'
+#' @keywords internal
 #' @export
 summary.snt_incidence <- function(object, ...) {
   cli::cli_h1("SNT Incidence Summary")
@@ -3208,6 +3210,7 @@ summary.snt_incidence <- function(object, ...) {
 #'
 #' @return A tibble with incidence data.
 #'
+#' @keywords internal
 #' @exportS3Method tibble::as_tibble
 as_tibble.snt_incidence <- function(x, ...) {
   x$data
@@ -3230,6 +3233,7 @@ as_tibble.snt_incidence <- function(x, ...) {
 #'
 #' @return A ggplot2 object.
 #'
+#' @keywords internal
 #' @export
 plot.snt_incidence <- function(
   x,

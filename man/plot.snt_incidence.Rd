@@ -27,3 +27,4 @@ A ggplot2 object.
 Creates a time series plot of incidence rates by level. If multiple
 administrative units are present, will facet by adm2 (up to 12 units).
 }
+\keyword{internal}
