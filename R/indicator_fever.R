@@ -1,3 +1,11 @@
+# fever indicator
+#
+# Merged from: dhs_calc_fever.R dhs_calc_fever_mbg.R dhs_helpers_fever.R 
+# Contains the survey-weighted calc, MBG cluster-prep, and indicator-
+# specific helpers for this family.
+
+# ---- dhs_calc_fever.R ----
+
 #' Calculate Fever Prevalence from DHS Data
 #'
 #' Estimates fever prevalence among children under 5 using survey-weighted
@@ -477,3 +485,320 @@ fever_dictionary <- function() {
     denominator_code        = vapply(conds, `[[`, character(1), "denom_code")
   )
 }
+
+
+# ---- dhs_calc_fever_mbg.R ----
+
+#' Prepare Fever Prevalence Data for MBG Analysis
+#'
+#' Prepares cluster-level fever prevalence data for MBG analysis.
+#' Calculates counts of alive children under 5 who had fever in the
+#' last 2 weeks, at each survey cluster.
+#'
+#' @details
+#' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/fever_dhs.yml}
+#'
+#' @param dhs_kr DHS Children's Recode (KR) dataset.
+#' @param gps_data DHS GPS dataset with cluster coordinates.
+#' @param indicators Character vector of indicators to calculate:
+#'   \itemize{
+#'     \item "fever": Fever prevalence among alive U5 children
+#'   }
+#'   Default: "fever".
+#' @param survey_vars Named list mapping DHS variable names:
+#'   \itemize{
+#'     \item `cluster`: Cluster ID (default: "v001")
+#'     \item `age`: Child's age in months (default: "hw1")
+#'     \item `fever`: Fever in last 2 weeks (default: "h22")
+#'     \item `alive`: Child survival status (default: "b5")
+#'   }
+#' @param gps_vars Named list for GPS variable mapping.
+#'
+#' @return A named list of data.tables (one per indicator), each with columns:
+#'   \itemize{
+#'     \item cluster_id: Cluster identifier
+#'     \item indicator: Numerator count (children with fever)
+#'     \item samplesize: Denominator count (all alive U5 children)
+#'     \item x: Longitude
+#'     \item y: Latitude
+#'   }
+#'
+#' @examples
+#' \dontrun{
+#' fever_mbg <- calc_fever_mbg(
+#'   dhs_kr = kr_data,
+#'   gps_data = gps_data
+#' )
+#' }
+#'
+#' @seealso [calc_fever_dhs_core()] for survey-weighted estimates,
+#'   [calc_csb_mbg()] for care-seeking behavior
+#' @export
+calc_fever_mbg <- function(
+  dhs_kr,
+  gps_data,
+  indicators = "fever",
+  survey_vars = list(
+    cluster = "v001",
+    age = "hw1",
+    fever = "h22",
+    alive = "b5"
+  ),
+  gps_vars = list(
+    cluster = "DHSCLUST",
+    lat = "LATNUM",
+    lon = "LONGNUM"
+  )
+) {
+  # ---- Input validation ----
+
+  if (!is.data.frame(dhs_kr)) {
+    cli::cli_abort("`dhs_kr` must be a data.frame or tibble")
+  }
+  if (!is.data.frame(gps_data)) {
+    cli::cli_abort("`gps_data` must be a data.frame or tibble")
+  }
+
+  valid_indicators <- "fever"
+  invalid <- setdiff(indicators, valid_indicators)
+  if (length(invalid) > 0) {
+    cli::cli_abort("Invalid indicators: {.val {invalid}}")
+  }
+
+  # ---- Prepare data using shared helpers ----
+
+  gps_clean <- .prepare_gps_data(gps_data, gps_vars)
+
+  kr_u5 <- tryCatch(
+    .prepare_fever_data(
+      dhs_kr = dhs_kr,
+      survey_vars = survey_vars,
+      include_survey_vars = FALSE
+    ),
+    error = function(e) {
+      cli::cli_alert_warning(conditionMessage(e))
+      return(NULL)
+    }
+  )
+
+  if (is.null(kr_u5)) return(list())
+
+  if (all(is.na(kr_u5$had_fever))) {
+    cli::cli_alert_warning(
+      "Fever variable {.var {survey_vars$fever}} is all NA - no fever data available"
+    )
+    return(list())
+  }
+
+  # ---- Calculate cluster-level indicators ----
+
+  results <- list()
+
+  if ("fever" %in% indicators) {
+    fever_data <- kr_u5 |>
+      dplyr::filter(!is.na(had_fever)) |>
+      dplyr::mutate(fever_binary = as.integer(had_fever == 1))
+
+    dt <- .aggregate_to_mbg_clusters(
+      individual_data = fever_data,
+      indicator_col = "fever_binary",
+      gps_clean = gps_clean,
+      result_name = "fever"
+    )
+
+    if (!is.null(dt)) {
+      results[["fever"]] <- dt
+    }
+  }
+
+  if (length(results) == 0) {
+    cli::cli_alert_warning("No valid fever MBG data could be prepared")
+  }
+
+  results
+}
+
+
+#' Prepare Single Fever Indicator for MBG
+#'
+#' Convenience wrapper around [calc_fever_mbg()] to prepare fever
+#' prevalence data for MBG analysis.
+#'
+#' @inheritParams calc_fever_mbg
+#' @param indicator Single indicator name. Default: "fever".
+#'
+#' @return A data.table with columns: cluster_id, indicator, samplesize, x, y
+#' @export
+prep_fever_mbg <- function(
+  dhs_kr,
+  gps_data,
+  indicator = "fever",
+  survey_vars = list(
+    cluster = "v001",
+    age = "hw1",
+    fever = "h22",
+    alive = "b5"
+  ),
+  gps_vars = list(
+    cluster = "DHSCLUST",
+    lat = "LATNUM",
+    lon = "LONGNUM"
+  )
+) {
+  result <- calc_fever_mbg(
+    dhs_kr = dhs_kr,
+    gps_data = gps_data,
+    indicators = indicator,
+    survey_vars = survey_vars,
+    gps_vars = gps_vars
+  )
+
+  if (length(result) == 0) {
+    cli::cli_abort("No data returned for indicator {.val {indicator}}")
+  }
+
+  result[[1]]
+}
+
+
+# ---- dhs_helpers_fever.R ----
+
+#' Prepare Fever Data for Analysis
+#'
+#' Shared data cleaning and indicator computation for fever functions.
+#' Used by both calc_fever_dhs_core() and calc_case_management_dhs().
+#'
+#' @param dhs_kr DHS Children's Recode (KR) dataset.
+#' @param survey_vars Named list mapping DHS variable names.
+#' @param include_survey_vars Logical. If TRUE, includes survey design columns.
+#'
+#' @return A data frame of alive U5 children with columns:
+#'   cluster_id, age_months, had_fever.
+#'   If include_survey_vars = TRUE, also: survey_weight, stratum_id.
+#'
+#' @noRd
+.prepare_fever_data <- function(
+  dhs_kr,
+  survey_vars,
+  include_survey_vars = FALSE
+) {
+  if (!is.data.frame(dhs_kr)) {
+    cli::cli_abort("`dhs_kr` must be a data.frame or tibble.")
+  }
+  if (nrow(dhs_kr) == 0) {
+    cli::cli_abort("`dhs_kr` is empty.")
+  }
+
+  # Auto-detect age variable if specified one is missing
+  # Fallback order: hw1 (anthropometry) -> hc1 (standard KR) -> b8 (current age)
+  if (!survey_vars$age %in% names(dhs_kr)) {
+    age_candidates <- c("hc1", "b8", "hw1")
+    available_age <- intersect(age_candidates, names(dhs_kr))
+
+    if (length(available_age) > 0) {
+      old_age_var <- survey_vars$age
+      survey_vars$age <- available_age[1]
+      cli::cli_alert_info(
+        "Age variable {.var {old_age_var}} not found; using {.var {survey_vars$age}} instead"
+      )
+    }
+  }
+
+  # Check required columns
+  needed <- c(survey_vars$cluster, survey_vars$age, survey_vars$fever)
+  if (include_survey_vars) {
+    needed <- c(needed, survey_vars$weight, survey_vars$stratum)
+  }
+  missing_vars <- setdiff(needed, names(dhs_kr))
+  if (length(missing_vars) > 0) {
+    cli::cli_abort(c(
+      "Required variables not found: {.var {missing_vars}}",
+      "i" = "Check your survey_vars mapping"
+    ))
+  }
+
+  # Zap labels
+  kr <- dhs_kr |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
+
+  # Build columns (force numeric to guard against haven character residuals)
+  kr <- kr |>
+    dplyr::mutate(
+      cluster_id = .data[[survey_vars$cluster]],
+      age_months = suppressWarnings(as.numeric(as.character(.data[[survey_vars$age]]))),
+      fever_raw = suppressWarnings(as.numeric(as.character(.data[[survey_vars$fever]])))
+    )
+
+  # Check alive variable if present
+  has_alive <- !is.null(survey_vars$alive) &&
+    survey_vars$alive %in% names(dhs_kr)
+
+  if (has_alive) {
+    kr <- kr |>
+      dplyr::mutate(
+        child_alive = suppressWarnings(as.numeric(as.character(.data[[survey_vars$alive]])))
+      )
+  }
+
+  if (include_survey_vars) {
+    kr <- kr |>
+      dplyr::mutate(
+        survey_weight = .data[[survey_vars$weight]] / 1e6,
+        stratum_id = .data[[survey_vars$stratum]]
+      )
+  }
+
+  # Filter to alive U5 children
+  kr_u5 <- kr |>
+    dplyr::filter(
+      age_months >= 0,
+      age_months <= 59
+    )
+
+  # Filter to alive children if variable present
+
+  if (has_alive) {
+    kr_u5 <- kr_u5 |>
+      dplyr::filter(child_alive == 1)
+  }
+
+  if (nrow(kr_u5) == 0) {
+    cli::cli_abort("No alive children under 5 found in data.")
+  }
+
+  # Check that fever variable has valid data
+  if (all(is.na(kr_u5$fever_raw))) {
+    cli::cli_abort(
+      "Fever variable {.var {survey_vars$fever}} is all NA for U5 children"
+    )
+  }
+
+  # Detect fever coding scheme: Some surveys use 0=No/1=Yes, others use 1=No/2=Yes
+  fever_values <- unique(kr_u5$fever_raw[!is.na(kr_u5$fever_raw)])
+
+  # Determine "Yes" value: if values are strictly {1, 2} or {2}, assume 2=Yes
+  # Otherwise, assume 1=Yes (standard DHS coding)
+  if (all(fever_values %in% c(1, 2)) && 2 %in% fever_values && !0 %in% fever_values) {
+    fever_yes_value <- 2
+    cli::cli_alert_info(
+      "Detected alternative fever coding (1=No, 2=Yes) - using 2 as 'Yes'"
+    )
+  } else {
+    fever_yes_value <- 1
+  }
+
+  # Create binary fever indicator
+  kr_u5 <- kr_u5 |>
+    dplyr::mutate(
+      had_fever = dplyr::if_else(fever_raw == fever_yes_value, 1, 0, missing = NA_real_)
+    )
+
+  cli::cli_alert_info(
+    "Found {format(nrow(kr_u5), big.mark = ',')} alive children under 5"
+  )
+
+  kr_u5
+}
+
+

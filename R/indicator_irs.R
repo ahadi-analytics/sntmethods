@@ -1,3 +1,11 @@
+# irs indicator
+#
+# Merged from: dhs_calc_irs.R dhs_calc_irs_mbg.R dhs_helpers_irs.R 
+# Contains the survey-weighted calc, MBG cluster-prep, and indicator-
+# specific helpers for this family.
+
+# ---- dhs_calc_irs.R ----
+
 #' Calculate IRS Coverage from DHS Data
 #'
 #' Estimates Indoor Residual Spraying (IRS) coverage at the household level
@@ -285,3 +293,189 @@ irs_dictionary <- function() {
     denominator_code        = vapply(conds, `[[`, character(1), "denom_code")
   )
 }
+
+
+# ---- dhs_calc_irs_mbg.R ----
+
+#' Prepare IRS Data for MBG Analysis
+#'
+#' Prepares cluster-level Indoor Residual Spraying (IRS) coverage data for
+#' Model-Based Geostatistics (MBG) analysis. Calculates the proportion of
+#' households sprayed in the last 12 months.
+#'
+#' @details
+#' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/irs_dhs.yml}
+#'
+#' @param dhs_hr DHS Household Records dataset.
+#' @param gps_data DHS GPS dataset with cluster coordinates.
+#' @param survey_vars Named list mapping DHS variable names.
+#' @param gps_vars Named list for GPS variable mapping.
+#'
+#' @return A data.table with columns:
+#'   \itemize{
+#'     \item cluster_id: Cluster identifier
+#'     \item indicator: Number of households sprayed
+#'     \item samplesize: Total number of households
+#'     \item x: Longitude
+#'     \item y: Latitude
+#'   }
+#'
+#' @details
+#' IRS coverage is measured using variable hv253 (household sprayed in last
+#' 12 months). This is a household-level indicator.
+#'
+#' @examples
+#' \dontrun{
+#' irs_mbg <- calc_irs_mbg(
+#'   dhs_hr = hr_data,
+#'   gps_data = gps_data
+#' )
+#' }
+#'
+#' @export
+calc_irs_mbg <- function(
+  dhs_hr,
+  gps_data,
+  survey_vars = list(
+    cluster = "hv001",
+    irs = "hv253"
+  ),
+  gps_vars = list(
+    cluster = "DHSCLUST",
+    lat = "LATNUM",
+    lon = "LONGNUM"
+  )
+) {
+  # ---- Input validation ----
+
+  if (!is.data.frame(gps_data)) {
+    cli::cli_abort("`gps_data` must be a data.frame or tibble")
+  }
+
+  # ---- Prepare GPS data ----
+
+  gps_clean <- .prepare_gps_data(gps_data, gps_vars)
+
+  # ---- Prepare HR data ----
+
+  hr <- .prepare_irs_data(dhs_hr, survey_vars, include_survey_vars = FALSE, strict = FALSE)
+  if (is.null(hr)) return(NULL)
+
+  # ---- Aggregate to cluster level ----
+
+  result <- .aggregate_to_mbg_clusters(hr, "sprayed", gps_clean, "irs_coverage")
+  if (is.null(result)) return(NULL)
+
+  result
+}
+
+
+#' Prepare IRS Data for MBG (Alias)
+#'
+#' Alias for calc_irs_mbg for consistent naming.
+#'
+#' @inheritParams calc_irs_mbg
+#' @return A data.table with columns: cluster_id, indicator, samplesize, x, y
+#' @export
+prep_irs_mbg <- calc_irs_mbg
+
+
+# ---- dhs_helpers_irs.R ----
+
+#' Prepare IRS Data for Analysis
+#'
+#' Shared data cleaning and indicator computation for IRS functions.
+#' Used by both calc_irs_dhs_core() and calc_irs_mbg().
+#'
+#' @param dhs_hr DHS Household Records dataset.
+#' @param survey_vars Named list mapping DHS variable names. Must include
+#'   cluster and irs. Optionally: weight, stratum for DHS.
+#' @param include_survey_vars Logical. If TRUE, includes survey design columns.
+#' @param strict Logical. If TRUE (default), abort when the IRS variable and
+#'   hv253a-z fallbacks are all absent. If FALSE, emit a warning and return
+#'   NULL instead.
+#'
+#' @return A data frame of households with columns:
+#'   cluster_id, sprayed (binary 0/1).
+#'   If include_survey_vars = TRUE, also: survey_weight, stratum_id.
+#'   Returns NULL (when strict = FALSE) if IRS data is unavailable.
+#'
+#' @noRd
+.prepare_irs_data <- function(
+  dhs_hr,
+  survey_vars,
+  include_survey_vars = FALSE,
+  strict = TRUE
+) {
+  if (!is.data.frame(dhs_hr)) {
+    cli::cli_abort("`dhs_hr` must be a data.frame or tibble")
+  }
+  if (nrow(dhs_hr) == 0) {
+    cli::cli_abort("`dhs_hr` is empty.")
+  }
+
+  irs_col <- survey_vars$irs
+
+  if (!irs_col %in% names(dhs_hr)) {
+    sprayed_by_vars <- grep("^hv253[a-z]$", names(dhs_hr), value = TRUE)
+
+    if (length(sprayed_by_vars) > 0) {
+      cli::cli_alert_warning(
+        "{.var {irs_col}} not found; deriving IRS from {.val {sprayed_by_vars}}"
+      )
+      dhs_hr <- dhs_hr |>
+        dplyr::mutate(
+          irs_derived = dplyr::case_when(
+            dplyr::if_any(dplyr::all_of(sprayed_by_vars), ~ .x == 1L) ~ 1L,
+            dplyr::if_any(dplyr::all_of(sprayed_by_vars), ~ .x == 0L) ~ 0L,
+            TRUE ~ NA_integer_
+          )
+        )
+      irs_col <- "irs_derived"
+    } else if (strict) {
+      cli::cli_abort(c(
+        "IRS variable {.var {irs_col}} not found in HR data",
+        "i" = "IRS coverage data may not be available for this survey"
+      ))
+    } else {
+      cli::cli_warn(
+        "IRS variable {.var {irs_col}} not found and no {.val hv253a-z} columns present; IRS coverage not available for this survey"
+      )
+      return(NULL)
+    }
+  }
+
+  hr <- dhs_hr |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), as.vector)) |>
+    dplyr::mutate(
+      cluster_id = .data[[survey_vars$cluster]],
+      irs_sprayed = suppressWarnings(as.numeric(as.character(.data[[irs_col]])))
+    )
+
+  if (include_survey_vars) {
+    hr <- hr |>
+      dplyr::mutate(
+        survey_weight = .data[[survey_vars$weight]] / 1e6,
+        stratum_id = .data[[survey_vars$stratum]]
+      )
+  }
+
+  hr <- hr |>
+    dplyr::filter(!is.na(irs_sprayed)) |>
+    dplyr::mutate(
+      sprayed = as.integer(irs_sprayed == 1)
+    )
+
+  if (nrow(hr) == 0) {
+    cli::cli_abort("No households with valid IRS data found")
+  }
+
+  cli::cli_alert_info(
+    "Found {format(nrow(hr), big.mark = ',')} households with valid IRS data"
+  )
+
+  hr
+}
+
+

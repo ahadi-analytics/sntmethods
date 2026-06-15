@@ -1,3 +1,11 @@
+# iptp indicator
+#
+# Merged from: dhs_calc_iptp.R dhs_calc_iptp_mbg.R dhs_helpers_iptp.R 
+# Contains the survey-weighted calc, MBG cluster-prep, and indicator-
+# specific helpers for this family.
+
+# ---- dhs_calc_iptp.R ----
+
 #' Calculate Core IPTp Coverage from DHS Data
 #'
 #' Core function that estimates IPTp (Intermittent Preventive Treatment in
@@ -1252,3 +1260,389 @@ aggregate_iptp_admin <- function(
 
   result
 }
+
+
+# ---- dhs_calc_iptp_mbg.R ----
+
+#' Prepare IPTp Data for MBG Analysis
+#'
+#' Prepares cluster-level Intermittent Preventive Treatment in pregnancy (IPTp)
+#' data for MBG analysis. Calculates both cumulative (1+, 2+, 3+) and
+#' exclusive (exactly 1, exactly 2, exactly 3) dose categories.
+#'
+#' Supports both IR (Individual Recode) and KR (Children's Recode) formats.
+#' The function automatically detects the file type and adjusts variable names.
+#'
+#' @details
+#' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/iptp_dhs.yml}
+#'
+#' @param dhs_ir DHS Individual Recode (IR) or Children's Recode (KR) dataset.
+#' @param gps_data DHS GPS dataset with cluster coordinates.
+#' @param indicators Character vector of indicators to calculate:
+#'   \itemize{
+#'     \item Cumulative:
+#'     \itemize{
+#'       \item "iptp_1plus": At least 1 dose
+#'       \item "iptp_2plus": At least 2 doses
+#'       \item "iptp_3plus": At least 3 doses (WHO recommendation)
+#'       \item "iptp_4plus": At least 4 doses (requires ml1_1 as sp_doses)
+#'     }
+#'     \item Exclusive:
+#'     \itemize{
+#'       \item "iptp_1only": Exactly 1 dose
+#'       \item "iptp_2only": Exactly 2 doses
+#'       \item "iptp_3only": Exactly 3 doses
+#'     }
+#'   }
+#'   Default: c("iptp_1plus", "iptp_2plus", "iptp_3plus").
+#' @param birth_window_months Months to look back for births. Default: 36.
+#' @param survey_vars Named list mapping DHS variable names.
+#' @param gps_vars Named list for GPS variable mapping.
+#'
+#' @return A list of data.tables (one per indicator).
+#'
+#' @details
+#' No ANC attendance restriction is applied; the denominator is all women
+#' with a birth in the analysis window and a valid SP response
+#' (`sp_doses <= 7`). The default `survey_vars$sp_doses = "ml1_1"` is
+#' the dose count variable (0-7). If `ml1_1` is not available, the helper
+#' falls back to `sp_taken` (`"m49a_1"`, binary 0/1), in which case only
+#' IPTp 1+ will produce meaningful results.
+#'
+#' @examples
+#' \dontrun{
+#' iptp_mbg <- calc_iptp_mbg(
+#'   dhs_ir = ir_data,
+#'   gps_data = gps_data,
+#'   indicators = c("iptp_2plus", "iptp_3plus")
+#' )
+#' }
+#'
+#' @seealso [calc_iptp_dhs()] for survey-weighted estimates
+#' @export
+calc_iptp_mbg <- function(
+  dhs_ir,
+  gps_data,
+  indicators = c("iptp_1plus", "iptp_2plus", "iptp_3plus"),
+  birth_window_months = 36,
+  survey_vars = list(
+    cluster = "v001",
+    interview_date = "v008",
+    birth_date = "b3_01",
+    sp_doses = "ml1_1",
+    sp_taken = "m49a_1"
+  ),
+  gps_vars = list(
+    cluster = "DHSCLUST",
+    lat = "LATNUM",
+    lon = "LONGNUM"
+  )
+) {
+  # ---- Input validation ----
+
+  if (!is.data.frame(gps_data)) {
+    cli::cli_abort("`gps_data` must be a data.frame or tibble")
+  }
+
+  valid_indicators <- c(
+    "iptp_1plus", "iptp_2plus", "iptp_3plus", "iptp_4plus",
+    "iptp_1only", "iptp_2only", "iptp_3only"
+  )
+  invalid <- setdiff(indicators, valid_indicators)
+  if (length(invalid) > 0) {
+    cli::cli_abort("Invalid indicators: {.val {invalid}}")
+  }
+
+  # ---- Prepare GPS data ----
+
+  gps_clean <- .prepare_gps_data(gps_data, gps_vars)
+
+  # ---- Prepare IR data ----
+
+  ir <- .prepare_iptp_data(
+    dhs_ir, survey_vars, birth_window_months,
+    include_survey_vars = FALSE
+  )
+  if (is.null(ir)) return(NULL)
+
+  # ---- Aggregate to cluster level ----
+
+  indicator_map <- list(
+    iptp_1plus = "has_1plus",
+    iptp_2plus = "has_2plus",
+    iptp_3plus = "has_3plus",
+    iptp_4plus = "has_4plus",
+    iptp_1only = "has_1only",
+    iptp_2only = "has_2only",
+    iptp_3only = "has_3only"
+  )
+
+  results <- list()
+
+  for (ind in indicators) {
+    cluster_dt <- .aggregate_to_mbg_clusters(
+      ir, indicator_map[[ind]], gps_clean, ind
+    )
+    if (!is.null(cluster_dt)) {
+      results[[ind]] <- cluster_dt
+    }
+  }
+
+  if (length(results) == 0) return(NULL)
+
+  results
+}
+
+
+#' Prepare Single IPTp Indicator for MBG
+#'
+#' @inheritParams calc_iptp_mbg
+#' @param doses Minimum doses for cumulative indicator (1, 2, or 3).
+#'
+#' @return A data.table with columns: cluster_id, indicator, samplesize, x, y
+#' @export
+prep_iptp_mbg <- function(
+  dhs_ir,
+  gps_data,
+  doses = 3,
+  birth_window_months = 36,
+  survey_vars = list(
+    cluster = "v001",
+    interview_date = "v008",
+    birth_date = "b3_01",
+    sp_doses = "ml1_1",
+    sp_taken = "m49a_1"
+  ),
+  gps_vars = list(
+    cluster = "DHSCLUST",
+    lat = "LATNUM",
+    lon = "LONGNUM"
+  )
+) {
+  indicator_name <- paste0("iptp_", doses, "plus")
+
+  result <- calc_iptp_mbg(
+    dhs_ir = dhs_ir,
+    gps_data = gps_data,
+    indicators = indicator_name,
+    birth_window_months = birth_window_months,
+    survey_vars = survey_vars,
+    gps_vars = gps_vars
+  )
+
+  result[[1]]
+}
+
+
+# ---- dhs_helpers_iptp.R ----
+
+#' Detect DHS File Type and Adjust Variable Mapping
+#'
+#' Detects whether the dataset is IR (Individual Recode) or KR (Children's Recode)
+#' format and adjusts variable names accordingly.
+#'
+#' @param dhs_data DHS dataset (IR or KR format).
+#' @param survey_vars Named list mapping DHS variable names.
+#'
+#' @return Updated survey_vars list with correct variable names for the detected format.
+#'
+#' @noRd
+.detect_file_type_and_adjust_vars <- function(dhs_data, survey_vars) {
+  # Try to detect file type based on variable patterns
+  has_birth_suffix <- any(grepl("_01$|_1$", names(dhs_data)))
+  has_kr_vars <- "b8" %in% names(dhs_data)  # b8 is specific to KR
+
+  # Check if IPTp variables exist in different formats
+  has_ml1_1 <- !is.null(survey_vars$sp_doses) && survey_vars$sp_doses %in% names(dhs_data)
+  has_ml1 <- "ml1" %in% names(dhs_data)
+  has_m49a_1 <- !is.null(survey_vars$sp_taken) && survey_vars$sp_taken %in% names(dhs_data)
+  has_m49a <- "m49a" %in% names(dhs_data)
+
+  # Determine file type
+  if (has_kr_vars || (!has_birth_suffix && (has_ml1 || has_m49a))) {
+    # KR format detected
+    cli::cli_alert_info("Detected KR (Children's Recode) format - adjusting variable names")
+
+    # Map KR variables (without suffixes) to expected names
+    if (!has_ml1_1 && has_ml1) {
+      survey_vars$sp_doses <- "ml1"
+    }
+    if (!has_m49a_1 && has_m49a) {
+      survey_vars$sp_taken <- "m49a"
+    }
+
+    # KR uses different variable names for birth date
+    birth_var <- survey_vars$birth_date %||% survey_vars$birth_cmc
+    if (is.null(birth_var) || !birth_var %in% names(dhs_data)) {
+      if ("b3" %in% names(dhs_data)) {
+        survey_vars$birth_date <- "b3"
+        survey_vars$birth_cmc <- "b3"
+      }
+    }
+
+    # KR uses v008 for interview date (same as IR)
+    interview_var <- survey_vars$interview_date %||% survey_vars$interview_cmc
+    if (is.null(interview_var) || !interview_var %in% names(dhs_data)) {
+      if ("v008" %in% names(dhs_data)) {
+        survey_vars$interview_date <- "v008"
+        survey_vars$interview_cmc <- "v008"
+      }
+    }
+  } else {
+    # IR format (default)
+    cli::cli_alert_info("Detected IR (Individual Recode) format")
+  }
+
+  survey_vars
+}
+
+#' Prepare IPTp Data for Analysis
+#'
+#' Shared data cleaning and indicator computation for IPTp functions.
+#' Used by both calc_iptp_dhs_core() and calc_iptp_mbg().
+#' Supports both IR (Individual Recode) and KR (Children's Recode) formats.
+#'
+#' @param dhs_ir DHS Individual Recode or Children's Recode dataset.
+#' @param survey_vars Named list mapping DHS variable names.
+#' @param birth_window_months Months to look back for births.
+#' @param include_survey_vars Logical. If TRUE, includes survey design columns.
+#'
+#' @return A data frame of eligible women/births with columns:
+#'   cluster_id, sp_doses, and binary indicators:
+#'   has_1plus, has_2plus, has_3plus, has_1only, has_2only, has_3only.
+#'   If include_survey_vars = TRUE, also: survey_weight, stratum_id.
+#'
+#' @noRd
+.prepare_iptp_data <- function(
+  dhs_ir,
+  survey_vars,
+  birth_window_months = 36,
+  include_survey_vars = FALSE
+) {
+  if (!is.data.frame(dhs_ir)) {
+    cli::cli_abort("`dhs_ir` must be a data.frame or tibble")
+  }
+  if (nrow(dhs_ir) == 0) {
+    cli::cli_abort("`dhs_ir` is empty.")
+  }
+
+  # Detect file type and adjust variable names
+  survey_vars <- .detect_file_type_and_adjust_vars(dhs_ir, survey_vars)
+
+  # Check SP variable -- prefer dose count (ml1_1 or ml1) over binary (m49a_1 or m49a)
+  sp_var <- survey_vars$sp_doses %||% survey_vars$sp_taken
+  if (!sp_var %in% names(dhs_ir)) {
+    # Fallback: try sp_taken if sp_doses column missing
+    sp_fallback <- survey_vars$sp_taken
+    if (!is.null(sp_fallback) && sp_fallback != sp_var &&
+        sp_fallback %in% names(dhs_ir)) {
+      cli::cli_warn(
+        "IPTp dose variable {.var {sp_var}} not found; falling back to binary {.var {sp_fallback}} (only IPTp 1+ will be meaningful)"
+      )
+      sp_var <- sp_fallback
+    } else {
+      cli::cli_warn(
+        "IPTp variable {.var {sp_var}} not found; IPTp not available for this survey"
+      )
+      return(NULL)
+    }
+  }
+
+  # Zap labels
+  ir <- dhs_ir |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
+
+  # Check for interview date/CMC variable
+  interview_var <- survey_vars$interview_date %||% survey_vars$interview_cmc
+  if (!interview_var %in% names(ir)) {
+    cli::cli_warn(
+      "Interview date variable {.var {interview_var}} not found; IPTp not available for this survey"
+    )
+    return(NULL)
+  }
+
+  # Check for birth date/CMC variable
+  birth_var <- survey_vars$birth_date %||% survey_vars$birth_cmc
+  if (!birth_var %in% names(ir)) {
+    cli::cli_warn(
+      "Birth date variable {.var {birth_var}} not found; IPTp not available for this survey"
+    )
+    return(NULL)
+  }
+
+  # Build core columns (force numeric to guard against haven character residuals)
+  ir <- ir |>
+    dplyr::mutate(
+      cluster_id = .data[[survey_vars$cluster]],
+      interview_cmc = suppressWarnings(as.numeric(as.character(
+        .data[[interview_var]]
+      ))),
+      birth_cmc = suppressWarnings(as.numeric(as.character(
+        .data[[birth_var]]
+      ))),
+      sp_doses = suppressWarnings(as.numeric(as.character(.data[[sp_var]])))
+    )
+
+  if (include_survey_vars) {
+    ir <- ir |>
+      dplyr::mutate(
+        survey_weight = .data[[survey_vars$weight]] / 1e6,
+        stratum_id = .data[[survey_vars$stratum]]
+      )
+
+    has_adm1 <- !is.null(survey_vars$adm1) && survey_vars$adm1 %in% names(dhs_ir)
+    if (has_adm1) {
+      ir <- ir |>
+        dplyr::mutate(
+          adm1 = haven::as_factor(.data[[survey_vars$adm1]]) |>
+            as.character() |> toupper()
+        )
+    }
+  }
+
+  # Filter to recent births
+  ir <- ir |>
+    dplyr::filter(
+      !is.na(birth_cmc),
+      !is.na(interview_cmc)
+    ) |>
+    dplyr::mutate(
+      months_since_birth = interview_cmc - birth_cmc
+    ) |>
+    dplyr::filter(
+      months_since_birth >= 0,
+      months_since_birth <= birth_window_months
+    )
+
+  # Filter valid SP responses (0-7 are valid dose counts)
+  ir <- ir |>
+    dplyr::filter(
+      !is.na(sp_doses),
+      sp_doses <= 7
+    )
+
+  if (nrow(ir) == 0) {
+    cli::cli_abort("No eligible women with valid IPTp data found")
+  }
+
+  cli::cli_alert_info(
+    "Found {format(nrow(ir), big.mark = ',')} women with births in last {birth_window_months} months"
+  )
+
+  # Calculate IPTp indicators
+  ir <- ir |>
+    dplyr::mutate(
+      has_1plus = as.integer(sp_doses >= 1),
+      has_2plus = as.integer(sp_doses >= 2),
+      has_3plus = as.integer(sp_doses >= 3),
+      has_4plus = as.integer(sp_doses >= 4),
+      has_1only = as.integer(sp_doses == 1),
+      has_2only = as.integer(sp_doses == 2),
+      has_3only = as.integer(sp_doses == 3)
+    )
+
+  ir
+}
+
+

@@ -1,3 +1,11 @@
+# act indicator
+#
+# Merged from: dhs_calc_act.R dhs_calc_act_mbg.R dhs_helpers_act.R 
+# Contains the survey-weighted calc, MBG cluster-prep, and indicator-
+# specific helpers for this family.
+
+# ---- dhs_calc_act.R ----
+
 #' Calculate ACT Treatment Indicators from DHS Data
 #'
 #' Computes the full set of (World Malaria Report) ACT treatment indicators
@@ -1746,3 +1754,1389 @@ act_dictionary <- function() {
 
   results
 }
+
+
+# ---- dhs_calc_act_mbg.R ----
+
+#' Prepare ACT and Antimalarial Data for MBG Analysis
+#'
+#' Prepares cluster-level ACT (Artemisinin-based Combination
+#' Therapy), antimalarial treatment, and malaria diagnostic
+#' data for MBG analysis. Uses a dictionary-driven approach
+#' matching the indicator codes from \code{\link{calc_act_dhs}}.
+#'
+#' @details
+#' All dictionary-based indicators share the same data
+#' preparation pipeline:
+#' \enumerate{
+#'   \item Filter to febrile U5 children (via
+#'     \code{.prepare_act_data()})
+#'   \item Classify care-seeking sectors (via
+#'     \code{.classify_csb_from_h32()})
+#'   \item Build antimalarial composite from ml13/h37 series
+#'   \item Build malaria diagnostic flag from ml1/h47
+#'   \item Apply per-indicator filters and aggregate to
+#'     cluster-level counts
+#' }
+#'
+#' The dictionary includes three indicator families:
+#' \itemize{
+#'   \item \strong{ACT} (\code{act_*}): ACT receipt among
+#'     febrile U5, with sector and AM filters
+#'   \item \strong{Antimalarial} (\code{antimal_*}):
+#'     Antimalarial receipt among febrile U5, with sector
+#'     filters
+#'   \item \strong{Malaria diagnostic} (\code{mal_dx_*}):
+#'     Malaria diagnostic test (ml1/h47) among AM recipients,
+#'     with sector filters
+#' }
+#'
+#' @param dhs_kr DHS Children's Recode (KR) dataset.
+#' @param gps_data DHS GPS dataset with cluster coordinates.
+#' @param dhs_pr Optional DHS Person Recode (PR) dataset.
+#'   Required for \code{"febrile_rdt_pos"} and
+#'   \code{"febrile_rdt_pos_act"} indicators (provides hml35).
+#' @param indicators Character vector of indicators to
+#'   calculate. See \code{.act_mbg_dictionary()} for the full
+#'   list of standardized indicator codes. Legacy names
+#'   \code{"act_pub"} and \code{"act_among_am"} are also
+#'   accepted. Special indicators:
+#'   \itemize{
+#'     \item \code{"act_tested"}: ACT among test-positive
+#'     \item \code{"febrile_rdt_pos"}: RDT positivity
+#'       (requires dhs_pr)
+#'     \item \code{"febrile_rdt_pos_act"}: ACT among
+#'       RDT-positive (requires dhs_pr)
+#'   }
+#'   Default: \code{c("act", "act_tested")}.
+#' @param survey_vars Named list mapping DHS variable names:
+#'   \itemize{
+#'     \item \code{cluster}: Cluster ID (default: "v001")
+#'     \item \code{age}: Child's age in months
+#'       (default: "hw1")
+#'     \item \code{fever}: Fever in last 2 weeks
+#'       (default: "h22")
+#'     \item \code{alive}: Child is alive (default: "b5")
+#'     \item \code{act}: ACT variable (default: "ml13e")
+#'     \item \code{test}: Diagnostic test variable
+#'       (default: "ml13a")
+#'   }
+#' @param gps_vars Named list for GPS variable mapping.
+#'
+#' @return A named list of data.tables (one per indicator),
+#'   each with columns:
+#'   \itemize{
+#'     \item cluster_id: Cluster identifier
+#'     \item indicator: Numerator count
+#'     \item samplesize: Denominator count
+#'     \item x: Longitude
+#'     \item y: Latitude
+#'   }
+#'
+#' @examples
+#' \dontrun{
+#' act_mbg <- calc_act_mbg(
+#'   dhs_kr = kr_data,
+#'   gps_data = gps_data,
+#'   indicators = c("act_pub_am", "act_trained_am", "antimal_chw",
+#'                   "mal_dx_am", "mal_dx_pub_am")
+#' )
+#' }
+#'
+#' @seealso [calc_act_dhs()] for survey-weighted estimates,
+#'   [calc_csb_mbg()] for care-seeking behavior
+#' @export
+calc_act_mbg <- function(
+  dhs_kr,
+  gps_data,
+  dhs_pr = NULL,
+  indicators = c("act", "act_tested"),
+  survey_vars = list(
+    cluster = "v001",
+    age = "hw1",
+    fever = "h22",
+    alive = "b5",
+    act = "ml13e",
+    test = "ml13a"
+  ),
+  gps_vars = list(
+    cluster = "DHSCLUST",
+    lat = "LATNUM",
+    lon = "LONGNUM"
+  )
+) {
+  # ---- Input validation ----
+
+  if (!is.data.frame(dhs_kr)) {
+    cli::cli_abort(
+      "`dhs_kr` must be a data.frame or tibble"
+    )
+  }
+  if (!is.data.frame(gps_data)) {
+    cli::cli_abort(
+      "`gps_data` must be a data.frame or tibble"
+    )
+  }
+
+  # Resolve legacy aliases
+  legacy_map <- list(
+    act_public = "act_pub",
+    act_among_am = "act_any_tx_am",
+    act_antimal = "act_am",
+    act_any_tx = "act_any_tx_am",
+    act_trained = "act_trained_am",
+    act_pub_nochw = "act_pub_nochw_am",
+    act_chw = "act_chw_am",
+    act_priv = "act_priv_am",
+    act_priv_formal = "act_priv_formal_am",
+    act_priv_pharm = "act_priv_pharm_am",
+    act_priv_informal = "act_priv_informal_am",
+    act_priv_form_pha = "act_priv_form_pha_am"
+  )
+  indicators <- vapply(indicators, function(ind) {
+    if (ind %in% names(legacy_map)) {
+      legacy_map[[ind]]
+    } else {
+      ind
+    }
+  }, character(1), USE.NAMES = FALSE)
+
+  # Build valid indicator set from dictionary + specials
+  dict <- .act_mbg_dictionary()
+  dict_names <- vapply(
+    dict, `[[`, character(1), "name"
+  )
+  special_indicators <- c(
+    "act_pub", "act_tested",
+    "febrile_rdt_pos", "febrile_rdt_pos_act"
+  )
+  valid_indicators <- unique(c(
+    dict_names, special_indicators
+  ))
+
+  invalid <- setdiff(indicators, valid_indicators)
+  if (length(invalid) > 0) {
+    cli::cli_abort(
+      "Invalid indicators: {.val {invalid}}"
+    )
+  }
+
+  pr_required <- intersect(
+    indicators,
+    c("febrile_rdt_pos", "febrile_rdt_pos_act")
+  )
+  if (length(pr_required) > 0 && is.null(dhs_pr)) {
+    cli::cli_alert_warning(
+      "Indicators {.val {pr_required}} require \\
+      `dhs_pr` - these will be skipped"
+    )
+  }
+
+  # ---- Prepare base data ----
+
+  gps_clean <- .prepare_gps_data(gps_data, gps_vars)
+
+  kr_fever <- tryCatch(
+    .prepare_act_data(
+      dhs_kr = dhs_kr,
+      survey_vars = survey_vars,
+      include_survey_vars = FALSE
+    ),
+    error = function(e) {
+      cli::cli_alert_warning(conditionMessage(e))
+      return(NULL)
+    }
+  )
+
+  if (is.null(kr_fever)) return(list())
+
+  if (all(is.na(kr_fever$received_act))) {
+    cli::cli_alert_warning(
+      "ACT variable {.var {survey_vars$act}} is \\
+      all NA - no ACT data available"
+    )
+    return(list())
+  }
+
+  # ---- Determine which enrichments are needed ----
+
+  # Which dictionary indicators were requested?
+  dict_requested <- indicators[
+    indicators %in% dict_names
+  ]
+  dict_specs <- dict[
+    vapply(dict, function(d) {
+      d$name %in% dict_requested
+    }, logical(1))
+  ]
+
+  needs_csb <- any(vapply(dict_specs, function(d) {
+    !is.null(d$csb_filter)
+  }, logical(1))) ||
+    "act_pub" %in% indicators
+  needs_am <- any(vapply(dict_specs, function(d) {
+    isTRUE(d$am_filter)
+  }, logical(1))) ||
+    any(vapply(dict_specs, function(d) {
+      identical(d$outcome, "received_antimalarial")
+    }, logical(1)))
+
+  # ---- Enrich with CSB flags if needed ----
+
+  enriched <- kr_fever
+  if (needs_csb) {
+    # Detect CSB classification from haven labels on raw data (before zapping)
+    # so CHW/pharmacy slots are correctly identified across DHS versions
+    csb_class <- .detect_csb_from_labels(dhs_kr)
+    if (nrow(csb_class) == 0) csb_class <- NULL
+    enriched <- tryCatch(
+      .classify_csb_from_h32(enriched, classification = csb_class),
+      error = function(e) {
+        cli::cli_alert_warning(
+          "CSB classification failed: \\
+          {conditionMessage(e)}"
+        )
+        NULL
+      }
+    )
+    if (is.null(enriched)) {
+      # Fall back to unenriched data for non-CSB
+      enriched <- kr_fever
+      needs_csb <- FALSE
+    }
+  }
+
+  # ---- Enrich with antimalarial composite if needed ----
+
+  if (needs_am) {
+    enriched <- .enrich_with_antimalarial(
+      enriched, dhs_kr, survey_vars
+    )
+  }
+
+  # ---- Enrich with malaria diagnostic if needed ----
+
+  needs_dx <- any(vapply(dict_specs, function(s) {
+    s$outcome == "had_test"
+  }, logical(1)))
+  if (needs_dx) {
+    # h47 ("blood taken from finger/heel for testing") is the standard
+    # DHS malaria diagnostic variable. ml1 means "blood taken for
+    # testing" in the KR (children) recode, but in the IR (women)
+    # recode it means "times took Fansidar during pregnancy" (IPTp).
+    # Since labels from parquet files sometimes carry the wrong recode
+    # label, we validate ml1 by rejecting known-bad labels (IPTp/
+    # pregnancy patterns) rather than requiring a positive match.
+    dx_var <- NULL
+    if ("h47" %in% names(enriched)) {
+      dx_var <- "h47"
+    } else if ("ml1" %in% names(enriched)) {
+      ml1_label <- attr(dhs_kr[["ml1"]], "label") %||% ""
+      is_iptp <- grepl(
+        "fansidar|sp\\/fansidar|pregnancy|iptp|ipt\\b|dose.*preg",
+        ml1_label, ignore.case = TRUE
+      )
+      if (is_iptp) {
+        cli::cli_alert_warning(
+          "ml1 label is {.val {ml1_label}} \\
+          {cli::symbol$em_dash} IPTp variable, not malaria \\
+          diagnostic; mal_dx indicators will be skipped"
+        )
+      } else {
+        dx_var <- "ml1"
+      }
+    }
+
+    if (!is.null(dx_var)) {
+      enriched$had_test <- as.integer(
+        !is.na(enriched[[dx_var]]) &
+          enriched[[dx_var]] == 1
+      )
+      cli::cli_alert_info(
+        "Enriched with malaria diagnostic ({dx_var}): \\
+        {sum(enriched$had_test == 1, na.rm = TRUE)} \\
+        tested"
+      )
+    } else {
+      cli::cli_alert_warning(
+        "No valid malaria diagnostic variable found \\
+        {cli::symbol$em_dash} mal_dx indicators \\
+        will be skipped"
+      )
+      enriched$had_test <- NA_integer_
+    }
+  }
+
+  # ---- Dictionary-driven indicator loop ----
+
+  results <- list()
+
+  for (spec in dict_specs) {
+    # Skip CSB-filtered indicators if CSB failed
+    if (!is.null(spec$csb_filter) && !needs_csb) {
+      cli::cli_alert_warning(
+        "Skipping {.val {spec$name}}: \\
+        CSB classification not available"
+      )
+      next
+    }
+
+    # Skip AM-dependent indicators if AM not built
+    if (isTRUE(spec$am_filter) &&
+        !"received_antimalarial" %in% names(enriched)) {
+      cli::cli_alert_warning(
+        "Skipping {.val {spec$name}}: \\
+        antimalarial composite not available"
+      )
+      next
+    }
+
+    # Apply filters
+    filtered <- enriched
+    if (!is.null(spec$csb_filter)) {
+      col <- spec$csb_filter
+      if (!col %in% names(filtered)) next
+      filtered <- filtered[
+        !is.na(filtered[[col]]) &
+          filtered[[col]] == 1, ,
+        drop = FALSE
+      ]
+    }
+    if (isTRUE(spec$am_filter)) {
+      filtered <- filtered[
+        !is.na(filtered$received_antimalarial) &
+          filtered$received_antimalarial == 1, ,
+        drop = FALSE
+      ]
+    }
+
+    # Filter to non-NA outcome and build binary
+    outcome_col <- spec$outcome
+    if (!outcome_col %in% names(filtered)) next
+    filtered <- filtered[
+      !is.na(filtered[[outcome_col]]), ,
+      drop = FALSE
+    ]
+    if (nrow(filtered) == 0) {
+      cli::cli_alert_warning(
+        "No data for {.val {spec$name}} -- skipping"
+      )
+      next
+    }
+    filtered$.binary <- as.integer(
+      filtered[[outcome_col]] == 1
+    )
+
+    dt <- .aggregate_to_mbg_clusters(
+      individual_data = filtered,
+      indicator_col = ".binary",
+      gps_clean = gps_clean,
+      result_name = spec$name
+    )
+    if (!is.null(dt)) {
+      results[[spec$name]] <- dt
+    }
+  }
+
+  # ---- Legacy act_pub (no AM filter) ----
+
+  if ("act_pub" %in% indicators &&
+      needs_csb &&
+      !"act_pub" %in% names(results)) {
+    pub_data <- enriched[
+      !is.na(enriched$csb_public) &
+        enriched$csb_public == 1 &
+        !is.na(enriched$received_act), ,
+      drop = FALSE
+    ]
+    if (nrow(pub_data) > 0) {
+      pub_data$.binary <- as.integer(
+        pub_data$received_act == 1
+      )
+      dt <- .aggregate_to_mbg_clusters(
+        individual_data = pub_data,
+        indicator_col = ".binary",
+        gps_clean = gps_clean,
+        result_name = "act_pub"
+      )
+      if (!is.null(dt)) {
+        results[["act_pub"]] <- dt
+      }
+    }
+  }
+
+  # ---- Special: act_tested ----
+
+  has_test_var <- !is.null(survey_vars$test) && survey_vars$test %in% names(dhs_kr)
+  if ("act_tested" %in% indicators) {
+    if (!has_test_var) {
+      cli::cli_alert_warning(
+        "Test variable {.var {survey_vars$test}} \\
+        not found - skipping act_tested"
+      )
+    } else if (all(is.na(kr_fever$test_positive))) {
+      cli::cli_alert_warning(
+        "Test variable {.var {survey_vars$test}} \\
+        is all NA - skipping act_tested"
+      )
+    } else {
+      tested_data <- kr_fever |>
+        dplyr::filter(
+          test_positive == 1,
+          !is.na(received_act)
+        ) |>
+        dplyr::mutate(
+          .binary = as.integer(received_act == 1)
+        )
+
+      dt <- .aggregate_to_mbg_clusters(
+        individual_data = tested_data,
+        indicator_col = ".binary",
+        gps_clean = gps_clean,
+        result_name = "act_tested"
+      )
+      if (!is.null(dt)) {
+        results[["act_tested"]] <- dt
+      }
+    }
+  }
+
+  # ---- Febrile RDT indicators (require dhs_pr) ----
+
+  if (!is.null(dhs_pr) && length(pr_required) > 0) {
+    kr_merged <- .merge_kr_pr_febrile(
+      kr_fever = kr_fever, dhs_pr = dhs_pr
+    )
+
+    if (!is.null(kr_merged)) {
+      if ("febrile_rdt_pos" %in% indicators) {
+        dt <- .aggregate_to_mbg_clusters(
+          individual_data = kr_merged,
+          indicator_col = "has_rdt_pos",
+          gps_clean = gps_clean,
+          result_name = "febrile_rdt_pos"
+        )
+        if (!is.null(dt)) {
+          results[["febrile_rdt_pos"]] <- dt
+        }
+      }
+
+      if ("febrile_rdt_pos_act" %in% indicators) {
+        rdt_pos_data <- kr_merged |>
+          dplyr::filter(
+            has_rdt_pos == 1, !is.na(has_act)
+          )
+
+        if (nrow(rdt_pos_data) > 0) {
+          dt <- .aggregate_to_mbg_clusters(
+            individual_data = rdt_pos_data,
+            indicator_col = "has_act",
+            gps_clean = gps_clean,
+            result_name = "febrile_rdt_pos_act"
+          )
+          if (!is.null(dt)) {
+            results[["febrile_rdt_pos_act"]] <- dt
+          }
+        } else {
+          cli::cli_alert_warning(
+            "No RDT-positive febrile children \\
+            for febrile_rdt_pos_act"
+          )
+        }
+      }
+    }
+  }
+
+  if (length(results) == 0) {
+    cli::cli_alert_warning(
+      "No valid ACT MBG data could be prepared"
+    )
+  }
+
+  results
+}
+
+
+#' ACT/Antimalarial/Malaria Diagnostic MBG Indicator Dictionary
+#'
+#' Returns the full set of standardized indicator
+#' specifications for cluster-level MBG output.
+#' Each entry defines the outcome variable, optional
+#' CSB filter column, and whether an antimalarial
+#' receipt filter applies.
+#'
+#' Three indicator families:
+#' \itemize{
+#'   \item \strong{ACT} (13): \code{outcome = "received_act"}
+#'   \item \strong{Antimalarial} (11):
+#'     \code{outcome = "received_antimalarial"}
+#'   \item \strong{Malaria diagnostic} (9):
+#'     \code{outcome = "had_test"} (ml1/h47 == 1)
+#' }
+#'
+#' @return List of named lists with fields:
+#'   \code{name}, \code{outcome}, \code{csb_filter},
+#'   \code{am_filter}.
+#' @noRd
+.act_mbg_dictionary <- function() {
+  list(
+    # -- ACT indicators (outcome = received_act) --
+    list(
+      name = "act",
+      outcome = "received_act",
+      csb_filter = NULL,
+      am_filter = FALSE
+    ),
+    list(
+      name = "act_care_seek",
+      outcome = "received_act",
+      csb_filter = "csb_any",
+      am_filter = FALSE
+    ),
+    list(
+      name = "act_am",
+      outcome = "received_act",
+      csb_filter = NULL,
+      am_filter = TRUE
+    ),
+    list(
+      name = "act_any_tx_am",
+      outcome = "received_act",
+      csb_filter = "csb_any",
+      am_filter = TRUE
+    ),
+    list(
+      name = "act_trained_am",
+      outcome = "received_act",
+      csb_filter = "csb_trained",
+      am_filter = TRUE
+    ),
+    list(
+      name = "act_pub_am",
+      outcome = "received_act",
+      csb_filter = "csb_public",
+      am_filter = TRUE
+    ),
+    list(
+      name = "act_pub_nochw_am",
+      outcome = "received_act",
+      csb_filter = "csb_public_nochw",
+      am_filter = TRUE
+    ),
+    list(
+      name = "act_chw_am",
+      outcome = "received_act",
+      csb_filter = "csb_chw",
+      am_filter = TRUE
+    ),
+    list(
+      name = "act_priv_am",
+      outcome = "received_act",
+      csb_filter = "csb_private",
+      am_filter = TRUE
+    ),
+    list(
+      name = "act_priv_formal_am",
+      outcome = "received_act",
+      csb_filter = "csb_private_formal_ind",
+      am_filter = TRUE
+    ),
+    list(
+      name = "act_priv_pharm_am",
+      outcome = "received_act",
+      csb_filter = "csb_pharmacy",
+      am_filter = TRUE
+    ),
+    list(
+      name = "act_priv_informal_am",
+      outcome = "received_act",
+      csb_filter = "csb_private_informal",
+      am_filter = TRUE
+    ),
+    list(
+      name = "act_priv_form_pha_am",
+      outcome = "received_act",
+      csb_filter = "csb_private_formal_pha",
+      am_filter = TRUE
+    ),
+
+    # -- Antimalarial indicators (outcome = received_antimalarial) --
+    list(
+      name = "antimal",
+      outcome = "received_antimalarial",
+      csb_filter = NULL,
+      am_filter = FALSE
+    ),
+    list(
+      name = "antimal_any_tx",
+      outcome = "received_antimalarial",
+      csb_filter = "csb_any",
+      am_filter = FALSE
+    ),
+    list(
+      name = "antimal_trained",
+      outcome = "received_antimalarial",
+      csb_filter = "csb_trained",
+      am_filter = FALSE
+    ),
+    list(
+      name = "antimal_pub",
+      outcome = "received_antimalarial",
+      csb_filter = "csb_public",
+      am_filter = FALSE
+    ),
+    list(
+      name = "antimal_pub_nochw",
+      outcome = "received_antimalarial",
+      csb_filter = "csb_public_nochw",
+      am_filter = FALSE
+    ),
+    list(
+      name = "antimal_chw",
+      outcome = "received_antimalarial",
+      csb_filter = "csb_chw",
+      am_filter = FALSE
+    ),
+    list(
+      name = "antimal_priv",
+      outcome = "received_antimalarial",
+      csb_filter = "csb_private",
+      am_filter = FALSE
+    ),
+    list(
+      name = "antimal_formal",
+      outcome = "received_antimalarial",
+      csb_filter = "csb_private_formal_ind",
+      am_filter = FALSE
+    ),
+    list(
+      name = "antimal_pharm",
+      outcome = "received_antimalarial",
+      csb_filter = "csb_pharmacy",
+      am_filter = FALSE
+    ),
+    list(
+      name = "antimal_priv_informal",
+      outcome = "received_antimalarial",
+      csb_filter = "csb_private_informal",
+      am_filter = FALSE
+    ),
+    list(
+      name = "antimal_form_pharm",
+      outcome = "received_antimalarial",
+      csb_filter = "csb_private_formal_pha",
+      am_filter = FALSE
+    ),
+
+    # -- Malaria diagnostic indicators (outcome = had_test) --
+    # Malaria diagnostic among AM recipients, by care-seeking sector
+    list(
+      name = "mal_dx_am",
+      outcome = "had_test",
+      csb_filter = NULL,
+      am_filter = TRUE
+    ),
+    list(
+      name = "mal_dx_pub_am",
+      outcome = "had_test",
+      csb_filter = "csb_public",
+      am_filter = TRUE
+    ),
+    list(
+      name = "mal_dx_pub_nochw_am",
+      outcome = "had_test",
+      csb_filter = "csb_public_nochw",
+      am_filter = TRUE
+    ),
+    list(
+      name = "mal_dx_chw_am",
+      outcome = "had_test",
+      csb_filter = "csb_chw",
+      am_filter = TRUE
+    ),
+    list(
+      name = "mal_dx_priv_am",
+      outcome = "had_test",
+      csb_filter = "csb_private",
+      am_filter = TRUE
+    ),
+    list(
+      name = "mal_dx_priv_formal_am",
+      outcome = "had_test",
+      csb_filter = "csb_private_formal_ind",
+      am_filter = TRUE
+    ),
+    list(
+      name = "mal_dx_pharm_am",
+      outcome = "had_test",
+      csb_filter = "csb_pharmacy",
+      am_filter = TRUE
+    ),
+    list(
+      name = "mal_dx_priv_informal_am",
+      outcome = "had_test",
+      csb_filter = "csb_private_informal",
+      am_filter = TRUE
+    ),
+    list(
+      name = "mal_dx_priv_form_pha_am",
+      outcome = "had_test",
+      csb_filter = "csb_private_formal_pha",
+      am_filter = TRUE
+    )
+  )
+}
+
+
+#' Enrich Febrile Data with Antimalarial Composite
+#'
+#' Builds a \code{received_antimalarial} column on the
+#' enriched febrile dataset by detecting the antimalarial
+#' drug series (ml13 or h37) and compositing across all
+#' variables in the series.
+#'
+#' @param enriched Febrile U5 data (possibly with CSB flags).
+#' @param dhs_kr Original KR dataset (for drug variables).
+#' @param survey_vars Survey variable mapping.
+#'
+#' @return The \code{enriched} data frame with
+#'   \code{received_antimalarial} column added.
+#' @noRd
+.enrich_with_antimalarial <- function(
+  enriched, dhs_kr, survey_vars
+) {
+  # Zap labels on raw data for safe comparisons
+  dhs_kr_zapped <- dhs_kr |>
+    dplyr::mutate(dplyr::across(
+      dplyr::everything(), haven::zap_labels
+    )) |>
+    dplyr::mutate(dplyr::across(
+      dplyr::everything(), as.vector
+    ))
+
+  # ---- Detect antimalarial variables using label-based filtering ----
+  # Must match DHS path (calc_act_dhs): only include variables whose labels
+  # contain actual drug names. Non-drug ml13 variables (e.g. "Don't know",
+  # "No treatment", response-quality codes) are excluded because their
+  # labels don't match the drug-name pattern. This prevents inflating the
+  # antimalarial composite.
+  antimalarial_pattern <- paste0(
+    "antimalarial|fansidar|chloroquine|amodiaquine|quinine|",
+    "artemether|artesunate|dihydroartemis|artemisinin|coartem|",
+    "\\bsp\\b|\\bcta\\b|\\bact\\b|mefloquine|piperaquine|lumefantrine"
+  )
+
+  ml13_candidates <- grep(
+    "^ml13[a-z]+$",
+    names(dhs_kr), value = TRUE
+  )
+  h37_candidates <- grep(
+    "^h37[a-z]+$",
+    names(dhs_kr), value = TRUE
+  )
+
+  # Align with ACT variable series
+  act_vars_used <- attr(
+    enriched, "act_vars_used"
+  ) %||%
+    attr(enriched, "act_var_used") %||%
+    (survey_vars$act %||% "ml13e")
+  act_used_h37 <- any(grepl("^h37", act_vars_used))
+
+  # Label-based detection from original dhs_kr (pre-zap).
+  # Matches DHS primary path: include if label contains a drug name.
+  .detect_am_from_labels <- function(candidates) {
+    matched <- character(0)
+    for (v in candidates) {
+      lbl <- attr(dhs_kr[[v]], "label")
+      if (is.null(lbl) || !is.character(lbl) ||
+          length(lbl) != 1) next
+      if (grepl(antimalarial_pattern, lbl,
+                ignore.case = TRUE)) {
+        matched <- c(matched, v)
+      }
+    }
+    matched
+  }
+
+  drug_series <- character(0)
+
+  if (act_used_h37 && length(h37_candidates) > 0) {
+    drug_series <- .detect_am_from_labels(h37_candidates)
+    if (length(drug_series) == 0) {
+      # No labels -- fall back to standard h37 slots
+      drug_series <- grep(
+        "^h37[a-h]$",
+        names(dhs_kr_zapped), value = TRUE
+      )
+    }
+    cli::cli_alert_info(
+      "Antimalarial composite using h37 series \\
+      (aligned with ACT h37 fallback)"
+    )
+  } else {
+    # Try ml13 labels first
+    drug_series <- .detect_am_from_labels(ml13_candidates)
+
+    # If no labels matched, try h37 labels
+    if (length(drug_series) == 0) {
+      drug_series <- .detect_am_from_labels(h37_candidates)
+    }
+
+    # Last resort: standard DHS drug slots (a-h)
+    if (length(drug_series) == 0) {
+      ml13_slots <- grep(
+        "^ml13[a-h]$",
+        names(dhs_kr_zapped), value = TRUE
+      )
+      h37_slots <- grep(
+        "^h37[a-h]$",
+        names(dhs_kr_zapped), value = TRUE
+      )
+
+      ml13_has_pos <- length(ml13_slots) > 0 &&
+        any(sapply(ml13_slots, function(v) {
+          any(dhs_kr_zapped[[v]] == 1, na.rm = TRUE)
+        }))
+      h37_has_pos <- length(h37_slots) > 0 &&
+        any(sapply(h37_slots, function(v) {
+          any(dhs_kr_zapped[[v]] == 1, na.rm = TRUE)
+        }))
+
+      if (ml13_has_pos) {
+        drug_series <- ml13_slots
+      } else if (h37_has_pos) {
+        drug_series <- h37_slots
+      } else {
+        drug_series <- c(ml13_slots, h37_slots)
+      }
+    }
+  }
+
+  if (length(drug_series) == 0) {
+    cli::cli_alert_warning(
+      "No antimalarial variables found -- \\
+      antimalarial indicators will be skipped"
+    )
+    return(enriched)
+  }
+
+  # Use .row_id from enriched to map back to original rows
+  # (febrile_idx was already computed by .prepare_act_data())
+  if (!".row_id" %in% names(enriched)) {
+    cli::cli_abort(
+      "Internal error: enriched data missing .row_id column. \\
+      This column is required to map drug variables from the original dataset."
+    )
+  }
+
+  febrile_idx <- enriched[[".row_id"]]
+
+  # Copy drug variables into enriched data
+  for (dvar in drug_series) {
+    enriched[[dvar]] <-
+      dhs_kr_zapped[[dvar]][febrile_idx]
+    enriched[[dvar]][
+      !enriched[[dvar]] %in% c(0, 1)
+    ] <- NA
+  }
+
+  drug_matrix <- as.matrix(
+    enriched[, drug_series, drop = FALSE]
+  )
+  enriched$received_antimalarial <- apply(
+    drug_matrix, 1,
+    function(row) {
+      if (any(row == 1, na.rm = TRUE)) return(1)
+      if (any(is.na(row))) return(NA_real_)
+      return(0)
+    }
+  )
+
+  n_am <- sum(enriched$received_antimalarial == 1,
+               na.rm = TRUE)
+  cli::cli_alert_info(
+    "Antimalarial composite ({length(drug_series)} vars: \\
+    {paste(drug_series, collapse = ', ')}): \\
+    {n_am}/{nrow(enriched)}"
+  )
+
+  enriched
+}
+
+
+#' Prepare Single ACT Indicator for MBG
+#'
+#' Convenience wrapper around [calc_act_mbg()] to prepare
+#' a single ACT indicator for MBG analysis.
+#'
+#' @inheritParams calc_act_mbg
+#' @param indicator Single indicator name. Default: "act".
+#'
+#' @return A data.table with columns: cluster_id, indicator,
+#'   samplesize, x, y
+#' @export
+prep_act_mbg <- function(
+  dhs_kr,
+  gps_data,
+  indicator = "act",
+  survey_vars = list(
+    cluster = "v001",
+    age = "hw1",
+    fever = "h22",
+    alive = "b5",
+    act = "ml13e",
+    test = "ml13a"
+  ),
+  gps_vars = list(
+    cluster = "DHSCLUST",
+    lat = "LATNUM",
+    lon = "LONGNUM"
+  )
+) {
+  result <- calc_act_mbg(
+    dhs_kr = dhs_kr,
+    gps_data = gps_data,
+    indicators = indicator,
+    survey_vars = survey_vars,
+    gps_vars = gps_vars
+  )
+
+  if (length(result) == 0) {
+    cli::cli_abort(
+      "No data returned for indicator \\
+      {.val {indicator}}"
+    )
+  }
+
+  result[[1]]
+}
+
+
+# ---- dhs_helpers_act.R ----
+
+#' Detect ACT Variables from Haven Labels
+#'
+#' Scans ml13* and h37* variables in a DHS dataset for haven labels indicating
+#' ACT (Artemisinin-based Combination Therapy). ACT is a drug CLASS -- multiple
+#' variables may contain different ACT formulations (e.g., artemether-lumefantrine
+#' in ml13f, artesunate-amodiaquine in ml13g). Returns ALL matching variables.
+#'
+#' Excludes artemisinin monotherapies (artesunate rectal/injection/IV) which
+#' are NOT combination therapies.
+#'
+#' @param dhs_kr DHS dataset with haven_labelled columns.
+#' @param default_vars Default ACT variable(s) to return if no label match found.
+#'
+#' @return Character vector of detected ACT variable names, or `default_vars`.
+#' @noRd
+.detect_act_vars <- function(dhs_kr, default_vars = "ml13e") {
+  # Inclusion pattern: ACT combinations
+  # - combin.*artemi / artemi.*combin: "Combination with artemisinin" (standardised)
+  # - artemether.+lumef: artemether-lumefantrine (Coartem)
+  # - artesunate.+amodiaq: artesunate-amodiaquine (ASAQ)
+  # - dihydroartemis: DHA-piperaquine
+  # - \bact\b: "ACT" as a word
+  # - \bcta\b: French "Combinaison Therapeutique a base d'Artemisinine"
+  # - coartem: brand name
+  act_pattern <- paste0(
+    "\\bact\\b|combin.*artemi|artemi.*combin|",
+    "artemether.+lumef|artesunate.+amodiaq|dihydroartemis|",
+    "coartem|\\bcta\\b"
+  )
+  # Exclusion pattern: artemisinin monotherapies (not combination therapy)
+  exclude_pattern <- "rectal|injection|\\biv\\b|monotherapy"
+
+  # Helper: scan a set of candidates for ACT labels
+  .scan_labels <- function(candidates) {
+    matched <- character(0)
+    for (v in candidates) {
+      lbl <- attr(dhs_kr[[v]], "label")
+      if (!is.null(lbl) && is.character(lbl) && length(lbl) == 1 &&
+          grepl(act_pattern, lbl, ignore.case = TRUE) &&
+          !grepl(exclude_pattern, lbl, ignore.case = TRUE)) {
+        matched <- c(matched, v)
+      }
+    }
+    matched
+  }
+
+  # Search ml13 series first (newer surveys). Only fall back to h37 (older
+  # surveys) if ml13 yields no matches. The two series are PARALLEL -- they
+  # represent the same drug slots in different DHS coding systems and must
+  # never be mixed into a single composite.
+  ml13_candidates <- grep("^ml13[a-z]", names(dhs_kr), value = TRUE)
+  act_vars <- .scan_labels(ml13_candidates)
+
+  if (length(act_vars) == 0) {
+    h37_candidates <- grep("^h37[a-z]", names(dhs_kr), value = TRUE)
+    act_vars <- .scan_labels(h37_candidates)
+  }
+
+  if (length(act_vars) == 0) {
+    cli::cli_alert_warning(
+      "No ACT variables detected from labels; defaulting to {.var {default_vars}}"
+    )
+    return(default_vars)
+  }
+
+  if (length(act_vars) > 1) {
+    cli::cli_alert_info(
+      "Detected {length(act_vars)} ACT variables from labels: {paste(act_vars, collapse = ', ')}"
+    )
+  } else if (act_vars[1] != default_vars[1]) {
+    lbl <- attr(dhs_kr[[act_vars[1]]], "label")
+    cli::cli_alert_info(
+      "Auto-detected ACT variable {.var {act_vars[1]}} from label: {.val {lbl}}"
+    )
+  }
+
+  act_vars
+}
+
+
+#' Detect ACT Variable from Haven Labels (deprecated wrapper)
+#'
+#' @param dhs_kr DHS dataset with haven_labelled columns.
+#' @param default_var Default ACT variable to return if no label match found.
+#' @return Single variable name (first detected ACT variable).
+#' @noRd
+.detect_act_var_from_labels <- function(dhs_kr, default_var = "ml13e") {
+  .detect_act_vars(dhs_kr, default_vars = default_var)[1]
+}
+
+
+#' Prepare ACT Data for Analysis
+#'
+#' Shared data cleaning and indicator computation for ACT functions.
+#' Used by both calc_act_dhs() and calc_act_mbg().
+#'
+#' @param dhs_kr DHS Children's Recode (KR) dataset.
+#' @param survey_vars Named list mapping DHS variable names.
+#' @param include_survey_vars Logical. If TRUE, includes survey design columns.
+#'
+#' @return A data frame of febrile children with columns:
+#'   cluster_id, age_months, received_act, test_positive, has_act.
+#'   If include_survey_vars = TRUE, also: survey_weight, stratum_id.
+#'   Attribute "act_var_used" records which variable was resolved as ACT.
+#'
+#' @noRd
+.prepare_act_data <- function(
+  dhs_kr,
+  survey_vars,
+  include_survey_vars = FALSE
+) {
+  if (!is.data.frame(dhs_kr)) {
+    cli::cli_abort("`dhs_kr` must be a data.frame or tibble.")
+  }
+  if (nrow(dhs_kr) == 0) {
+    cli::cli_abort("`dhs_kr` is empty.")
+  }
+
+  # Auto-detect age variable if specified one is missing
+  # Fallback order: hw1 (anthropometry) -> hc1 (standard KR) -> b8 (current age)
+  if (!survey_vars$age %in% names(dhs_kr)) {
+    age_candidates <- c("hc1", "b8", "hw1")
+    available_age <- intersect(age_candidates, names(dhs_kr))
+
+    if (length(available_age) > 0) {
+      old_age_var <- survey_vars$age
+      survey_vars$age <- available_age[1]
+      cli::cli_alert_info(
+        "Age variable {.var {old_age_var}} not found; using {.var {survey_vars$age}} instead"
+      )
+    }
+  }
+
+  # Check required columns
+  needed <- c(survey_vars$cluster, survey_vars$age, survey_vars$fever)
+  if (include_survey_vars) {
+    needed <- c(needed, survey_vars$weight, survey_vars$stratum)
+  }
+  missing_vars <- setdiff(needed, names(dhs_kr))
+  if (length(missing_vars) > 0) {
+    cli::cli_abort(c(
+      "Required variables not found: {.var {missing_vars}}",
+      "i" = "Check your survey_vars mapping"
+    ))
+  }
+
+  # Detect ACT variables with multi-stage resolution:
+  # 1. Label-based detection: find ALL ACT combination variables
+  #    (handles surveys with multiple ACT formulations, e.g. Togo MIS 2017)
+  # 2. Positive-value fallback: if no ACT vars have data, try h37 series
+  # 3. Presence fallback: try h37e if ml13 vars are missing entirely
+  act_input <- survey_vars$act
+
+  # Stage 1: auto-detect from haven labels when using default mapping
+  if (length(act_input) == 1 && act_input == "ml13e") {
+    act_vars <- .detect_act_vars(dhs_kr, default_vars = act_input)
+  } else {
+    act_vars <- act_input
+  }
+
+  # Validate presence
+  act_vars <- intersect(act_vars, names(dhs_kr))
+
+  # Stage 2-3: fallback logic
+  if (length(act_vars) == 0) {
+    # Try h37 series
+    h37_acts <- .detect_act_vars(dhs_kr, default_vars = "h37e")
+    act_vars <- intersect(h37_acts, names(dhs_kr))
+    if (length(act_vars) > 0) {
+      cli::cli_alert_info(
+        "ml13 ACT variables not found; using h37 series: {paste(act_vars, collapse = ', ')}"
+      )
+    } else {
+      cli::cli_abort(
+        "No ACT variables found in data (tried ml13* and h37*)"
+      )
+    }
+  }
+
+  # Check if any ACT var has positive values
+  act_has_data <- any(sapply(act_vars, function(v) {
+    any(as.vector(haven::zap_labels(dhs_kr[[v]])) == 1, na.rm = TRUE)
+  }))
+
+  if (!act_has_data && "h37e" %in% names(dhs_kr)) {
+    h37e_vals <- as.vector(haven::zap_labels(dhs_kr[["h37e"]]))
+    if (any(h37e_vals == 1, na.rm = TRUE)) {
+      cli::cli_alert_info(
+        "ACT variable{?s} {.var {act_vars}} ha{?s/ve} no positive values; using {.var h37e} which has data"
+      )
+      act_vars <- "h37e"
+    }
+  }
+
+  has_test_var <- !is.null(survey_vars$test) && survey_vars$test %in% names(dhs_kr)
+
+  # Zap labels
+  kr <- dhs_kr |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
+
+  # Force indicator columns to numeric (guards against haven character residuals)
+  for (col in c(act_vars, survey_vars$fever, survey_vars$age, survey_vars$alive, survey_vars$test)) {
+    if (!is.null(col) && col %in% names(kr)) {
+      kr[[col]] <- suppressWarnings(as.numeric(as.character(kr[[col]])))
+    }
+  }
+
+  # Build composite received_act from all ACT variables
+  # (same pattern as received_antimalarial in .prepare_antimalarial_data)
+  act_matrix <- as.matrix(kr[, act_vars, drop = FALSE])
+  act_matrix[!act_matrix %in% c(0, 1)] <- NA
+  kr$received_act <- apply(act_matrix, 1, function(row) {
+    if (any(row == 1, na.rm = TRUE)) return(1)
+    if (any(is.na(row))) return(NA_real_)
+    return(0)
+  })
+
+  # Build columns (include .row_id for downstream enrichment)
+  kr <- kr |>
+    dplyr::mutate(
+      .row_id = dplyr::row_number(),
+      cluster_id = .data[[survey_vars$cluster]],
+      age_months = .data[[survey_vars$age]],
+      had_fever = .data[[survey_vars$fever]]
+    )
+
+  if (has_test_var) {
+    kr$test_positive <- kr[[survey_vars$test]]
+  } else {
+    kr$test_positive <- NA_real_
+  }
+
+  if (include_survey_vars) {
+    kr <- kr |>
+      dplyr::mutate(
+        survey_weight = .data[[survey_vars$weight]] / 1e6,
+        stratum_id = .data[[survey_vars$stratum]]
+      )
+  }
+
+  # Check alive variable if present
+  has_alive <- !is.null(survey_vars$alive) &&
+    survey_vars$alive %in% names(dhs_kr)
+  if (has_alive) {
+    kr <- kr |>
+      dplyr::mutate(child_alive = .data[[survey_vars$alive]])
+  }
+
+  # Filter to U5 children
+  kr_u5 <- kr |>
+    dplyr::filter(
+      age_months >= 0,
+      age_months <= 59
+    )
+
+  if (has_alive) {
+    kr_u5 <- kr_u5 |>
+      dplyr::filter(child_alive == 1)
+  }
+
+  # Detect fever coding scheme: Some surveys use 0=No/1=Yes, others use 1=No/2=Yes
+  fever_values <- unique(kr_u5$had_fever[!is.na(kr_u5$had_fever)])
+
+  if (length(fever_values) == 0) {
+    cli::cli_abort(
+      "Fever variable has no valid values. Check that {.var {survey_vars$fever}} exists and contains data."
+    )
+  }
+
+  # Determine "Yes" value: if values are strictly {1, 2} or {2}, assume 2=Yes
+  # Otherwise, assume 1=Yes (standard DHS coding)
+  if (all(fever_values %in% c(1, 2)) && 2 %in% fever_values && !0 %in% fever_values) {
+    fever_yes_value <- 2
+    cli::cli_alert_info(
+      "Detected alternative fever coding (1=No, 2=Yes) - using 2 as 'Yes'"
+    )
+  } else {
+    fever_yes_value <- 1
+  }
+
+  # Filter to children with fever
+  kr_fever <- kr_u5 |>
+    dplyr::filter(had_fever == fever_yes_value)
+
+  if (nrow(kr_fever) == 0) {
+    n_with_data <- sum(!is.na(kr_u5$had_fever))
+    cli::cli_abort(c(
+      "No children with fever in the last 2 weeks found.",
+      "i" = "Total U5 children: {nrow(kr_u5)}",
+      "i" = "Children with fever data: {n_with_data}",
+      "i" = "Unique fever values: {paste(sort(fever_values), collapse = ', ')}",
+      "i" = "Expected 'Yes' value: {fever_yes_value}"
+    ))
+  }
+
+  if (all(is.na(kr_fever$received_act))) {
+    cli::cli_abort("ACT variable {.var {act_var}} is all NA for febrile children")
+  }
+
+  # Create binary ACT indicator
+  kr_fever <- kr_fever |>
+    dplyr::mutate(
+      has_act = dplyr::if_else(received_act == 1, 1, 0, missing = NA_real_)
+    )
+
+  cli::cli_alert_info(
+    "Found {format(nrow(kr_fever), big.mark = ',')} febrile children under 5"
+  )
+  cli::cli_alert_info(
+    "Using {length(act_vars)} ACT variable{?s}: {paste(act_vars, collapse = ', ')}"
+  )
+
+  # Record which ACT variables were resolved for downstream alignment
+  attr(kr_fever, "act_vars_used") <- act_vars
+  attr(kr_fever, "act_var_used") <- act_vars[1]  # backward compat
+
+  kr_fever
+}
+
+
+#' Merge Febrile KR Children with PR RDT Results
+#'
+#' Links febrile U5 children from the KR file to their RDT results in the
+#' PR (Person Recode) file. The merge uses cluster number (v001), household
+#' number (v002), and child line number (b16_01) as the linkage key.
+#'
+#' @param kr_fever Febrile U5 data prepared by .prepare_act_data().
+#' @param dhs_pr DHS Person Recode (PR) dataset containing hml35 (RDT result).
+#' @param kr_cluster_var Column in kr_fever for geographic cluster number
+#'   (default: "v001"). Used for PR linkage; distinct from survey design PSU.
+#' @param kr_hh_var KR column for household number (default: "v002").
+#' @param kr_line_var KR column for the child's line number in the household
+#'   (default: "b16_01"). Links to PR hvidx.
+#'
+#' @return A data frame of febrile children matched to valid RDT results,
+#'   containing all kr_fever columns plus: rdt_result (0/1) and
+#'   has_rdt_pos (integer 0/1). Returns NULL if hml35 is absent, link
+#'   variables are missing, or no children can be matched.
+#'
+#' @noRd
+.merge_kr_pr_febrile <- function(
+  kr_fever,
+  dhs_pr,
+  kr_cluster_var = "v001",
+  kr_hh_var = "v002",
+  kr_line_var = "b16_01"
+) {
+  if (!is.data.frame(dhs_pr)) {
+    cli::cli_alert_warning(
+      "`dhs_pr` must be a data.frame - skipping febrile RDT indicators"
+    )
+    return(NULL)
+  }
+
+  rdt_var <- "hml35"
+  if (!rdt_var %in% names(dhs_pr)) {
+    cli::cli_alert_warning(
+      "RDT variable {.var {rdt_var}} not found in PR data - skipping febrile RDT indicators"
+    )
+    return(NULL)
+  }
+
+  missing_link <- setdiff(c(kr_cluster_var, kr_hh_var, kr_line_var), names(kr_fever))
+  if (length(missing_link) > 0) {
+    cli::cli_alert_warning(
+      "KR link variables {.var {missing_link}} not found - skipping febrile RDT indicators"
+    )
+    return(NULL)
+  }
+
+  # Zap labels on PR
+  pr <- dhs_pr |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
+
+  # Force RDT column to numeric (guards against haven character residuals)
+  if (rdt_var %in% names(pr)) {
+    pr[[rdt_var]] <- suppressWarnings(as.numeric(as.character(pr[[rdt_var]])))
+  }
+
+  # Subset PR: link vars + RDT result (valid tests only: 0 = negative, 1 = positive)
+  pr_link <- pr |>
+    dplyr::select(
+      pr_cluster = hv001,
+      pr_hh      = hv002,
+      pr_line    = hvidx,
+      rdt_result = !!rdt_var
+    ) |>
+    dplyr::filter(rdt_result %in% c(0, 1))
+
+  if (nrow(pr_link) == 0) {
+    cli::cli_alert_warning(
+      "No valid RDT results (0/1) found in PR data - skipping febrile RDT indicators"
+    )
+    return(NULL)
+  }
+
+  # Build join key: KR column names -> PR column names
+  join_key <- stats::setNames(
+    c("pr_cluster", "pr_hh", "pr_line"),
+    c(kr_cluster_var, kr_hh_var, kr_line_var)
+  )
+
+  merged <- dplyr::inner_join(kr_fever, pr_link, by = join_key)
+
+  n_total   <- nrow(kr_fever)
+  n_matched <- nrow(merged)
+
+  if (n_matched == 0) {
+    cli::cli_alert_warning(
+      "No febrile children matched to RDT results in PR data - skipping febrile RDT indicators"
+    )
+    return(NULL)
+  }
+
+  cli::cli_alert_info(
+    "Matched {format(n_matched, big.mark = ',')} of {format(n_total, big.mark = ',')} febrile children to RDT results"
+  )
+
+  merged |>
+    dplyr::mutate(has_rdt_pos = as.integer(rdt_result == 1))
+}
+
+

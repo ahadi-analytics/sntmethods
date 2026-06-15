@@ -1,3 +1,11 @@
+# wealth indicator
+#
+# Merged from: dhs_calc_wealth.R dhs_calc_wealth_mbg.R dhs_helpers_wealth_stratified.R 
+# Contains the survey-weighted calc, MBG cluster-prep, and indicator-
+# specific helpers for this family.
+
+# ---- dhs_calc_wealth.R ----
+
 #' Calculate Gini Coefficient Using DHS Brown Formula Methodology
 #'
 #' Calculates the Gini coefficient for wealth inequality following the DHS
@@ -1220,3 +1228,500 @@ aggregate_wealth_admin <- function(
 
   result
 }
+
+
+# ---- dhs_calc_wealth_mbg.R ----
+
+#' Prepare Wealth Quintile Distribution Data for MBG Analysis
+#'
+#' Prepares cluster-level wealth quintile distribution data for Model-Based
+#' Geostatistics (MBG) analysis. Calculates proportions of households in each
+#' wealth quintile, aggregated to cluster level.
+#'
+#' @details
+#' This function prepares wealth distribution indicators for spatial modeling.
+#' Unlike the survey-weighted [calc_wealth_dhs()], this uses simple cluster-level
+#' counts without survey weights - MBG handles spatial smoothing internally.
+#'
+#' **Pipeline Integration:** This function IS called by [run_mbg_pipeline()]
+#' when you specify `indicators = "wealth"` or individual codes like
+#' `"prop_poorest"`.
+#'
+#' Methodology: Uses DHS wealth quintile variable (hv270 in HR recode) which
+#' classifies households into 5 quintiles based on wealth index factor scores.
+#'
+#' @param dhs_hr DHS Household Records (HR) dataset.
+#' @param gps_data DHS GPS dataset with cluster coordinates.
+#' @param indicators Character vector of indicators to calculate:
+#'   \itemize{
+#'     \item "prop_poorest" or "prop_q1": Proportion in poorest quintile (Q1)
+#'     \item "prop_poorer" or "prop_q2": Proportion in second quintile (Q2)
+#'     \item "prop_middle" or "prop_q3": Proportion in middle quintile (Q3)
+#'     \item "prop_richer" or "prop_q4": Proportion in fourth quintile (Q4)
+#'     \item "prop_richest" or "prop_q5": Proportion in richest quintile (Q5)
+#'   }
+#'   Default: c("prop_poorest", "prop_richest") for equity analysis.
+#' @param survey_vars Named list mapping DHS variable names:
+#'   \itemize{
+#'     \item cluster: Cluster ID (default: "hv001")
+#'     \item wealth_quintile: Wealth quintile variable (default: "hv270")
+#'   }
+#' @param gps_vars Named list for GPS variable mapping.
+#'
+#' @return A named list of data.tables (one per indicator), each with columns:
+#'   \itemize{
+#'     \item cluster_id: Cluster identifier
+#'     \item indicator: Numerator count (households in quintile)
+#'     \item samplesize: Denominator count (all households)
+#'     \item x: Longitude
+#'     \item y: Latitude
+#'   }
+#'
+#' @section Output Structure:
+#' For `indicators = c("prop_poorest", "prop_richest")`:
+#' \preformatted{
+#' list(
+#'   prop_poorest = data.table(cluster_id, indicator, samplesize, x, y),
+#'   prop_richest = data.table(cluster_id, indicator, samplesize, x, y)
+#' )
+#' }
+#'
+#' @examples
+#' \dontrun{
+#' # Poorest quintile distribution for equity mapping
+#' wealth_poorest <- calc_wealth_mbg(
+#'   dhs_hr = hr_data,
+#'   gps_data = gps_data,
+#'   indicators = "prop_poorest"
+#' )
+#'
+#' # Compare poorest vs richest for inequality analysis
+#' wealth_inequality <- calc_wealth_mbg(
+#'   dhs_hr = hr_data,
+#'   gps_data = gps_data,
+#'   indicators = c("prop_poorest", "prop_richest")
+#' )
+#'
+#' # Via pipeline
+#' results <- run_mbg_pipeline(
+#'   country_iso3 = "gin",
+#'   indicators = "wealth",
+#'   ...
+#' )
+#' }
+#'
+#' @seealso
+#' * [calc_wealth_dhs()] for survey-weighted wealth estimates with CIs
+#' * [run_mbg_pipeline()] for automated pipeline processing
+#' @export
+calc_wealth_mbg <- function(
+  dhs_hr,
+  gps_data,
+  indicators = c("prop_poorest", "prop_richest"),
+  survey_vars = list(
+    cluster = "hv001",
+    wealth_quintile = "hv270"
+  ),
+  gps_vars = list(
+    cluster = "DHSCLUST",
+    lat = "LATNUM",
+    lon = "LONGNUM"
+  )
+) {
+  # Fail fast on missing suggested dependencies
+  .check_pkg(
+    c("tibble"),
+    reason = "for `calc_wealth_mbg()`"
+  )
+
+  # ---- Input validation ----
+
+  if (!is.data.frame(dhs_hr)) {
+    cli::cli_abort("`dhs_hr` must be a data.frame or tibble")
+  }
+  if (!is.data.frame(gps_data)) {
+    cli::cli_abort("`gps_data` must be a data.frame or tibble")
+  }
+
+  dict <- .wealth_mbg_dictionary()
+  dict_names <- vapply(dict, `[[`, character(1), "name")
+
+  # Default: poorest and richest
+  if (is.null(indicators)) {
+    indicators <- c("prop_poorest", "prop_richest")
+  }
+
+  invalid <- setdiff(indicators, dict_names)
+  if (length(invalid) > 0) {
+    cli::cli_abort(
+      "Invalid indicators: {.val {invalid}}. Valid: {.val {dict_names}}"
+    )
+  }
+
+  # Filter dictionary to requested indicators
+  dict_specs <- dict[vapply(dict, function(d) d$name %in% indicators, logical(1))]
+
+  # ---- Prepare GPS data ----
+
+  gps_clean <- .prepare_gps_data(gps_data, gps_vars)
+
+  # ---- Prepare household data ----
+
+  cluster_var <- survey_vars$cluster
+  wealth_var <- survey_vars$wealth_quintile
+
+  if (!cluster_var %in% names(dhs_hr)) {
+    cli::cli_abort("Cluster variable {.var {cluster_var}} not found in dhs_hr")
+  }
+  if (!wealth_var %in% names(dhs_hr)) {
+    cli::cli_abort("Wealth variable {.var {wealth_var}} not found in dhs_hr")
+  }
+
+  # Extract and zap labels
+  hr_clean <- dhs_hr |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
+
+  hr_data <- tibble::tibble(
+    cluster_id = hr_clean[[cluster_var]],
+    wealth_quintile = as.numeric(hr_clean[[wealth_var]])
+  )
+
+  # Filter to valid quintiles
+  hr_data <- hr_data |>
+    dplyr::filter(wealth_quintile %in% 1:5, !is.na(wealth_quintile))
+
+  if (nrow(hr_data) == 0) {
+    cli::cli_abort("No valid household data after filtering")
+  }
+
+  cli::cli_alert_success(
+    "Valid households: {format(nrow(hr_data), big.mark = ',')}"
+  )
+
+  # Create binary indicators for each quintile
+  hr_data <- hr_data |>
+    dplyr::mutate(
+      in_q1 = as.integer(wealth_quintile == 1),
+      in_q2 = as.integer(wealth_quintile == 2),
+      in_q3 = as.integer(wealth_quintile == 3),
+      in_q4 = as.integer(wealth_quintile == 4),
+      in_q5 = as.integer(wealth_quintile == 5)
+    )
+
+  # ---- Dictionary-driven indicator loop ----
+
+  results <- list()
+
+  for (spec in dict_specs) {
+    outcome_col <- spec$outcome
+
+    if (!outcome_col %in% names(hr_data)) {
+      cli::cli_alert_warning(
+        "Outcome {.var {outcome_col}} not found for {.val {spec$name}} - skipping"
+      )
+      next
+    }
+
+    # Drop NAs in outcome
+    filtered <- hr_data[!is.na(hr_data[[outcome_col]]), , drop = FALSE]
+
+    if (nrow(filtered) == 0) {
+      cli::cli_alert_warning("No data for {.val {spec$name}} - skipping")
+      next
+    }
+
+    dt <- .aggregate_to_mbg_clusters(filtered, outcome_col, gps_clean, spec$name)
+    if (!is.null(dt)) {
+      results[[spec$name]] <- dt
+    }
+  }
+
+  if (length(results) == 0) {
+    cli::cli_abort("No valid MBG data could be prepared")
+  }
+
+  cli::cli_alert_success(
+    "Prepared {length(results)} wealth indicator(s)"
+  )
+
+  results
+}
+
+
+# =============================================================================
+# Wealth MBG Indicator Dictionary
+# =============================================================================
+
+#' Wealth MBG Indicator Dictionary
+#'
+#' Returns the full set of standardized indicator specifications for
+#' cluster-level wealth MBG output. Each entry defines the indicator name
+#' and outcome column (binary indicator for each quintile).
+#'
+#' @return List of named lists with fields: \code{name}, \code{outcome},
+#'   \code{quintile}.
+#' @noRd
+.wealth_mbg_dictionary <- function() {
+  list(
+    list(name = "prop_poorest", outcome = "in_q1", quintile = 1),
+    list(name = "prop_q1",      outcome = "in_q1", quintile = 1),
+    list(name = "prop_poorer",  outcome = "in_q2", quintile = 2),
+    list(name = "prop_q2",      outcome = "in_q2", quintile = 2),
+    list(name = "prop_middle",  outcome = "in_q3", quintile = 3),
+    list(name = "prop_q3",      outcome = "in_q3", quintile = 3),
+    list(name = "prop_richer",  outcome = "in_q4", quintile = 4),
+    list(name = "prop_q4",      outcome = "in_q4", quintile = 4),
+    list(name = "prop_richest", outcome = "in_q5", quintile = 5),
+    list(name = "prop_q5",      outcome = "in_q5", quintile = 5)
+  )
+}
+
+
+#' Prepare Single Wealth Indicator for MBG
+#'
+#' Convenience wrapper around [calc_wealth_mbg()] to prepare a single
+#' wealth quintile distribution indicator.
+#'
+#' @inheritParams calc_wealth_mbg
+#' @param indicator Single indicator name. Default: "prop_poorest".
+#'
+#' @return Named list with single data.table containing columns:
+#'   cluster_id, indicator, samplesize, x, y
+#'
+#' @examples
+#' \dontrun{
+#' # Poorest quintile distribution only
+#' poorest <- prep_wealth_mbg(
+#'   dhs_hr = hr_data,
+#'   gps_data = gps_data,
+#'   indicator = "prop_poorest"
+#' )
+#' }
+#'
+#' @export
+prep_wealth_mbg <- function(
+  dhs_hr,
+  gps_data,
+  indicator = "prop_poorest",
+  survey_vars = list(
+    cluster = "hv001",
+    wealth_quintile = "hv270"
+  ),
+  gps_vars = list(
+    cluster = "DHSCLUST",
+    lat = "LATNUM",
+    lon = "LONGNUM"
+  )
+) {
+  result <- calc_wealth_mbg(
+    dhs_hr = dhs_hr,
+    gps_data = gps_data,
+    indicators = indicator,
+    survey_vars = survey_vars,
+    gps_vars = gps_vars
+  )
+
+  result
+}
+
+
+# ---- dhs_helpers_wealth_stratified.R ----
+
+# =============================================================================
+# Shared helpers for wealth-stratified DHS indicators
+# =============================================================================
+
+#' Prepare wealth quintile variable for stratification
+#'
+#' Standardizes wealth quintile extraction from DHS datasets. Handles both
+#' household (hv270) and individual (v190) recodes.
+#'
+#' @param dhs_data DHS dataset (KR, IR, PR, or HR recode).
+#' @param wealth_var Name of wealth quintile variable. Default: "v190" for
+#'   individual recodes, "hv270" for household recodes.
+#' @param quintiles Numeric vector of quintiles to include. Default: 1:5 (all).
+#'   Use c(1) for poorest only, c(1,2) for poorest + poorer, etc.
+#'
+#' @return Input dataset with added `wealth_quintile` column, filtered to
+#'   requested quintiles. Rows with NA wealth are removed.
+#' @noRd
+.add_wealth_quintile <- function(dhs_data, wealth_var = NULL, quintiles = 1:5) {
+  # Auto-detect wealth variable if not specified
+  if (is.null(wealth_var)) {
+    if ("v190" %in% names(dhs_data)) {
+      wealth_var <- "v190"
+    } else if ("hv270" %in% names(dhs_data)) {
+      wealth_var <- "hv270"
+    } else {
+      cli::cli_abort(c(
+        "No wealth quintile variable found",
+        "i" = "Expected 'v190' (individual recode) or 'hv270' (household recode)",
+        "i" = "Specify wealth_var parameter if using custom variable name"
+      ))
+    }
+  }
+
+  if (!wealth_var %in% names(dhs_data)) {
+    cli::cli_abort(
+      "Wealth variable {.var {wealth_var}} not found in dataset"
+    )
+  }
+
+  # Extract and validate wealth quintile
+  dhs_data$wealth_quintile <- as.numeric(dhs_data[[wealth_var]])
+
+  # Remove NA wealth
+  n_before <- nrow(dhs_data)
+  dhs_data <- dhs_data[!is.na(dhs_data$wealth_quintile), , drop = FALSE]
+  n_after <- nrow(dhs_data)
+
+  if (n_after < n_before) {
+    cli::cli_alert_info(
+      "Removed {n_before - n_after} rows with missing wealth quintile"
+    )
+  }
+
+  # Filter to requested quintiles
+  valid_q <- dhs_data$wealth_quintile %in% quintiles
+  dhs_data <- dhs_data[valid_q, , drop = FALSE]
+
+  if (nrow(dhs_data) == 0) {
+    cli::cli_abort(
+      "No observations remain after filtering to quintiles: {quintiles}"
+    )
+  }
+
+  cli::cli_alert_info(
+    "Filtered to {nrow(dhs_data)} observations in quintile(s): {paste(quintiles, collapse = ', ')}"
+  )
+
+  dhs_data
+}
+
+
+#' Aggregate to MBG clusters by wealth quintile
+#'
+#' Extension of `.aggregate_to_mbg_clusters` that produces separate outputs
+#' for each wealth quintile.
+#'
+#' @param individual_data Individual-level data with cluster_id and wealth_quintile.
+#' @param indicator_col Name of binary 0/1 indicator column.
+#' @param gps_clean GPS data with cluster_id, lat, lon.
+#' @param result_name Base name for output (e.g., "csb_public").
+#' @param quintiles Numeric vector of quintiles to include. Default: 1:5.
+#'
+#' @return Named list of data.tables, one per quintile. Each has columns:
+#'   cluster_id, indicator, samplesize, x, y. Names are formatted as
+#'   "{result_name}_q{quintile}" (e.g., "csb_public_q1", "csb_public_q2").
+#' @noRd
+.aggregate_to_mbg_clusters_by_wealth <- function(
+  individual_data,
+  indicator_col,
+  gps_clean,
+  result_name = "indicator",
+  quintiles = 1:5
+) {
+  if (!"wealth_quintile" %in% names(individual_data)) {
+    cli::cli_abort(
+      "Data must have 'wealth_quintile' column. Use .add_wealth_quintile() first."
+    )
+  }
+
+  results <- list()
+
+  for (q in quintiles) {
+    subset_data <- individual_data[
+      individual_data$wealth_quintile == q,
+      ,
+      drop = FALSE
+    ]
+
+    if (nrow(subset_data) == 0) {
+      cli::cli_alert_warning(
+        "{result_name} Q{q}: no observations in this quintile"
+      )
+      next
+    }
+
+    cluster_data <- .aggregate_to_mbg_clusters(
+      individual_data = subset_data,
+      indicator_col = indicator_col,
+      gps_clean = gps_clean,
+      result_name = paste0(result_name, "_q", q)
+    )
+
+    if (!is.null(cluster_data)) {
+      results[[paste0(result_name, "_q", q)]] <- cluster_data
+    }
+  }
+
+  results
+}
+
+
+#' Compute survey-weighted indicator by wealth quintile
+#'
+#' Extension of `.compute_dhs_indicator_generic` that calculates estimates
+#' separately for each wealth quintile.
+#'
+#' @param data Prepared dataset with wealth_quintile column.
+#' @param condition Indicator condition specification (from indicator functions).
+#' @param group_var Optional grouping variable (e.g., "region" for adm1).
+#' @param subnational_level Admin level name (e.g., "adm1").
+#' @param ci_method CI method for svyciprop. Default: "logit".
+#' @param quintiles Numeric vector of quintiles to include. Default: 1:5.
+#'
+#' @return Tibble with additional column `wealth_quintile` indicating which
+#'   quintile each estimate applies to. All other columns match
+#'   `.compute_dhs_indicator_generic` output.
+#' @noRd
+.compute_dhs_indicator_by_wealth <- function(
+  data,
+  condition,
+  group_var = NULL,
+  subnational_level = NULL,
+  ci_method = "logit",
+  quintiles = 1:5
+) {
+  if (!"wealth_quintile" %in% names(data)) {
+    cli::cli_abort(
+      "Data must have 'wealth_quintile' column. Use .add_wealth_quintile() first."
+    )
+  }
+
+  results <- purrr::map_dfr(quintiles, function(q) {
+    subset_data <- data[data$wealth_quintile == q, , drop = FALSE]
+
+    if (nrow(subset_data) == 0) {
+      return(tibble::tibble())
+    }
+
+    quintile_result <- .compute_dhs_indicator_generic(
+      data = subset_data,
+      condition = condition,
+      group_var = group_var,
+      subnational_level = subnational_level,
+      ci_method = ci_method
+    )
+
+    if (nrow(quintile_result) > 0) {
+      quintile_result$wealth_quintile <- q
+    }
+
+    quintile_result
+  })
+
+  # Reorder columns to put wealth_quintile early
+  if (nrow(results) > 0 && "wealth_quintile" %in% names(results)) {
+    col_order <- c(
+      "wealth_quintile",
+      setdiff(names(results), "wealth_quintile")
+    )
+    results <- results[, col_order, drop = FALSE]
+  }
+
+  results
+}
+
+

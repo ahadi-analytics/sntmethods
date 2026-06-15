@@ -1,3 +1,11 @@
+# antimalarial indicator
+#
+# Merged from: dhs_calc_antimalarial.R dhs_calc_antimalarial_mbg.R dhs_helpers_antimalarial.R 
+# Contains the survey-weighted calc, MBG cluster-prep, and indicator-
+# specific helpers for this family.
+
+# ---- dhs_calc_antimalarial.R ----
+
 #' Calculate Antimalarial Treatment from DHS Data
 #'
 #' Estimates the proportion of febrile children under 5 who received any
@@ -595,3 +603,552 @@ antimalarial_dictionary <- function() {
     denominator_code        = vapply(conds, `[[`, character(1), "denom_code")
   )
 }
+
+
+# ---- dhs_calc_antimalarial_mbg.R ----
+
+#' Prepare Antimalarial Treatment Data for MBG Analysis
+#'
+#' Prepares cluster-level antimalarial treatment data for MBG analysis.
+#' Uses a dictionary-driven approach matching the indicator codes from
+#' \code{\link{calc_antimalarial_dhs}}.
+#'
+#' @details
+#' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/antimalarial_dhs.yml}
+#'
+#' All dictionary-based indicators share the same data preparation pipeline:
+#' \enumerate{
+#'   \item Filter to febrile U5 children (via \code{.prepare_antimalarial_data()})
+#'   \item Classify care-seeking sectors if needed (via
+#'     \code{.classify_csb_from_h32()})
+#'   \item Apply per-indicator filters and aggregate to cluster-level counts
+#' }
+#'
+#' @param dhs_kr DHS Children's Recode (KR) dataset.
+#' @param gps_data DHS GPS dataset with cluster coordinates.
+#' @param indicators Character vector of indicators to calculate.
+#'   See \code{.antimalarial_mbg_dictionary()} for the full list of
+#'   standardized indicator codes. Default: \code{"antimalarial"}.
+#' @param survey_vars Named list mapping DHS variable names:
+#'   \itemize{
+#'     \item \code{cluster}: Cluster ID (default: "v001")
+#'     \item \code{age}: Child's age in months (default: "hw1")
+#'     \item \code{fever}: Fever in last 2 weeks (default: "h22")
+#'   }
+#' @param gps_vars Named list for GPS variable mapping.
+#'
+#' @return A named list of data.tables (one per indicator), each with columns:
+#'   \itemize{
+#'     \item cluster_id: Cluster identifier
+#'     \item indicator: Numerator count (children receiving antimalarial)
+#'     \item samplesize: Denominator count (febrile U5 children)
+#'     \item x: Longitude
+#'     \item y: Latitude
+#'   }
+#'
+#' @examples
+#' \dontrun{
+#' am_mbg <- calc_antimalarial_mbg(
+#'   dhs_kr = kr_data,
+#'   gps_data = gps_data,
+#'   indicators = c("antimalarial", "antimalarial_public")
+#' )
+#' }
+#'
+#' @seealso [calc_antimalarial_dhs()] for survey-weighted estimates,
+#'   [calc_act_mbg()] for ACT-specific treatment
+#' @export
+calc_antimalarial_mbg <- function(
+  dhs_kr,
+  gps_data,
+  indicators = "antimalarial",
+  survey_vars = list(
+    cluster = "v001",
+    age = "hw1",
+    fever = "h22"
+  ),
+  gps_vars = list(
+    cluster = "DHSCLUST",
+    lat = "LATNUM",
+    lon = "LONGNUM"
+  )
+) {
+  # ---- Input validation ----
+
+  if (!is.data.frame(dhs_kr)) {
+    cli::cli_abort("`dhs_kr` must be a data.frame or tibble")
+  }
+  if (!is.data.frame(gps_data)) {
+    cli::cli_abort("`gps_data` must be a data.frame or tibble")
+  }
+
+  # Validate indicators against dictionary
+  dict <- .antimalarial_mbg_dictionary()
+  dict_names <- vapply(dict, `[[`, character(1), "name")
+  invalid <- setdiff(indicators, dict_names)
+  if (length(invalid) > 0) {
+    cli::cli_abort("Invalid indicators: {.val {invalid}}")
+  }
+
+  # ---- Prepare base data using shared helpers ----
+
+  gps_clean <- .prepare_gps_data(gps_data, gps_vars)
+
+  am_data <- tryCatch(
+    .prepare_antimalarial_data(
+      dhs_kr = dhs_kr,
+      survey_vars = survey_vars,
+      include_survey_vars = FALSE
+    ),
+    error = function(e) {
+      cli::cli_alert_warning(conditionMessage(e))
+      return(NULL)
+    }
+  )
+
+  if (is.null(am_data)) return(list())
+
+  if (all(is.na(am_data$has_antimalarial))) {
+    cli::cli_alert_warning("All antimalarial variables are NA")
+    return(list())
+  }
+
+  # ---- Determine which dictionary entries are requested ----
+
+  dict_specs <- dict[vapply(dict, function(d) d$name %in% indicators, logical(1))]
+
+  # ---- Conditional CSB enrichment (only when needed) ----
+
+  needs_csb <- any(vapply(
+    dict_specs,
+    function(s) !is.null(s$csb_filter),
+    logical(1)
+  ))
+
+  if (needs_csb) {
+    am_data <- tryCatch(
+      .classify_csb_from_h32(am_data),
+      error = function(e) {
+        cli::cli_alert_warning(
+          "CSB classification failed: {conditionMessage(e)}"
+        )
+        NULL
+      }
+    )
+    if (is.null(am_data)) {
+      # Fall back: re-prepare without CSB, skip CSB-dependent indicators
+      am_data <- tryCatch(
+        .prepare_antimalarial_data(
+          dhs_kr = dhs_kr,
+          survey_vars = survey_vars,
+          include_survey_vars = FALSE
+        ),
+        error = function(e) {
+          cli::cli_alert_warning(conditionMessage(e))
+          return(NULL)
+        }
+      )
+      if (is.null(am_data)) return(list())
+      needs_csb <- FALSE
+    }
+  }
+
+  # ---- Dictionary-driven indicator loop ----
+
+  results <- list()
+
+  for (spec in dict_specs) {
+    # Skip CSB-filtered indicators if CSB enrichment failed
+    if (!is.null(spec$csb_filter) && !needs_csb) {
+      cli::cli_alert_warning(
+        "Skipping {.val {spec$name}}: CSB classification not available"
+      )
+      next
+    }
+
+    filtered <- am_data
+
+    # Apply CSB filter if specified
+    if (!is.null(spec$csb_filter)) {
+      col <- spec$csb_filter
+      if (!col %in% names(filtered)) next
+      filtered <- filtered[
+        !is.na(filtered[[col]]) & filtered[[col]] == 1, ,
+        drop = FALSE
+      ]
+    }
+
+    # Filter to non-NA outcome
+    filtered <- filtered[!is.na(filtered[[spec$outcome]]), , drop = FALSE]
+    if (nrow(filtered) == 0) {
+      cli::cli_alert_warning(
+        "No data for {.val {spec$name}} -- skipping"
+      )
+      next
+    }
+
+    # Build binary outcome
+    filtered$.binary <- as.integer(filtered[[spec$outcome]] == 1)
+
+    dt <- .aggregate_to_mbg_clusters(
+      individual_data = filtered,
+      indicator_col = ".binary",
+      gps_clean = gps_clean,
+      result_name = spec$name
+    )
+
+    if (!is.null(dt)) {
+      results[[spec$name]] <- dt
+    }
+  }
+
+  if (length(results) == 0) {
+    cli::cli_alert_warning("No valid antimalarial MBG data could be prepared")
+  }
+
+  results
+}
+
+
+#' Antimalarial MBG Indicator Dictionary
+#'
+#' Returns the full set of standardized indicator specifications for
+#' cluster-level antimalarial MBG output. Each entry defines the outcome
+#' variable and an optional CSB filter column.
+#'
+#' @return List of named lists with fields:
+#'   \code{name}, \code{outcome}, \code{csb_filter}.
+#' @noRd
+.antimalarial_mbg_dictionary <- function() {
+  list(
+    list(
+      name = "antimalarial",
+      outcome = "has_antimalarial",
+      csb_filter = NULL
+    ),
+    list(
+      name = "antimalarial_public",
+      outcome = "has_antimalarial",
+      csb_filter = "csb_public"
+    )
+  )
+}
+
+
+#' Prepare Single Antimalarial Indicator for MBG
+#'
+#' Convenience wrapper around [calc_antimalarial_mbg()] to prepare antimalarial
+#' treatment data for MBG analysis.
+#'
+#' @inheritParams calc_antimalarial_mbg
+#' @param indicator Single indicator name. Default: "antimalarial".
+#'
+#' @return A data.table with columns: cluster_id, indicator, samplesize, x, y
+#' @export
+prep_antimalarial_mbg <- function(
+  dhs_kr,
+  gps_data,
+  indicator = "antimalarial",
+  survey_vars = list(
+    cluster = "v001",
+    age = "hw1",
+    fever = "h22"
+  ),
+  gps_vars = list(
+    cluster = "DHSCLUST",
+    lat = "LATNUM",
+    lon = "LONGNUM"
+  )
+) {
+  result <- calc_antimalarial_mbg(
+    dhs_kr = dhs_kr,
+    gps_data = gps_data,
+    indicators = indicator,
+    survey_vars = survey_vars,
+    gps_vars = gps_vars
+  )
+
+  if (length(result) == 0) {
+    cli::cli_abort("No data returned for indicator {.val {indicator}}")
+  }
+
+  result[[1]]
+}
+
+
+# ---- dhs_helpers_antimalarial.R ----
+
+#' Prepare Antimalarial Data for Analysis
+#'
+#' Shared data cleaning and indicator computation for antimalarial functions.
+#' Used by both calc_antimalarial_dhs_core() and calc_case_management_dhs().
+#'
+#' @param dhs_kr DHS Children's Recode (KR) dataset.
+#' @param survey_vars Named list mapping DHS variable names.
+#' @param include_survey_vars Logical. If TRUE, includes survey design columns.
+#'
+#' @return A data frame of febrile U5 children with columns:
+#'   cluster_id, age_months, received_antimalarial, ml13_vars_found.
+#'   If include_survey_vars = TRUE, also: survey_weight, stratum_id.
+#'
+#' @noRd
+.prepare_antimalarial_data <- function(
+  dhs_kr,
+  survey_vars,
+  include_survey_vars = FALSE
+) {
+  if (!is.data.frame(dhs_kr)) {
+    cli::cli_abort("`dhs_kr` must be a data.frame or tibble.")
+  }
+  if (nrow(dhs_kr) == 0) {
+    cli::cli_abort("`dhs_kr` is empty.")
+  }
+
+  # Auto-detect age variable if specified one is missing
+  # Fallback order: hw1 (anthropometry) -> hc1 (standard KR) -> b8 (current age)
+  if (!survey_vars$age %in% names(dhs_kr)) {
+    age_candidates <- c("hc1", "b8", "hw1")
+    available_age <- intersect(age_candidates, names(dhs_kr))
+
+    if (length(available_age) > 0) {
+      old_age_var <- survey_vars$age
+      survey_vars$age <- available_age[1]
+      cli::cli_alert_info(
+        "Age variable {.var {old_age_var}} not found; using {.var {survey_vars$age}} instead"
+      )
+    }
+  }
+
+  # Check required columns
+  needed <- c(survey_vars$cluster, survey_vars$age, survey_vars$fever)
+  if (include_survey_vars) {
+    needed <- c(needed, survey_vars$weight, survey_vars$stratum)
+  }
+  missing_vars <- setdiff(needed, names(dhs_kr))
+  if (length(missing_vars) > 0) {
+    cli::cli_abort(c(
+      "Required variables not found: {.var {missing_vars}}",
+      "i" = "Check your survey_vars mapping"
+    ))
+  }
+
+  # Auto-detect available antimalarial variables using label-based filtering.
+  # Only include variables whose labels contain actual drug names -- excludes
+  # non-drug response codes ("Don't know", "Other", "No treatment") that would
+  # inflate the antimalarial composite.
+  # Prefer ml13* series (drug-specific, newer surveys);
+  # fall back to h37* series (older DHS surveys use h37a-h for drug-specific treatment).
+  antimalarial_pattern <- paste0(
+    "antimalarial|fansidar|chloroquine|amodiaquine|quinine|",
+    "artemether|artesunate|dihydroartemis|artemisinin|coartem|",
+    "\\bsp\\b|\\bcta\\b|\\bact\\b|mefloquine|piperaquine|lumefantrine"
+  )
+
+  # Label-based detection from original dhs_kr (pre-zap)
+  .detect_am_labels <- function(candidates) {
+    matched <- character(0)
+    for (v in candidates) {
+      lbl <- attr(dhs_kr[[v]], "label")
+      if (is.null(lbl) || !is.character(lbl) ||
+          length(lbl) != 1) next
+      if (grepl(antimalarial_pattern, lbl, ignore.case = TRUE)) {
+        matched <- c(matched, v)
+      }
+    }
+    matched
+  }
+
+  ml13_candidates <- grep("^ml13[a-z]+$", names(dhs_kr), value = TRUE)
+  h37_candidates  <- grep("^h37[a-z]+$", names(dhs_kr), value = TRUE)
+
+  # Stage 1: label-based detection
+  ml13_vars <- .detect_am_labels(ml13_candidates)
+  h37_vars  <- .detect_am_labels(h37_candidates)
+
+  # Stage 2: if no labels matched, fall back to standard drug slots (a-h)
+  if (length(ml13_vars) == 0 && length(h37_vars) == 0) {
+    ml13_vars <- grep("^ml13[a-h]$", names(dhs_kr), value = TRUE)
+    h37_vars  <- grep("^h37[a-h]$", names(dhs_kr), value = TRUE)
+  }
+
+  use_h37_fallback <- FALSE
+
+  if (length(ml13_vars) > 0) {
+    # Check if ml13 series has any positive values (zap labels for safe comparison)
+    ml13_has_data <- any(sapply(ml13_vars, function(v) {
+      vals <- as.vector(haven::zap_labels(dhs_kr[[v]]))
+      any(vals == 1, na.rm = TRUE)
+    }))
+    if (ml13_has_data) {
+      cli::cli_alert_info(
+        "Detected {length(ml13_vars)} ml13 antimalarial variables: {paste(ml13_vars, collapse = ', ')}"
+      )
+    } else if (length(h37_vars) > 0) {
+      h37_has_data <- any(sapply(h37_vars, function(v) {
+        vals <- as.vector(haven::zap_labels(dhs_kr[[v]]))
+        any(vals == 1, na.rm = TRUE)
+      }))
+      if (h37_has_data) {
+        cli::cli_alert_info(
+          "ml13* variables have no positive values; using h37* series which has data: {paste(h37_vars, collapse = ', ')}"
+        )
+        ml13_vars <- character(0)
+        use_h37_fallback <- TRUE
+      } else {
+        cli::cli_alert_info(
+          "Detected {length(ml13_vars)} ml13 antimalarial variables (no positive values found)"
+        )
+      }
+    } else {
+      cli::cli_alert_info(
+        "Detected {length(ml13_vars)} ml13 antimalarial variables (no positive values found)"
+      )
+    }
+  } else if (length(h37_vars) > 0) {
+    cli::cli_alert_info(
+      "No ml13* variables found; using h37* series as fallback: {paste(h37_vars, collapse = ', ')}"
+    )
+    use_h37_fallback <- TRUE
+  } else {
+    cli::cli_abort(c(
+      "No antimalarial treatment variables found in data.",
+      "i" = "Checked for ml13a/ml13b/... (newer surveys) and h37a-h (older surveys).",
+      "i" = "Verify that this survey includes malaria treatment questions."
+    ))
+  }
+
+  if (length(ml13_vars) == 0 && !use_h37_fallback) {
+    cli::cli_abort("No antimalarial treatment variables with data found.")
+  }
+
+  # Zap labels
+  kr <- dhs_kr |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
+
+  # Force indicator columns to numeric (guards against haven character residuals)
+  num_cols <- c(
+    survey_vars$age, survey_vars$fever, survey_vars$alive,
+    if (use_h37_fallback) h37_vars else ml13_vars
+  )
+  for (col in num_cols) {
+    if (!is.null(col) && col %in% names(kr)) {
+      kr[[col]] <- suppressWarnings(as.numeric(as.character(kr[[col]])))
+    }
+  }
+
+  # Build columns
+  kr <- kr |>
+    dplyr::mutate(
+      cluster_id = .data[[survey_vars$cluster]],
+      age_months = .data[[survey_vars$age]],
+      had_fever = .data[[survey_vars$fever]]
+    )
+
+  if (include_survey_vars) {
+    kr <- kr |>
+      dplyr::mutate(
+        survey_weight = .data[[survey_vars$weight]] / 1e6,
+        stratum_id = .data[[survey_vars$stratum]]
+      )
+  }
+
+  # Check alive variable if present
+  has_alive <- !is.null(survey_vars$alive) &&
+    survey_vars$alive %in% names(dhs_kr)
+  if (has_alive) {
+    kr <- kr |>
+      dplyr::mutate(child_alive = .data[[survey_vars$alive]])
+  }
+
+  # Filter to U5 children
+  kr_u5 <- kr |>
+    dplyr::filter(
+      age_months >= 0,
+      age_months <= 59
+    )
+
+  if (has_alive) {
+    kr_u5 <- kr_u5 |>
+      dplyr::filter(child_alive == 1)
+  }
+
+  # Detect fever coding scheme: Some surveys use 0=No/1=Yes, others use 1=No/2=Yes
+  fever_values <- unique(kr_u5$had_fever[!is.na(kr_u5$had_fever)])
+
+  if (length(fever_values) == 0) {
+    cli::cli_abort(
+      "Fever variable has no valid values. Check that {.var {survey_vars$fever}} exists and contains data."
+    )
+  }
+
+  # Determine "Yes" value: if values are strictly {1, 2} or {2}, assume 2=Yes
+  # Otherwise, assume 1=Yes (standard DHS coding)
+  if (all(fever_values %in% c(1, 2)) && 2 %in% fever_values && !0 %in% fever_values) {
+    fever_yes_value <- 2
+    cli::cli_alert_info(
+      "Detected alternative fever coding (1=No, 2=Yes) - using 2 as 'Yes'"
+    )
+  } else {
+    fever_yes_value <- 1
+  }
+
+  # Filter to children with fever
+  kr_fever <- kr_u5 |>
+    dplyr::filter(had_fever == fever_yes_value)
+
+  if (nrow(kr_fever) == 0) {
+    n_with_data <- sum(!is.na(kr_u5$had_fever))
+    cli::cli_abort(c(
+      "No children with fever in the last 2 weeks found.",
+      "i" = "Total U5 children: {nrow(kr_u5)}",
+      "i" = "Children with fever data: {n_with_data}",
+      "i" = "Unique fever values: {paste(sort(fever_values), collapse = ', ')}",
+      "i" = "Expected 'Yes' value: {fever_yes_value}"
+    ))
+  }
+
+  # Create binary antimalarial indicator
+  if (use_h37_fallback) {
+    # h37* series: 1 if ANY drug variable == 1
+    # Each h37x records whether a specific drug was taken for fever/cough
+    h37_matrix <- as.matrix(kr_fever[, h37_vars, drop = FALSE])
+    h37_matrix[!h37_matrix %in% c(0, 1)] <- NA
+    kr_fever$received_antimalarial <- apply(h37_matrix, 1, function(row) {
+      if (any(row == 1, na.rm = TRUE)) return(1)
+      if (any(is.na(row))) return(NA_real_)
+      return(0)
+    })
+    attr(kr_fever, "ml13_vars_found") <- h37_vars
+  } else {
+    # ml13* series: 1 if ANY drug variable == 1
+    ml13_matrix <- as.matrix(kr_fever[, ml13_vars, drop = FALSE])
+    ml13_matrix[!ml13_matrix %in% c(0, 1)] <- NA
+    kr_fever$received_antimalarial <- apply(ml13_matrix, 1, function(row) {
+      if (any(row == 1, na.rm = TRUE)) return(1)
+      if (any(is.na(row))) return(NA_real_)
+      return(0)
+    })
+    attr(kr_fever, "ml13_vars_found") <- ml13_vars
+  }
+
+  if (all(is.na(kr_fever$received_antimalarial))) {
+    cli::cli_abort("All antimalarial variables are NA for febrile children")
+  }
+
+  # Create binary indicator for survey estimation
+  kr_fever <- kr_fever |>
+    dplyr::mutate(
+      has_antimalarial = dplyr::if_else(
+        received_antimalarial == 1, 1, 0, missing = NA_real_
+      )
+    )
+
+  cli::cli_alert_info(
+    "Found {format(nrow(kr_fever), big.mark = ',')} febrile children under 5"
+  )
+
+  kr_fever
+}
+
+

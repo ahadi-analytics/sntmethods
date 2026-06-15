@@ -1,3 +1,11 @@
+# anc indicator
+#
+# Merged from: dhs_calc_anc.R dhs_calc_anc_mbg.R dhs_helpers_anc.R 
+# Contains the survey-weighted calc, MBG cluster-prep, and indicator-
+# specific helpers for this family.
+
+# ---- dhs_calc_anc.R ----
+
 #' Calculate ANC Coverage from DHS Data
 #'
 #' Estimates Antenatal Care (ANC) attendance rates using survey-weighted
@@ -337,3 +345,275 @@ anc_dictionary <- function() {
     denominator_code        = vapply(conds, `[[`, character(1), "denom_code")
   )
 }
+
+
+# ---- dhs_calc_anc_mbg.R ----
+
+#' Prepare ANC Data for MBG Analysis
+#'
+#' Prepares cluster-level Antenatal Care (ANC) attendance data for Model-Based
+#' Geostatistics (MBG) analysis. Calculates the proportion of women who had
+#' at least N ANC visits during their most recent pregnancy.
+#'
+#' @details
+#' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/anc_dhs.yml}
+#'
+#' @param dhs_ir DHS Individual Recode dataset.
+#' @param gps_data DHS GPS dataset with cluster coordinates.
+#' @param indicators Character vector of indicators to calculate:
+#'   \itemize{
+#'     \item "anc_1plus": At least 1 ANC visit
+#'     \item "anc_2plus": At least 2 ANC visits
+#'     \item "anc_3plus": At least 3 ANC visits
+#'     \item "anc_4plus": At least 4 ANC visits
+#'     \item "anc_8plus": At least 8 ANC visits (2016 WHO recommendation)
+#'   }
+#'   Default: c("anc_1plus", "anc_2plus", "anc_3plus", "anc_4plus").
+#' @param birth_window_months Number of months to look back for births.
+#'   Default: 36 (3 years). Max 60 (5 years).
+#' @param survey_vars Named list mapping DHS variable names.
+#' @param gps_vars Named list for GPS variable mapping.
+#'
+#' @return A list of data.tables (one per indicator), each with columns:
+#'   \itemize{
+#'     \item cluster_id: Cluster identifier
+#'     \item indicator: Number of women meeting threshold
+#'     \item samplesize: Total number of women with recent births
+#'     \item x: Longitude
+#'     \item y: Latitude
+#'   }
+#'
+#' @details
+#' This function uses data on most recent births within the specified window.
+#' ANC visits are measured using m14 (number of antenatal visits).
+#'
+#' @examples
+#' \dontrun{
+#' anc_mbg <- calc_anc_mbg(
+#'   dhs_ir = ir_data,
+#'   gps_data = gps_data,
+#'   indicators = c("anc_1plus", "anc_4plus")
+#' )
+#' }
+#'
+#' @export
+calc_anc_mbg <- function(
+  dhs_ir,
+  gps_data,
+  indicators = c("anc_1plus", "anc_2plus", "anc_3plus", "anc_4plus"),
+  birth_window_months = 36,
+  survey_vars = list(
+    cluster = "v001",
+    interview_date = "v008",
+    birth_date = "b3_01",
+    anc_visits = "m14_1"
+  ),
+  gps_vars = list(
+    cluster = "DHSCLUST",
+    lat = "LATNUM",
+    lon = "LONGNUM"
+  )
+) {
+  # ---- Input validation ----
+
+  if (!is.data.frame(gps_data)) {
+    cli::cli_abort("`gps_data` must be a data.frame or tibble")
+  }
+
+  valid_indicators <- c("anc_1plus", "anc_2plus", "anc_3plus", "anc_4plus", "anc_8plus")
+  invalid <- setdiff(indicators, valid_indicators)
+  if (length(invalid) > 0) {
+    cli::cli_abort("Invalid indicators: {.val {invalid}}")
+  }
+
+  # ---- Prepare GPS data ----
+
+  gps_clean <- .prepare_gps_data(gps_data, gps_vars)
+
+  # ---- Prepare IR data ----
+
+  ir <- .prepare_anc_data(
+    dhs_ir, survey_vars, birth_window_months,
+    include_survey_vars = FALSE
+  )
+  if (is.null(ir)) return(NULL)
+
+  # ---- Aggregate to cluster level ----
+
+  indicator_map <- list(
+    anc_1plus = "has_anc1",
+    anc_2plus = "has_anc2",
+    anc_3plus = "has_anc3",
+    anc_4plus = "has_anc4",
+    anc_8plus = "has_anc8"
+  )
+
+  results <- list()
+
+  for (ind in indicators) {
+    cluster_dt <- .aggregate_to_mbg_clusters(
+      ir, indicator_map[[ind]], gps_clean, ind
+    )
+    if (!is.null(cluster_dt)) {
+      results[[ind]] <- cluster_dt
+    }
+  }
+
+  if (length(results) == 0) return(NULL)
+
+  results
+}
+
+
+#' Prepare Single ANC Indicator for MBG
+#'
+#' Simplified function to prepare a single ANC indicator.
+#'
+#' @inheritParams calc_anc_mbg
+#' @param threshold Minimum number of ANC visits (1, 4, or 8). Default: 4.
+#'
+#' @return A data.table with columns: cluster_id, indicator, samplesize, x, y
+#'
+#' @export
+prep_anc_mbg <- function(
+  dhs_ir,
+  gps_data,
+  threshold = 4,
+  birth_window_months = 36,
+  survey_vars = list(
+    cluster = "v001",
+    interview_date = "v008",
+    birth_date = "b3_01",
+    anc_visits = "m14_1"
+  ),
+  gps_vars = list(
+    cluster = "DHSCLUST",
+    lat = "LATNUM",
+    lon = "LONGNUM"
+  )
+) {
+  indicator_name <- paste0("anc_", threshold, "plus")
+
+  result <- calc_anc_mbg(
+    dhs_ir = dhs_ir,
+    gps_data = gps_data,
+    indicators = indicator_name,
+    birth_window_months = birth_window_months,
+    survey_vars = survey_vars,
+    gps_vars = gps_vars
+  )
+
+  result[[1]]
+}
+
+
+# ---- dhs_helpers_anc.R ----
+
+#' Prepare ANC Data for Analysis
+#'
+#' Shared data cleaning and indicator computation for ANC functions.
+#' Used by both calc_anc_dhs_core() and calc_anc_mbg().
+#'
+#' @param dhs_ir DHS Individual Recode dataset.
+#' @param survey_vars Named list mapping DHS variable names.
+#' @param birth_window_months Months to look back for births.
+#' @param include_survey_vars Logical. If TRUE, includes survey design columns.
+#'
+#' @return A data frame of eligible women with columns:
+#'   cluster_id, anc_visits, and binary indicators:
+#'   has_anc1, has_anc2, has_anc3, has_anc4, has_anc8.
+#'   If include_survey_vars = TRUE, also: survey_weight, stratum_id.
+#'
+#' @noRd
+.prepare_anc_data <- function(
+  dhs_ir,
+  survey_vars,
+  birth_window_months = 36,
+  include_survey_vars = FALSE
+) {
+  if (!is.data.frame(dhs_ir)) {
+    cli::cli_abort("`dhs_ir` must be a data.frame or tibble")
+  }
+  if (nrow(dhs_ir) == 0) {
+    cli::cli_abort("`dhs_ir` is empty.")
+  }
+
+  if (birth_window_months < 1 || birth_window_months > 60) {
+    cli::cli_abort("`birth_window_months` must be between 1 and 60")
+  }
+
+  # Check required columns
+  required_cols <- c(survey_vars$cluster, survey_vars$interview_date,
+                     survey_vars$birth_date, survey_vars$anc_visits)
+  if (include_survey_vars) {
+    required_cols <- c(required_cols, survey_vars$weight, survey_vars$stratum)
+  }
+  missing_cols <- setdiff(required_cols, names(dhs_ir))
+  if (length(missing_cols) > 0) {
+    cli::cli_warn(
+      "ANC required columns not found: {.var {missing_cols}}; ANC not available for this survey"
+    )
+    return(NULL)
+  }
+
+  ir <- dhs_ir |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), as.vector)) |>
+    dplyr::mutate(
+      cluster_id = .data[[survey_vars$cluster]],
+      interview_cmc = .data[[survey_vars$interview_date]],
+      birth_cmc = .data[[survey_vars$birth_date]],
+      anc_visits = .data[[survey_vars$anc_visits]]
+    )
+
+  if (include_survey_vars) {
+    ir <- ir |>
+      dplyr::mutate(
+        survey_weight = .data[[survey_vars$weight]] / 1e6,
+        stratum_id = .data[[survey_vars$stratum]]
+      )
+  }
+
+  # Filter to recent births
+  ir <- ir |>
+    dplyr::filter(
+      !is.na(birth_cmc),
+      !is.na(interview_cmc)
+    ) |>
+    dplyr::mutate(
+      months_since_birth = interview_cmc - birth_cmc
+    ) |>
+    dplyr::filter(
+      months_since_birth >= 0,
+      months_since_birth <= birth_window_months
+    )
+
+  # Filter valid ANC responses (98 = "don't know")
+  ir <- ir |>
+    dplyr::filter(
+      !is.na(anc_visits),
+      anc_visits < 98
+    )
+
+  if (nrow(ir) == 0) {
+    cli::cli_abort("No eligible women with valid ANC data found")
+  }
+
+  cli::cli_alert_info(
+    "Found {format(nrow(ir), big.mark = ',')} women with births in last {birth_window_months} months"
+  )
+
+  # Calculate indicators
+  ir <- ir |>
+    dplyr::mutate(
+      has_anc1 = as.integer(anc_visits >= 1),
+      has_anc2 = as.integer(anc_visits >= 2),
+      has_anc3 = as.integer(anc_visits >= 3),
+      has_anc4 = as.integer(anc_visits >= 4),
+      has_anc8 = as.integer(anc_visits >= 8)
+    )
+
+  ir
+}
+
+

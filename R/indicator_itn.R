@@ -1,3 +1,11 @@
+# itn indicator
+#
+# Merged from: dhs_calc_itn.R dhs_calc_itn_mbg.R dhs_helpers_itn.R 
+# Contains the survey-weighted calc, MBG cluster-prep, and indicator-
+# specific helpers for this family.
+
+# ---- dhs_calc_itn.R ----
+
 #' Calculate ITN Indicators from DHS Data
 #'
 #' Computes the full set of ITN indicators
@@ -1197,3 +1205,531 @@ itn_dictionary <- function() {
 
   conditions
 }
+
+
+# ---- dhs_calc_itn_mbg.R ----
+
+#' Prepare ITN Data for MBG Analysis
+#'
+#' Prepares cluster-level ITN ownership, access, and use data for Model-Based
+#' Geostatistics (MBG) analysis. Aggregates to cluster counts WITHOUT survey
+#' weights - MBG handles spatial smoothing internally.
+#'
+#' Uses a dictionary-driven approach matching the indicator codes from
+#' \code{\link{calc_itn_dhs}}. The dictionary mirrors the DHS
+#' \code{.itn_conditions()} -- same outcome variables, same filters, same data
+#' sources (HR vs PR).
+#'
+#' @details
+#' Methodology: \url{https://github.com/ahadi-analytics/sntmethods/blob/master/inst/methods/itn_dhs.yml}
+#'
+#' @param dhs_hr DHS Household Records dataset.
+#' @param dhs_pr DHS Person Records dataset.
+#' @param gps_data DHS GPS dataset with cluster coordinates.
+#' @param indicators Character vector of indicators to calculate. Options
+#'   from \code{.itn_mbg_dictionary()}:
+#'   \itemize{
+#'     \item \code{"with_itn"}: Households with at least one ITN (HR)
+#'     \item \code{"enough_itn"}: Households with enough ITNs for every 2
+#'       people (HR)
+#'     \item \code{"access_itn"}: Population with access to ITN -- binary
+#'       indicator (PR)
+#'     \item \code{"use_itn"}: Population that used ITN last night (PR)
+#'     \item \code{"use_itn_chu5"}: Under-5 children that used ITN (PR)
+#'     \item \code{"use_itn_5_10"}: Children 5-9 years that used ITN (PR)
+#'     \item \code{"use_itn_10_20"}: Adolescents 10-19 years that used ITN (PR)
+#'     \item \code{"use_itn_20plus"}: Adults 20+ that used ITN (PR)
+#'     \item \code{"use_itn_preg"}: Pregnant women that used ITN (PR)
+#'     \item \code{"use_itn_if_access"}: Of those with access, proportion that
+#'       used ITN (PR)
+#'   }
+#'   Default: all indicators.
+#' @param survey_vars Named list mapping DHS variable names.
+#' @param gps_vars Named list for GPS variable mapping.
+#' @param seed Deprecated. Previously used for probabilistic access assignment.
+#'   Access is now calculated deterministically following standard DHS methodology.
+#'
+#' @return A list of data.tables (one per indicator), each with columns:
+#'   \itemize{
+#'     \item cluster_id: Cluster identifier
+#'     \item indicator: Numerator count
+#'     \item samplesize: Denominator count
+#'     \item x: Longitude
+#'     \item y: Latitude
+#'   }
+#'
+#' @details
+#' This function prepares data for MBG spatial modeling. Unlike the survey-
+#' weighted \code{calc_itn_dhs()} function, this uses simple cluster-level counts.
+#'
+#' ITN access is calculated using the standard DHS deterministic assignment method:
+#' \enumerate{
+#'   \item Calculate potential users per household: min(ITNs * 2, household_size)
+#'   \item Sort individuals within each household by ITN use (users first)
+#'   \item Assign access to the first N individuals where N = potential_users
+#' }
+#'
+#' This method guarantees that use <= access at the individual level, since
+#' anyone who used an ITN is prioritised for access assignment.
+#'
+#' @examples
+#' \dontrun{
+#' itn_mbg <- calc_itn_mbg(
+#'   dhs_hr = hr_data,
+#'   dhs_pr = pr_data,
+#'   gps_data = gps_data,
+#'   indicators = c("access_itn", "use_itn_chu5")
+#' )
+#' }
+#'
+#' @seealso [calc_itn_dhs()] for survey-weighted estimates,
+#'   `.itn_mbg_dictionary()` for indicator definitions
+#' @export
+calc_itn_mbg <- function(
+  dhs_hr,
+  dhs_pr,
+  gps_data,
+  indicators = NULL,
+  survey_vars = list(
+    cluster = "hv001",
+    hhid = "hhid",
+    hhsize = "hv013",
+    age = "hv105",
+    sex = "hv104",
+    pregnant = "hml18",
+    itn_use = "hml12",
+    itn_prefix = "hml10_",
+    itn_treated_prefix = "hml7_"
+  ),
+  gps_vars = list(
+    cluster = "DHSCLUST",
+    lat = "LATNUM",
+    lon = "LONGNUM"
+  ),
+  seed = NULL
+) {
+  # ---- Input validation ----
+
+  if (!is.data.frame(dhs_hr)) cli::cli_abort("`dhs_hr` must be a data.frame or tibble")
+  if (!is.data.frame(dhs_pr)) cli::cli_abort("`dhs_pr` must be a data.frame or tibble")
+  if (!is.data.frame(gps_data)) cli::cli_abort("`gps_data` must be a data.frame or tibble")
+
+  dict <- .itn_mbg_dictionary()
+  dict_names <- vapply(dict, `[[`, character(1), "name")
+
+  # Default: all indicators
+  if (is.null(indicators)) {
+    indicators <- dict_names
+  }
+
+  invalid <- setdiff(indicators, dict_names)
+  if (length(invalid) > 0) {
+    cli::cli_abort("Invalid indicators: {.val {invalid}}")
+  }
+
+  # Filter dictionary to requested indicators
+  dict_specs <- dict[vapply(dict, function(d) d$name %in% indicators, logical(1))]
+
+  # ---- Prepare GPS data ----
+
+  gps_clean <- .prepare_gps_data(gps_data, gps_vars)
+
+  # ---- Prepare HR data (household level) ----
+
+  hr <- .prepare_itn_household_data(dhs_hr, survey_vars, include_survey_vars = FALSE)
+
+  if (is.null(hr)) {
+    return(NULL)
+  }
+
+  # Add sufficient nets indicator for enough_itn (1 if n_itns * 2 >= hh_size)
+  hr <- hr |>
+    dplyr::mutate(
+      hh_sufficient_nets = as.integer(n_itns >= (hh_size / 2))
+    )
+
+  # ---- Prepare PR data (individual level with deterministic access) ----
+
+  pr <- .prepare_itn_person_data(dhs_pr, hr, survey_vars, include_survey_vars = FALSE)
+
+  # ---- Enrich PR data with derived columns ----
+
+  pr <- pr |>
+    dplyr::mutate(
+      # Binary access indicator (MBG needs binary, not ratio)
+      itn_access_ind = as.integer(has_access == 1),
+      # Under-5 flag
+      is_under5 = as.integer(age < 5),
+      # Pregnant woman flag
+      is_pregnant_woman = as.integer(sex == 2 & is_pregnant == 1),
+      # Age group for age-specific use indicators
+      age_group = dplyr::case_when(
+        age >= 5  & age < 10 ~ "5_10",
+        age >= 10 & age < 20 ~ "10_20",
+        age >= 20            ~ "20plus",
+        TRUE                 ~ NA_character_
+      )
+    )
+
+  # ---- Dictionary-driven indicator loop ----
+
+  results <- list()
+
+  for (spec in dict_specs) {
+    # Select the right data source
+    src <- if (spec$data_source == "hr") hr else pr
+
+    # Apply filter
+    filtered <- src
+    if (!is.null(spec$filter_col)) {
+      col <- spec$filter_col
+      val <- spec$filter_val
+      if (!col %in% names(filtered)) {
+        cli::cli_alert_warning("Column {.var {col}} not found for {.val {spec$name}} - skipping")
+        next
+      }
+      filtered <- filtered[
+        !is.na(filtered[[col]]) & filtered[[col]] == val, ,
+        drop = FALSE
+      ]
+    }
+
+    # Check outcome variable exists
+    outcome_col <- spec$outcome
+    if (!outcome_col %in% names(filtered)) {
+      cli::cli_alert_warning("Outcome {.var {outcome_col}} not found for {.val {spec$name}} - skipping")
+      next
+    }
+
+    # Drop NAs in outcome
+    filtered <- filtered[!is.na(filtered[[outcome_col]]), , drop = FALSE]
+
+    if (nrow(filtered) == 0) {
+      cli::cli_alert_warning("No data for {.val {spec$name}} - skipping")
+      next
+    }
+
+    dt <- .aggregate_to_mbg_clusters(filtered, outcome_col, gps_clean, spec$name)
+    if (!is.null(dt)) {
+      results[[spec$name]] <- dt
+    }
+  }
+
+  if (length(results) == 0) {
+    cli::cli_abort("No valid MBG data could be prepared")
+  }
+
+  results
+}
+
+
+# =============================================================================
+# ITN MBG Indicator Dictionary
+# =============================================================================
+
+#' ITN MBG Indicator Dictionary
+#'
+#' Returns the full set of indicator specifications for cluster-level MBG output.
+#' Each entry defines the indicator name, data source (HR or PR), outcome column,
+#' and optional filter.
+#'
+#' Mirrors the DHS \code{.itn_conditions()} -- same outcome variables, same
+#' filters, same data sources. The MBG dictionary uses simple column-based
+#' filtering instead of quoted expressions.
+#'
+#' @return List of named lists with fields: \code{name}, \code{data_source},
+#'   \code{outcome}, \code{filter_col}, \code{filter_val}.
+#' @noRd
+.itn_mbg_dictionary <- function() {
+  list(
+    # Household-level (same as DHS WITH_ITN, ENOUGH_ITN)
+    list(name = "with_itn",          data_source = "hr", outcome = "has_itn",
+         filter_col = NULL, filter_val = NULL),
+    list(name = "enough_itn",        data_source = "hr", outcome = "hh_sufficient_nets",
+         filter_col = NULL, filter_val = NULL),
+
+    # Person-level (same as DHS ACCESS_ITN, USE_ITN_*)
+    list(name = "access_itn",        data_source = "pr", outcome = "itn_access_ind",
+         filter_col = NULL, filter_val = NULL),
+    list(name = "use_itn",           data_source = "pr", outcome = "itn_used",
+         filter_col = NULL, filter_val = NULL),
+    list(name = "use_itn_chu5",      data_source = "pr", outcome = "itn_used",
+         filter_col = "is_under5", filter_val = 1),
+    list(name = "use_itn_preg",      data_source = "pr", outcome = "itn_used",
+         filter_col = "is_pregnant_woman", filter_val = 1),
+    list(name = "use_itn_5_10",      data_source = "pr", outcome = "itn_used",
+         filter_col = "age_group", filter_val = "5_10"),
+    list(name = "use_itn_10_20",     data_source = "pr", outcome = "itn_used",
+         filter_col = "age_group", filter_val = "10_20"),
+    list(name = "use_itn_20plus",    data_source = "pr", outcome = "itn_used",
+         filter_col = "age_group", filter_val = "20plus"),
+    list(name = "use_itn_if_access", data_source = "pr", outcome = "itn_used",
+         filter_col = "has_access", filter_val = 1)
+  )
+}
+
+
+#' Prepare Single ITN Indicator for MBG
+#'
+#' Simplified function to prepare a single ITN indicator for MBG.
+#'
+#' @inheritParams calc_itn_mbg
+#' @param indicator Single indicator name. Default: "access_itn".
+#'
+#' @return A data.table with columns: cluster_id, indicator, samplesize, x, y
+#'
+#' @export
+prep_itn_mbg <- function(
+  dhs_hr,
+  dhs_pr,
+  gps_data,
+  indicator = "access_itn",
+  survey_vars = list(
+    cluster = "hv001",
+    hhid = "hhid",
+    hhsize = "hv013",
+    age = "hv105",
+    sex = "hv104",
+    pregnant = "hml18",
+    itn_use = "hml12",
+    itn_prefix = "hml10_",
+    itn_treated_prefix = "hml7_"
+  ),
+  gps_vars = list(
+    cluster = "DHSCLUST",
+    lat = "LATNUM",
+    lon = "LONGNUM"
+  ),
+  seed = NULL
+) {
+  result <- calc_itn_mbg(
+    dhs_hr = dhs_hr,
+    dhs_pr = dhs_pr,
+    gps_data = gps_data,
+    indicators = indicator,
+    survey_vars = survey_vars,
+    gps_vars = gps_vars,
+    seed = seed
+  )
+
+  result[[1]]
+}
+
+
+# ---- dhs_helpers_itn.R ----
+
+#' Prepare ITN Household Data for Analysis
+#'
+#' Shared household-level ITN data preparation.
+#' Used by both calc_itn_dhs_core() and calc_itn_mbg().
+#'
+#' Detects ITN net variables using a fallback chain:
+#' 1. `hml10_*` prefix (per-net LLIN/ITN flag, standard DHS-7+)
+#' 2. Single `hml10` variable (some MIS surveys)
+#' 3. `hml7_*` prefix (months since net was dipped in insecticide; a net
+#'    treated within 12 months is counted as an ITN)
+#' If none are found, returns NULL with a warning.
+#'
+#' @param dhs_hr DHS Household Records dataset.
+#' @param survey_vars Named list mapping DHS variable names.
+#' @param include_survey_vars Logical. If TRUE, includes survey design columns.
+#'
+#' @return A data frame of households with columns:
+#'   cluster_id, hhid, hh_size, n_itns, has_itn, potential_users.
+#'   If include_survey_vars = TRUE, also: survey_weight, stratum_id.
+#'   Returns NULL if no ITN variables are found.
+#'
+#' @noRd
+.prepare_itn_household_data <- function(
+  dhs_hr,
+  survey_vars,
+  include_survey_vars = FALSE
+) {
+  if (!is.data.frame(dhs_hr)) {
+    cli::cli_abort("`dhs_hr` must be a data.frame or tibble")
+  }
+
+  # --- Detect ITN variables using fallback chain ---
+  itn_prefix <- survey_vars$itn_prefix %||% "hml10_"
+  treated_prefix <- survey_vars$itn_treated_prefix %||% "hml7_"
+
+  # Strategy 1: hml10_* prefix (standard per-net LLIN/ITN flag)
+  itn_vars <- names(dhs_hr)[grepl(paste0("^", itn_prefix), names(dhs_hr))]
+  itn_method <- "hml10_prefix"
+
+  # Strategy 2: single hml10 variable (some MIS surveys)
+  if (length(itn_vars) == 0 && "hml10" %in% names(dhs_hr)) {
+    itn_vars <- "hml10"
+    itn_method <- "hml10_single"
+  }
+
+  # Strategy 3: hml7_* prefix (conventionally treated nets)
+  treated_vars <- character(0)
+  if (length(itn_vars) == 0) {
+    treated_vars <- names(dhs_hr)[grepl(paste0("^", treated_prefix), names(dhs_hr))]
+    if (length(treated_vars) > 0) {
+      itn_method <- "hml7_treated"
+      cli::cli_alert_info(
+        "No {.var {itn_prefix}} variables found; using {length(treated_vars)} {.var {treated_prefix}} variable{?s} as ITN fallback (treated within 12 months)"
+      )
+    }
+  }
+
+  # No ITN variables found at all -- graceful skip
+  if (length(itn_vars) == 0 && length(treated_vars) == 0) {
+    cli::cli_warn(c(
+      "No ITN variables found in HR data.",
+      "i" = "Checked: {.var {itn_prefix}} prefix, single {.var hml10}, {.var {treated_prefix}} prefix.",
+      "i" = "ITN indicators will be skipped for this survey."
+    ))
+    return(NULL)
+  }
+
+  if (itn_method != "hml7_treated") {
+    cli::cli_alert_info(
+      "Found {length(itn_vars)} ITN variable{?s} (method: {itn_method})"
+    )
+  }
+
+  hr <- dhs_hr |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
+
+  # Force ITN columns to numeric (guards against haven character residuals)
+  itn_num_cols <- if (itn_method == "hml7_treated") treated_vars else itn_vars
+  for (col in itn_num_cols) {
+    hr[[col]] <- suppressWarnings(as.numeric(as.character(hr[[col]])))
+  }
+
+  # Count ITNs per household based on detection method
+  if (itn_method == "hml7_treated") {
+    # Conventionally treated nets: count nets dipped within last 12 months
+    hr <- hr |>
+      dplyr::mutate(
+        n_itns = dplyr::pick(dplyr::all_of(treated_vars)) |>
+          dplyr::mutate(dplyr::across(
+            dplyr::everything(),
+            ~ dplyr::if_else(!is.na(.) & . > 0 & . <= 12, 1L, 0L)
+          )) |>
+          rowSums(na.rm = TRUE)
+      )
+  } else {
+    # Standard: hml10_* or single hml10 (value 1 = LLIN/ITN)
+    hr <- hr |>
+      dplyr::mutate(
+        n_itns = dplyr::pick(dplyr::all_of(itn_vars)) |>
+          dplyr::mutate(dplyr::across(
+            dplyr::everything(),
+            ~ dplyr::if_else(. == 1, 1L, 0L)
+          )) |>
+          rowSums(na.rm = TRUE)
+      )
+  }
+
+  hr <- hr |>
+    dplyr::transmute(
+      cluster_id = .data[[survey_vars$cluster]],
+      hhid = .data[[survey_vars$hhid]],
+      hh_size = .data[[survey_vars$hhsize]],
+      n_itns = n_itns,
+      has_itn = as.integer(n_itns >= 1),
+      potential_users = pmin(n_itns * 2, hh_size)
+    )
+
+  if (include_survey_vars && !is.null(survey_vars$weight)) {
+    hr <- hr |>
+      dplyr::mutate(
+        survey_weight = dhs_hr[[survey_vars$weight]] / 1e6,
+        stratum_id = dhs_hr[[survey_vars$stratum]]
+      )
+  }
+
+  hr
+}
+
+
+#' Prepare ITN Person Data for Analysis
+#'
+#' Shared person-level ITN data preparation including deterministic access
+#' assignment. Used by both calc_itn_dhs_core() and calc_itn_mbg().
+#'
+#' @param dhs_pr DHS Person Records dataset.
+#' @param hr_data Prepared household data from .prepare_itn_household_data().
+#' @param survey_vars Named list mapping DHS variable names.
+#' @param include_survey_vars Logical. If TRUE, includes survey design columns.
+#'
+#' @return A data frame with individual-level ITN data including:
+#'   cluster_id, hhid, age, sex, itn_used, is_pregnant, has_access.
+#'
+#' @noRd
+.prepare_itn_person_data <- function(
+  dhs_pr,
+  hr_data,
+  survey_vars,
+  include_survey_vars = FALSE
+) {
+  if (!is.data.frame(dhs_pr)) {
+    cli::cli_abort("`dhs_pr` must be a data.frame or tibble")
+  }
+
+  pr <- dhs_pr |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), haven::zap_labels)) |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), as.vector))
+
+  # Force indicator columns to numeric (guards against haven character residuals)
+  for (col in c(survey_vars$itn_use, survey_vars$age, survey_vars$pregnant)) {
+    if (!is.null(col) && col %in% names(pr)) {
+      pr[[col]] <- suppressWarnings(as.numeric(as.character(pr[[col]])))
+    }
+  }
+
+  pr <- pr |>
+    dplyr::transmute(
+      cluster_id = .data[[survey_vars$cluster]],
+      hhid = .data[[survey_vars$hhid]],
+      age = .data[[survey_vars$age]],
+      sex = .data[[survey_vars$sex]],
+      itn_used = dplyr::if_else(
+        .data[[survey_vars$itn_use]] == 1L,
+        1L, 0L, missing = 0L
+      ),
+      is_pregnant = if (survey_vars$pregnant %in% names(dhs_pr)) {
+        dplyr::if_else(.data[[survey_vars$pregnant]] == 1, 1L, 0L, missing = 0L)
+      } else {
+        0L
+      }
+    )
+
+  if (include_survey_vars && !is.null(survey_vars$weight)) {
+    pr <- pr |>
+      dplyr::mutate(
+        survey_weight = dhs_pr[[survey_vars$weight]] / 1e6,
+        stratum_id = dhs_pr[[survey_vars$stratum]]
+      )
+  }
+
+  # Merge household ITN info
+  pr <- pr |>
+    dplyr::left_join(
+      hr_data |> dplyr::select(cluster_id, hhid, hh_size, n_itns, potential_users),
+      by = c("cluster_id", "hhid")
+    )
+
+  # Deterministic access assignment (standard DHS methodology)
+  pr <- pr |>
+    dplyr::arrange(cluster_id, hhid, dplyr::desc(itn_used)) |>
+    dplyr::group_by(cluster_id, hhid) |>
+    dplyr::mutate(
+      person_index = dplyr::row_number(),
+      has_access = dplyr::if_else(
+        !is.na(potential_users) & !is.na(hh_size) &
+          person_index <= pmin(potential_users, hh_size),
+        1L, 0L
+      )
+    ) |>
+    dplyr::ungroup()
+
+  pr
+}
+
+
