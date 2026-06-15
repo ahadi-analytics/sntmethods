@@ -6,8 +6,6 @@ Authors@R:
            role = c("aut", "cre"),
            email = "myusuf@appliedhealthanalytics.org",
            comment = c(ORCID = "0000-0002-9339-4613"))
-Author: Mohamed A. Yusuf [aut, cre]
-Maintainer: Mohamed A. Yusuf <myusuf@appliedhealthanalytics.org>
 Description: Provides core analytical functions for Sub-National Tailoring (SNT)
     processes, including incidence estimation, imputation of routine health data,
     campaign performance metrics, and small-area statistical methods. Designed as
@@ -15,7 +13,7 @@ Description: Provides core analytical functions for Sub-National Tailoring (SNT)
     methods that produce reproducible, standardized outputs for malaria and related
     programmatic analyses.
 License: MIT + file LICENSE
-URL: https://github.com/ahadi-analytics/sntmethods
+URL: https://github.com/ahadi-analytics/sntmethods, https://ahadi-analytics.github.io/sntmethods/
 BugReports: https://github.com/ahadi-analytics/sntmethods/issues
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
@@ -25,12 +23,12 @@ Imports:
     cli (>= 3.6.5),
     DHS.rates,
     dplyr (>= 1.1.4),
+    ggplot2 (>= 4.0.0),
     haven (>= 2.5.5),
     lifecycle (>= 1.0.0),
     rlang (>= 1.1.6),
     sntutils (>= 1.11.6),
-    survey (>= 4.4.8),
-    ggplot2 (>= 4.0.0),
+    survey (>= 4.4.8)
 Suggests:
     here (>= 1.0.2),
     httr (>= 1.4.0),
