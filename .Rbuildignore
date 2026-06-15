@@ -16,3 +16,4 @@ src
 ^install_sysdeps\.sh$
 ^docs$
 ^_pkgdown\.yml$
+^pkgdown$

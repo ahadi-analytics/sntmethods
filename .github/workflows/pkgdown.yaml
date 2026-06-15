@@ -57,6 +57,13 @@ jobs:
         run: pkgdown::build_site_github_pages(new_process = FALSE, install = FALSE)
         shell: Rscript {0}
 
+      - name: Drop agent/dev pages pkgdown renders by default
+        # pkgdown 2.x renders every root + .github markdown file and offers no
+        # config to exclude them. Strip the agent-instruction pages so they
+        # never reach the published site.
+        run: rm -f docs/CLAUDE.html docs/AGENTS.html
+        shell: bash
+
       - name: Deploy to GitHub pages
         uses: JamesIves/github-pages-deploy-action@v4.5.0
         with:
