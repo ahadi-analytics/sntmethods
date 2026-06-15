@@ -41,5 +41,11 @@ renv/python/
 *.swo
 .~lock.*
 
+# Agent/assistant config — never commit, at any depth.
+# Slash-less patterns match by basename at every level (file or directory).
 CLAUDE.md
-/.claude
+AGENTS.md
+.claude
+
+/.quarto/
+**/*.quarto_ipynb
