@@ -1,0 +1,69 @@
+# Prepare Single PfPR Indicator for MBG
+
+Simplified function to prepare a single PfPR indicator for MBG. Returns
+a single data.table rather than a list.
+
+## Usage
+
+``` r
+prep_pfpr_mbg(
+  dhs_pr,
+  gps_data,
+  indicator = "pfpr_rdt_u5",
+  age_min = 6,
+  age_max = 59,
+  survey_vars = list(cluster = "hv001", age = "hc1", present = "hv103", mother = "hv042",
+    rdt = "hml35", mic = "hml32"),
+  gps_vars = list(cluster = "DHSCLUST", lat = "LATNUM", lon = "LONGNUM")
+)
+```
+
+## Arguments
+
+- dhs_pr:
+
+  DHS Person Records dataset (data.frame or tibble).
+
+- gps_data:
+
+  DHS GPS dataset with cluster coordinates.
+
+- indicator:
+
+  Single indicator code (e.g., `"pfpr_rdt_u5"`). Also accepts legacy
+  `test_type` values (`"rdt"`, `"mic"`) combined with
+  `age_min`/`age_max`.
+
+- age_min:
+
+  Minimum age in months (inclusive). Default: 6. Only used when
+  `indicator` is a legacy test_type name.
+
+- age_max:
+
+  Maximum age in months (inclusive). Default: 59. Only used when
+  `indicator` is a legacy test_type name.
+
+- survey_vars:
+
+  Named list mapping DHS variable names. Required keys:
+
+  - cluster: Cluster ID (default: "hv001")
+
+  - age: Age in months (default: "hc1")
+
+  - present: Present in household (default: "hv103")
+
+  - mother: Mother listed in household (default: "hv042")
+
+  - rdt: RDT result variable (default: "hml35")
+
+  - mic: Microscopy result variable (default: "hml32")
+
+- gps_vars:
+
+  Named list for GPS variable mapping.
+
+## Value
+
+A tibble with columns: cluster_id, indicator, samplesize, x, y

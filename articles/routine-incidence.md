@@ -1,0 +1,132 @@
+# Routine data: incidence & TPR
+
+This workflow estimates malaria incidence from routine health-facility
+(DHIS2-style) data. It has two stages that feed each other: compute the
+**test positivity rate (TPR)** with structured fallbacks, then run the
+**N0-N5 incidence cascade** that progressively adjusts crude case counts
+for testing gaps, reporting completeness, and care-seeking behaviour.
+
+A runnable end-to-end example ships at
+[`inst/scripts/example_tpr_incidence.R`](https://github.com/ahadi-analytics/sntmethods/blob/master/inst/scripts/example_tpr_incidence.R).
+None of this needs the spatial stack.
+
+## Inputs
+
+You need monthly facility records with confirmed cases, tests, presumed
+cases, a reporting rate, and a population denominator joined on.
+Identify the key columns up front:
+
+``` r
+
+library(sntmethods)
+
+vars_of_interest <- c("susp", "conf", "test", "pres")
+# facility data: hf_uid, adm0, adm1, adm2, date, year, month,
+#                conf, test, pres, reprate, pop, ...
+```
+
+## Step 1: test positivity rate
+
+[`calc_tpr()`](https://ahadi-analytics.github.io/sntmethods/reference/calc_tpr.md)
+computes TPR per facility-month and fills gaps through a fallback
+hierarchy (facility rolling average → district → previous year → region
+→ national), flagging which fallback was used:
+
+``` r
+
+result <- calc_tpr(
+  dhis2_hf,
+  hf_var   = "hf_uid",
+  adm1_var = "adm1",
+  adm2_var = "adm2",
+  date_var = "date",
+  conf_var = "conf",
+  test_var = "test",
+  pres_var = "pres",
+  reporting_threshold = 0.80,
+  extreme_threshold   = c(0.01, 0.99),
+  activity_indicators = vars_of_interest,
+  include_flags = TRUE
+)
+```
+
+Audit the proxy/fallback logic with
+[`validate_tpr_proxies()`](https://ahadi-analytics.github.io/sntmethods/reference/validate_tpr_proxies.md):
+
+``` r
+
+validate_tpr_proxies(result)
+```
+
+## Step 2: the incidence cascade
+
+[`calc_incidence()`](https://ahadi-analytics.github.io/sntmethods/reference/calc_incidence.md)
+runs the N-level cascade. Each level adds an adjustment, so the data
+must carry the columns each level needs (`tpr_var` for N1+,
+`reprate_var` for N2+, care-seeking columns for the care-seeking
+adjustment):
+
+| Level      | Adjustment                                        |
+|------------|---------------------------------------------------|
+| `N0`       | Crude confirmed cases per population              |
+| `N1`       | \+ testing adjustment (presumed cases via TPR)    |
+| `N2`       | \+ reporting-completeness adjustment              |
+| `N3`       | \+ care-seeking adjustment (public/private/none)  |
+| `N4`, `N5` | further care-seeking / private-sector adjustments |
+
+``` r
+
+incidence_input <- result |>
+  dplyr::left_join(csb_dhs, by = "adm1") |>          # care-seeking shares
+  dplyr::filter(!is.na(conf), !is.na(test),
+                !is.na(pop),  !is.na(pres))
+
+incid <- calc_incidence(
+  incidence_input,                  # must already contain tpr + reprate
+  levels   = c("N0", "N1", "N2", "N3"),
+  hf_var   = "hf_uid",
+  adm0_var = "adm0", adm1_var = "adm1", adm2_var = "adm2",
+  date_var = "date", pop_var = "pop",
+  conf_var = "conf", test_var = "test", pres_var = "pres",
+  tpr_var     = "tpr",      # required for N1+
+  reprate_var = "reprate",  # required for N2+
+  cs_public_var  = "csb_public",
+  cs_private_var = "csb_private",
+  cs_none_var    = "csb_no_treatment",
+  rho = 0,
+  rate_multiplier = 1000,   # incidence per 1,000 population
+  include_flags = TRUE
+)
+```
+
+## Step 3: explore the result
+
+Wrap the cascade output in an `snt_incidence` object with
+[`create_incidence()`](https://ahadi-analytics.github.io/sntmethods/reference/create_incidence.md),
+then use the familiar `print`/`summary`/`plot`/`as_tibble` methods:
+
+``` r
+
+incid_obj <- create_incidence(incid, scale = 1000)
+
+print(incid_obj)            # overview
+summary(incid_obj)          # data-quality stats
+plot(incid_obj)             # faceted incidence plot
+data <- tibble::as_tibble(incid_obj)   # back to a plain tibble
+```
+
+[`check_incidence()`](https://ahadi-analytics.github.io/sntmethods/reference/check_incidence.md)
+provides additional consistency checks on the cascade inputs and
+outputs.
+
+## See also
+
+- [Trend
+  analysis](https://ahadi-analytics.github.io/sntmethods/articles/trend-analysis.md)
+  to detect direction and significance in the resulting monthly series.
+- [Reference](https://ahadi-analytics.github.io/sntmethods/reference/index.html)
+  for the full
+  [`calc_tpr()`](https://ahadi-analytics.github.io/sntmethods/reference/calc_tpr.md)
+  and
+  [`calc_incidence()`](https://ahadi-analytics.github.io/sntmethods/reference/calc_incidence.md)
+  argument lists. \`\`\`

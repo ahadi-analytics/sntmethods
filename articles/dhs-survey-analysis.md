@@ -1,0 +1,296 @@
+# DHS survey analysis
+
+The DHS workflow turns Demographic and Health Survey (DHS) and Malaria
+Indicator Survey (MIS) microdata into survey-weighted indicator
+estimates. Every estimator accounts for the survey design (weights,
+clustering, stratification), returns long-format admin-stratified
+tibbles, and ships a machine-readable data dictionary.
+
+The recommended order of operations is: **(0)** discover what surveys
+exist and **inspect the variables they contain**, **(1)** read the
+recodes you need, then **(2)** compute indicators. Step 0 matters - DHS
+variable names drift between phases and survey types, so you should
+confirm the variables an indicator depends on are actually present
+*before* you build it.
+
+A complete, runnable version of this workflow ships with the package at
+[`inst/scripts/example_dhs_analysis.R`](https://github.com/ahadi-analytics/sntmethods/blob/master/inst/scripts/example_dhs_analysis.R).
+
+## Reading DHS data: pick a path
+
+Every `calc_*_dhs()` function accepts a plain data frame, so how you
+read the data is up to you. The walkthrough below uses
+[`dhs_read()`](https://ahadi-analytics.github.io/sntmethods/reference/dhs_read.md)
+against a parquet archive because it is the route AHADI uses internally
+and what
+[`run_mbg_pipeline()`](https://ahadi-analytics.github.io/sntmethods/reference/run_mbg_pipeline.md)
+is built on. **It is not the only route.**
+
+- **One or a few DHS files (`.dta`, `.csv`, `.rds`, `.sav`, …)** - read
+  each recode with
+  [`sntutils::read()`](https://ahadi-analytics.github.io/sntutils/) (or
+  [`haven::read_dta()`](https://haven.tidyverse.org/reference/read_dta.html))
+  and skip straight to *Step 2* below. Most analysts should take this
+  path.
+
+  ``` r
+
+  kr <- sntutils::read("TGKR81FL.DTA")
+  ge <- sntutils::read("TGGE8AFL.dta")
+  shp_admin <- sf::read_sf("path/to/admin.shp")
+
+  fever <- calc_fever_dhs(dhs_kr = kr, gps_data = ge,
+                          shapefile = shp_admin,
+                          admin_level = c("adm0", "adm1"))
+  ```
+
+  In this mode you do not need
+  [`dhs_read()`](https://ahadi-analytics.github.io/sntmethods/reference/dhs_read.md),
+  you do not need a parquet archive, and you do not need any directory
+  layout convention. **Step 0 (discovery / dictionary inspection) still
+  works** - run `make_dhs_raw_dictionary(kr)` and
+  `list_dhs_var_labels(kr)` on the data frame you just loaded.
+
+- **Archive of many surveys (the path used below).** Build a
+  hive-partitioned parquet archive in the layout documented in
+  [`?dhs_read`](https://ahadi-analytics.github.io/sntmethods/reference/dhs_read.html)
+  and use
+  [`dhs_read()`](https://ahadi-analytics.github.io/sntmethods/reference/dhs_read.md)
+  to query it by file type / country / year. The archive is what enables
+  cross-survey discovery and feeds
+  [`run_mbg_pipeline()`](https://ahadi-analytics.github.io/sntmethods/reference/run_mbg_pipeline.md).
+  See [Build your own
+  archive](https://ahadi-analytics.github.io/sntmethods/reference/dhs_read.html#building-your-own-parquet-archive)
+  for a recipe.
+
+``` r
+
+library(sntmethods)
+
+country_iso2 <- "TG"
+country_iso3 <- "tgo"
+path_dhs_parquet <- here::here(dhs_data_path(), "01_data/parquet")
+```
+
+## Step 0a: discover available surveys
+
+The `GE` (geographic) recode is the cheapest way to enumerate the survey
+years available in your parquet archive for a given country and survey
+type:
+
+``` r
+
+survey_years_dhs <- dhs_read(
+  path = path_dhs_parquet, file_type = "GE",
+  survey_type = "DHS", country_code = country_iso2
+) |>
+  dplyr::pull(DHSYEAR) |>
+  unique()
+
+survey_years_mis <- dhs_read(
+  path = path_dhs_parquet, file_type = "GE",
+  survey_type = "MIS", country_code = country_iso2
+) |>
+  dplyr::pull(DHSYEAR) |>
+  unique()
+```
+
+## Step 0b: inspect the variables BEFORE building indicators
+
+This is the step to run first. Before computing any indicator, build the
+**variable list / data dictionary** for each recode so you can confirm
+the variables that indicator needs are present (and named as expected)
+in *this* survey.
+
+[`make_dhs_raw_dictionary()`](https://ahadi-analytics.github.io/sntmethods/reference/make_dhs_raw_dictionary.md)
+returns a tidy table of every variable in a raw DHS dataset, with its
+label - a complete “what’s in this file” listing:
+
+``` r
+
+kr <- dhs_read(path = path_dhs_parquet, file_type = "KR",
+               survey_type = "DHS", country_code = country_iso2,
+               survey_year = 2017)
+
+# Full variable list for the recode (variable name + label + type)
+kr_vars <- make_dhs_raw_dictionary(kr)
+kr_vars
+#> # variable, label, ... - one row per column in the recode
+```
+
+[`list_dhs_var_labels()`](https://ahadi-analytics.github.io/sntmethods/reference/list_dhs_var_labels.md)
+is a lighter lookup of variable labels - handy for spot-checking a
+single candidate variable (e.g. does this survey carry the fever item
+`h22`, or the ACT items `ml13*`?):
+
+``` r
+
+list_dhs_var_labels(kr)
+```
+
+A robust pattern - used in the example script - is to build the
+dictionary for **every recode of every survey** up front and save it, so
+the team can audit variable availability across surveys before any
+indicator is computed:
+
+``` r
+
+recodes <- list(GE = "GE", PR = "PR", HR = "HR", KR = "KR", IR = "IR")
+
+survey_dictionary <- purrr::imap_dfr(recodes, function(ft, nm) {
+  dat <- dhs_read(path = path_dhs_parquet, file_type = ft,
+                  survey_type = "DHS", country_code = country_iso2,
+                  survey_year = 2017)
+  if (is.null(dat) || nrow(dat) == 0) return(NULL)
+  make_dhs_raw_dictionary(dplyr::slice(dat, 1:2)) |>
+    dplyr::mutate(recode = nm, .before = 1)
+})
+```
+
+The package also ships **curated** dictionaries describing the
+*indicators* (not just the raw variables) -
+[`dhs_dictionary()`](https://ahadi-analytics.github.io/sntmethods/reference/dhs_dictionary.md)
+for the unified view across all domains, and per-domain helpers
+([`itn_dictionary()`](https://ahadi-analytics.github.io/sntmethods/reference/itn_dictionary.md),
+[`act_dictionary()`](https://ahadi-analytics.github.io/sntmethods/reference/act_dictionary.md),
+…). See [Methodology &
+conventions](https://ahadi-analytics.github.io/sntmethods/articles/methodology.md).
+
+## Step 1: read the recodes
+
+[`dhs_read()`](https://ahadi-analytics.github.io/sntmethods/reference/dhs_read.md)
+reads a single survey recode from the partitioned parquet archive,
+preserving value labels and survey-specific variables:
+
+``` r
+
+ge <- dhs_read(path = path_dhs_parquet, file_type = "GE",
+               survey_type = "DHS", country_code = country_iso2,
+               survey_year = 2017)
+pr <- dhs_read(path = path_dhs_parquet, file_type = "PR", ...)
+hr <- dhs_read(path = path_dhs_parquet, file_type = "HR", ...)
+kr <- dhs_read(path = path_dhs_parquet, file_type = "KR", ...)
+ir <- dhs_read(path = path_dhs_parquet, file_type = "IR", ...)
+```
+
+Recodes map to indicator families as follows:
+
+| Recode | Contents | Used by |
+|----|----|----|
+| `GE` | GPS / cluster coordinates | survey discovery, cluster geolocation |
+| `HR` | Household | ITN ownership/access, IRS, wealth |
+| `PR` | Person (household roster) | PfPR, anemia, ITN use |
+| `KR` | Children (under 5) | fever, care-seeking, testing, ACT, EPI, SMC, U5MR |
+| `IR` | Women (15-49) | ANC, IPTp |
+
+## Step 2: compute indicators
+
+Every `calc_*_dhs()` function takes the recode(s) it needs plus the GPS
+recode (`gps_data`), the admin `shapefile`, and the `admin_level`(s) to
+return:
+
+``` r
+
+fever <- calc_fever_dhs(
+  dhs_kr = kr, gps_data = ge,
+  shapefile = shp_admin, admin_level = c("adm0", "adm1")
+)
+
+itn <- calc_itn_dhs(
+  dhs_hr = hr, dhs_pr = pr, gps_data = ge,
+  shapefile = shp_admin, admin_level = c("adm0", "adm1")
+)
+
+pfpr   <- calc_pfpr_dhs(dhs_pr = pr, gps_data = ge, shapefile = shp_admin)
+csb    <- calc_csb_dhs(dhs_kr = kr, gps_data = ge, shapefile = shp_admin)
+act    <- calc_act_dhs(dhs_kr = kr, gps_data = ge, shapefile = shp_admin)
+cm     <- calc_case_management_dhs(dhs_kr = kr, gps_data = ge, shapefile = shp_admin)
+iptp   <- calc_iptp_dhs(dhs_ir = ir, gps_data = ge, shapefile = shp_admin)
+wealth <- calc_wealth_dhs(dhs_hr = hr, gps_data = ge, shapefile = shp_admin)
+
+# A few take extra arguments:
+anemia <- calc_severe_anemia_dhs(dhs_pr = pr, gps_data = ge,
+                                 shapefile = shp_admin,
+                                 altitude_adjusted = FALSE)
+u5mr   <- calc_u5mr_dhs(dhs_kr = kr, period_years = 5,
+                        gps_data = ge, shapefile = shp_admin)
+```
+
+**Keep direct survey estimates at adm0/adm1.** DHS/MIS sample designs
+are stratified by region and the published weights (`v005`/`hv005`) are
+representative at adm0 and adm1 only. Going to adm2 breaks the design
+assumption - clusters per adm2 are sparse, weights are no longer
+self-weighting within the stratum, and direct estimates carry unstable
+variance and wide CIs. For sub-region estimates use the [MBG
+pipeline](https://ahadi-analytics.github.io/sntmethods/articles/spatial-modeling.md)
+instead of direct survey aggregation.
+
+## Indicator coverage
+
+| Domain | Key indicators | Recode | Function |
+|----|----|----|----|
+| **Parasite prevalence** | PfPR by RDT/microscopy; age groups (u5, 5-10, u10, 2-10) | PR | [`calc_pfpr_dhs()`](https://ahadi-analytics.github.io/sntmethods/reference/calc_pfpr_dhs.md) |
+| **ITN** | Ownership, access, use (all ages + u5/pregnant/age bands), use-if-access | HR, PR | [`calc_itn_dhs()`](https://ahadi-analytics.github.io/sntmethods/reference/calc_itn_dhs.md) |
+| **IRS** | Household spraying coverage | HR | [`calc_irs_dhs()`](https://ahadi-analytics.github.io/sntmethods/reference/calc_irs_dhs.md) |
+| **Fever** | Fever prevalence in children under 5 | KR | [`calc_fever_dhs()`](https://ahadi-analytics.github.io/sntmethods/reference/calc_fever_dhs.md) |
+| **Care-seeking** | By sector (public, private, CHW, pharmacy, trained, none) | KR | [`calc_csb_dhs()`](https://ahadi-analytics.github.io/sntmethods/reference/calc_csb_dhs.md) |
+| **Malaria testing** | RDT/microscopy testing among febrile children | KR | [`calc_malaria_dx_dhs()`](https://ahadi-analytics.github.io/sntmethods/reference/calc_malaria_dx_dhs.md) |
+| **Antimalarials** | Any antimalarial treatment among febrile U5 | KR | [`calc_antimalarial_dhs()`](https://ahadi-analytics.github.io/sntmethods/reference/calc_antimalarial_dhs.md) |
+| **ACT treatment** | ACT receipt by source; ACT among antimalarials / care seekers | KR | [`calc_act_dhs()`](https://ahadi-analytics.github.io/sntmethods/reference/calc_act_dhs.md) |
+| **Case management** | Effective coverage (fever → care → test → treat) | KR | [`calc_case_management_dhs()`](https://ahadi-analytics.github.io/sntmethods/reference/calc_case_management_dhs.md) |
+| **ANC** | Antenatal care visits (1+/2+/3+/4+/8+) | IR | [`calc_anc_dhs()`](https://ahadi-analytics.github.io/sntmethods/reference/calc_anc_dhs.md) |
+| **IPTp** | Intermittent preventive treatment doses (1+/2+/3+/4+) | IR | [`calc_iptp_dhs()`](https://ahadi-analytics.github.io/sntmethods/reference/calc_iptp_dhs.md) |
+| **EPI vaccines** | BCG, DPT, polio, measles, penta, PCV, rota, IPV, HepB, YF, malaria, fully/zero-dose | KR | [`calc_epi_dhs()`](https://ahadi-analytics.github.io/sntmethods/reference/calc_epi_dhs.md) |
+| **Under-5 mortality** | U5MR per 1,000 live births (via `DHS.rates`) | KR | [`calc_u5mr_dhs()`](https://ahadi-analytics.github.io/sntmethods/reference/calc_u5mr_dhs.md) |
+| **Anemia** | Any, moderate+, severe (children 6-59 months) | PR | [`calc_severe_anemia_dhs()`](https://ahadi-analytics.github.io/sntmethods/reference/calc_severe_anemia_dhs.md) |
+| **SMC** | Seasonal malaria chemoprevention coverage | KR | [`calc_smc_dhs()`](https://ahadi-analytics.github.io/sntmethods/reference/calc_smc_dhs.md) |
+| **Wealth** | Quintile distribution; Gini coefficient (Brown formula) | HR | [`calc_wealth_dhs()`](https://ahadi-analytics.github.io/sntmethods/reference/calc_wealth_dhs.md) |
+
+Each survey indicator has a spatial counterpart (`calc_*_mbg()` /
+`prep_*_mbg()`) - see [Spatial modeling
+(MBG)](https://ahadi-analytics.github.io/sntmethods/articles/spatial-modeling.md).
+
+## Output shape
+
+Every `calc_*_dhs()` returns a named list of tibbles, one per admin
+level (`adm0`, `adm1`, …). Each row is one indicator at one admin unit,
+with standardised columns:
+
+    survey_id, iso3, iso2, survey_type, survey_year,
+    adm0, [adm1], [adm2], type, geo_source,
+    point, ci_l, ci_u, numerator, denominator,
+    indicator, indicator_code, numerator_description,
+    denominator_description, denominator_code
+
+Because the shape is identical across families, you can stack results
+and treat a whole survey - or many surveys - as one tidy table:
+
+``` r
+
+library(dplyr)
+all_adm1 <- bind_rows(
+  itn$adm1, pfpr$adm1, fever$adm1, csb$adm1, act$adm1, cm$adm1
+)
+```
+
+## Running across many surveys
+
+For a country with several DHS and MIS rounds, read each survey into a
+bundle, run every indicator defensively (so a single missing recode or
+variable doesn’t abort the run), and stack by admin level. The full
+pattern - including the `tryCatch` wrappers that skip indicators whose
+required variables are missing - is in
+[`inst/scripts/example_dhs_analysis.R`](https://github.com/ahadi-analytics/sntmethods/blob/master/inst/scripts/example_dhs_analysis.R).
+This is exactly why Step 0 matters: the variable dictionary tells you in
+advance which indicators a given survey can support.
+
+## See also
+
+- [Spatial modeling
+  (MBG)](https://ahadi-analytics.github.io/sntmethods/articles/spatial-modeling.md)
+  for sub-adm1 estimates
+- [Methodology &
+  conventions](https://ahadi-analytics.github.io/sntmethods/articles/methodology.md)
+  for indicator specs and dictionaries
+- [Reference](https://ahadi-analytics.github.io/sntmethods/reference/index.html)
+  for every `calc_*_dhs()` signature \`\`\`

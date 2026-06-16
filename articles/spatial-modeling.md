@@ -1,0 +1,203 @@
+# Spatial modeling (MBG)
+
+When direct survey estimates run out of statistical power - typically
+below adm1 (see the caveat in [DHS survey
+analysis](https://ahadi-analytics.github.io/sntmethods/articles/dhs-survey-analysis.md)) -
+model-based geostatistics (MBG) fills the gap. It models the indicator
+as a smooth spatial surface from geolocated survey clusters, predicts a
+continuous raster, and aggregates that raster to admin units using
+population weights.
+
+There are **two entry points**:
+
+- **[`fit_mbg_indicator()`](https://ahadi-analytics.github.io/sntmethods/reference/fit_mbg_indicator.md)** -
+  fit one indicator from a prepared cluster table. Best when you want
+  full control or are modeling a single custom indicator.
+- **[`run_mbg_pipeline()`](https://ahadi-analytics.github.io/sntmethods/reference/run_mbg_pipeline.md)** -
+  the full pipeline: discover surveys, prepare every indicator, fit,
+  predict, and aggregate to adm2/adm1/adm0 in one call.
+
+This workflow requires the optional spatial stack (INLA, `mbg`, `sf`,
+`terra`). See
+[installation](https://ahadi-analytics.github.io/sntmethods/articles/getting-started.html#mbg-dependencies-optional).
+
+## Inputs
+
+MBG needs three things:
+
+1.  **A cluster table** with one row per survey cluster and columns:
+    `cluster_id`, `indicator` (event count / numerator), `samplesize`
+    (denominator), `x` (longitude), `y` (latitude).
+2.  **A population raster** for the modeled population (and optionally
+    age-specific rasters for child / women-of-reproductive-age
+    denominators).
+3.  **Admin boundaries** as `sf` objects (`adm0_sf`, `adm1_sf`,
+    `adm2_sf`).
+
+## Single indicator: `fit_mbg_indicator()`
+
+The package’s `prep_*_mbg()` / `calc_*_mbg()` helpers build the cluster
+table for each indicator family, but it is just a
+`data.table`/`data.frame` - here is the shape, built directly from a DHS
+`PR` recode and the `GE` GPS recode (condensed from
+[`inst/scripts/mbg_pfpr2_10_dhs.R`](https://github.com/ahadi-analytics/sntmethods/blob/master/inst/scripts/mbg_pfpr2_10_dhs.R)):
+
+``` r
+
+library(sntmethods)
+
+# cluster-level positives / tested, joined to GPS coordinates
+pfpr_dt <- data.table::data.table(
+  cluster_id = pfpr_sf$cluster_id,
+  indicator  = pfpr_sf$n_positive,  # numerator
+  samplesize = pfpr_sf$n_tested,    # denominator
+  x = pfpr_coords[, 1],             # longitude
+  y = pfpr_coords[, 2]              # latitude
+)
+```
+
+[`fit_mbg_indicator()`](https://ahadi-analytics.github.io/sntmethods/reference/fit_mbg_indicator.md)
+is the all-in-one wrapper around
+[`mbg::MbgModelRunner`](https://henryspatialanalysis.github.io/mbg/reference/MbgModelRunner.html).
+Give it the cluster table, a population raster, and any subset of admin
+shapefiles; it fits the model and returns a comprehensive list:
+
+``` r
+
+fit <- fit_mbg_indicator(
+  cluster_data      = pfpr_dt,
+  indicator_name    = "pfpr_mic_2_10",
+  population_raster = pop_rast,
+  adm1_sf           = adm1_sf,
+  adm2_sf           = adm2_sf,
+  primary_level     = "adm2",
+  output_levels     = c("adm1", "adm2"),
+  survey_year       = 2016,
+  source_label      = "DHS",
+  output_dir        = path_output,            # NULL = write nothing
+  cache_dir         = fs::path(path_output, "cache")  # caches the INLA fit
+)
+```
+
+The result contains:
+
+| Element | What it is |
+|----|----|
+| `$cluster_data` | the input cluster table |
+| `$cell_predictions` | `mean` / `lower` / `upper` `SpatRaster`s plus draws |
+| `$admin` | long-format tibble of estimates per admin level |
+| `$id_raster`, `$aggregation_tables` | internals for re-aggregation |
+| `$model_runner` | the fitted `mbg` runner |
+| `$saved_files`, `$cache_files`, `$inputs` | provenance |
+
+Country/ISO codes are derived automatically from the median cluster
+coordinate. When `cache_dir` is set, the prediction matrix is cached so
+re-runs skip the expensive INLA fit.
+
+### Mapping the result
+
+The mean surface and its uncertainty are plain `SpatRaster`s, so any
+mapping tool works. The package also provides
+[`generate_indicator_map()`](https://ahadi-analytics.github.io/sntmethods/reference/generate_indicator_map.md),
+[`generate_all_maps()`](https://ahadi-analytics.github.io/sntmethods/reference/generate_all_maps.md),
+and cluster diagnostics via
+[`plot_mbg_clusters()`](https://ahadi-analytics.github.io/sntmethods/reference/plot_mbg_clusters.md):
+
+``` r
+
+cell_preds <- fit$cell_predictions
+r_mean <- cell_preds$mean * 100                          # PfPR as %
+r_unc  <- (cell_preds$upper - cell_preds$lower) * 100     # 95% CI width (pp)
+
+tmap::tm_shape(r_mean) +
+  tmap::tm_raster(palette = "YlOrRd", title = "PfPR2-10 (%)") +
+  tmap::tm_shape(adm2_sf) + tmap::tm_borders(lwd = 0.3)
+```
+
+## Full pipeline: `run_mbg_pipeline()`
+
+For a whole country across many indicators,
+[`run_mbg_pipeline()`](https://ahadi-analytics.github.io/sntmethods/reference/run_mbg_pipeline.md)
+orchestrates everything: it auto-discovers surveys from the parquet
+archive, prepares cluster data per indicator, fits the INLA/MBG models,
+generates prediction rasters, aggregates to adm2 (or adm3) via
+population-weighted zonal statistics, and rolls up to adm1 and adm0.
+
+**This is not a general-purpose MBG wrapper.**
+[`run_mbg_pipeline()`](https://ahadi-analytics.github.io/sntmethods/reference/run_mbg_pipeline.md)
+is built around AHADI’s hive-partitioned parquet archive (see
+[`?dhs_read`](https://ahadi-analytics.github.io/sntmethods/reference/dhs_read.html))
+and
+[`dhs_read()`](https://ahadi-analytics.github.io/sntmethods/reference/dhs_read.md)’s
+discovery semantics. Use it when you have - or are willing to build -
+that archive and want to fit many indicators across many surveys
+end-to-end.
+
+For ad-hoc, single-survey, or single-indicator work, stay with
+[`fit_mbg_indicator()`](https://ahadi-analytics.github.io/sntmethods/reference/fit_mbg_indicator.md)
+(the *Single indicator* section above) - it takes a cluster-level data
+frame you load yourself (e.g. with
+[`sntutils::read()`](https://ahadi-analytics.github.io/sntutils/reference/read.html) +
+a `prep_*_mbg()` helper) and runs a single MBG fit, no archive required.
+See
+[`?run_mbg_pipeline`](https://ahadi-analytics.github.io/sntmethods/reference/run_mbg_pipeline.html)
+for the full *When to use this / When not to use this* checklist.
+
+``` r
+
+results <- run_mbg_pipeline(
+  adm0_sf = adm0, adm1_sf = adm1, adm2_sf = adm2,
+  pop_raster    = list("2016" = "path/to/bdi_pop_2016.tif"),
+  pop_raster_u5 = list("2016" = "path/to/bdi_pop_u5_2016.tif"),
+  path_dhs_parquet = "path/to/parquet",
+  table_out_path        = "output/tables",
+  raster_out_path       = "output/rasters",
+  intermediate_out_path = "output/intermediate",
+  survey_year = 2016,
+  indicators  = c("pfpr", "itn", "csb", "act", "eff_cm")
+)
+
+# long-format tables at each admin level, matching the DHS output shape
+results$final_dataset$adm0
+results$final_dataset$adm1
+results$final_dataset$adm2
+```
+
+Supported indicator families: `pfpr`, `itn`, `irs`, `csb`, `act`,
+`antimalarial`, `fever`, `anc`, `iptp`, `epi`, `u5mr`, `anemia`, `smc`,
+and `eff_cm` (effective case management).
+
+### Age-specific denominators
+
+Supply age-specific population rasters for more accurate denominators:
+`pop_raster_u5` (child indicators), `pop_raster_wra` (ANC/IPTp),
+`pop_raster_1_2` (EPI 12-23 months), and age-band rasters for ITN
+stratification. U5MR is expressed per 1,000 live births; coverage
+indicators as percentages.
+
+## Outputs and saving
+
+Pipeline and fit outputs are long-format tables with `point`, `ci_l`,
+`ci_u`, `numerator`, `denominator`, and indicator metadata - the same
+shape as the [DHS
+survey](https://ahadi-analytics.github.io/sntmethods/articles/dhs-survey-analysis.md)
+outputs, so survey and modeled estimates stack cleanly. Helpers
+[`save_mbg_cluster_data()`](https://ahadi-analytics.github.io/sntmethods/reference/save_mbg_cluster_data.md),
+[`save_mbg_rasters()`](https://ahadi-analytics.github.io/sntmethods/reference/save_mbg_rasters.md),
+and
+[`save_indicator_map()`](https://ahadi-analytics.github.io/sntmethods/reference/save_indicator_map.md)
+persist intermediate and final artifacts.
+
+## See also
+
+- A complete single-indicator example:
+  [`inst/scripts/mbg_pfpr2_10_dhs.R`](https://github.com/ahadi-analytics/sntmethods/blob/master/inst/scripts/mbg_pfpr2_10_dhs.R)
+  and
+  [`inst/scripts/mbg_itn_access_dhs.R`](https://github.com/ahadi-analytics/sntmethods/blob/master/inst/scripts/mbg_itn_access_dhs.R).
+- The team reference
+  [`inst/docs/mbg_pipeline_guide.md`](https://github.com/ahadi-analytics/sntmethods/blob/master/inst/docs/mbg_pipeline_guide.md).
+- [Reference](https://ahadi-analytics.github.io/sntmethods/reference/index.html)
+  for
+  [`fit_mbg_indicator()`](https://ahadi-analytics.github.io/sntmethods/reference/fit_mbg_indicator.md),
+  [`run_mbg_pipeline()`](https://ahadi-analytics.github.io/sntmethods/reference/run_mbg_pipeline.md),
+  and the `prep_*_mbg()` family. \`\`\`
