@@ -10,7 +10,11 @@ NULL
 
 #' Run MBG Indicator Pipeline
 #'
-#' Orchestrates the full MBG processing pipeline for DHS indicators.
+#' Orchestrates the full MBG processing pipeline for DHS indicators across
+#' one or more surveys in AHADI's parquet archive. This is a multi-survey,
+#' multi-indicator production workflow - it is **not** a general-purpose
+#' wrapper around [fit_mbg_indicator()].
+#'
 #' See indicator-specific methodology files at
 #' \url{https://github.com/ahadi-analytics/sntmethods/tree/master/inst/methods}
 #'
@@ -20,6 +24,48 @@ NULL
 #' 3. Prepares cluster-level data for each indicator
 #' 4. Runs MBG models (if enabled)
 #' 5. Generates outputs (rasters, CSVs, maps)
+#'
+#' @section When to use this:
+#'
+#' Use `run_mbg_pipeline()` when:
+#'
+#' - You have a hive-partitioned DHS parquet archive laid out as documented
+#'   in [dhs_read()] - the pipeline calls `dhs_read()` internally to discover
+#'   and load surveys.
+#' - You want to fit **many indicators across many surveys** end-to-end and
+#'   have them returned as long-format tables stacked at `adm0` / `adm1` /
+#'   `adm2`, with prediction rasters cached to disk.
+#' - You have set up the optional INLA + `mbg` stack (see the
+#'   [Get started](https://ahadi-analytics.github.io/sntmethods/articles/getting-started.html#mbg-dependencies-optional)
+#'   vignette).
+#'
+#' @section When *not* to use this:
+#'
+#' Do **not** use `run_mbg_pipeline()` for ad-hoc, single-survey, or
+#' single-indicator work. The pipeline assumes the parquet archive layout
+#' from [dhs_read()] and is not designed to be pointed at one DHS file. For
+#' those cases:
+#'
+#' - **One indicator, one survey, your own data.** Use
+#'   [fit_mbg_indicator()] directly. It takes a cluster-level
+#'   data.table (produced by [sntutils::read()] + a `prep_*_mbg()` helper, or
+#'   built by hand) and runs a single INLA / MBG fit. No archive required.
+#'
+#'   ```r
+#'   kr <- sntutils::read("TGKR81FL.DTA")
+#'   ge <- sntutils::read("TGGE8AFL.dta")
+#'   cl <- calc_pfpr_mbg(dhs_pr = kr, gps_data = ge)$pfpr_rdt_u5
+#'   fit <- fit_mbg_indicator(input_data = cl, ...)
+#'   ```
+#'
+#' - **Survey-weighted DHS indicators without spatial modelling.** Use the
+#'   [`calc_*_dhs()`][calc_pfpr_dhs] family - they accept any data frame and
+#'   need no parquet archive and no INLA stack.
+#'
+#' - **You only need one country, one survey, but want the pipeline shape.**
+#'   Build a minimal one-survey parquet leaf following the directory layout
+#'   in [dhs_read()] and then call `run_mbg_pipeline()` against it; this is
+#'   usually only worth the setup if you plan to add more surveys later.
 #'
 #' @param country_iso3 Three-letter ISO country code (e.g., "bdi").
 #' @param country_iso2 Two-letter DHS country code (e.g., "BU"). If NULL

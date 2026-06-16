@@ -231,11 +231,15 @@ denominator_description.
 }
 }
 \description{
-Orchestrates the full MBG processing pipeline for DHS indicators.
-See indicator-specific methodology files at
-\url{https://github.com/ahadi-analytics/sntmethods/tree/master/inst/methods}
+Orchestrates the full MBG processing pipeline for DHS indicators across
+one or more surveys in AHADI's parquet archive. This is a multi-survey,
+multi-indicator production workflow - it is \strong{not} a general-purpose
+wrapper around \code{\link[=fit_mbg_indicator]{fit_mbg_indicator()}}.
 }
 \details{
+See indicator-specific methodology files at
+\url{https://github.com/ahadi-analytics/sntmethods/tree/master/inst/methods}
+
 Pipeline steps:
 \enumerate{
 \item Discovers available surveys
@@ -245,6 +249,51 @@ Pipeline steps:
 \item Generates outputs (rasters, CSVs, maps)
 }
 }
+\section{When to use this}{
+
+
+Use \code{run_mbg_pipeline()} when:
+\itemize{
+\item You have a hive-partitioned DHS parquet archive laid out as documented
+in \code{\link[=dhs_read]{dhs_read()}} - the pipeline calls \code{dhs_read()} internally to discover
+and load surveys.
+\item You want to fit \strong{many indicators across many surveys} end-to-end and
+have them returned as long-format tables stacked at \code{adm0} / \code{adm1} /
+\code{adm2}, with prediction rasters cached to disk.
+\item You have set up the optional INLA + \code{mbg} stack (see the
+\href{https://ahadi-analytics.github.io/sntmethods/articles/getting-started.html#mbg-dependencies-optional}{Get started}
+vignette).
+}
+}
+
+\section{When \emph{not} to use this}{
+
+
+Do \strong{not} use \code{run_mbg_pipeline()} for ad-hoc, single-survey, or
+single-indicator work. The pipeline assumes the parquet archive layout
+from \code{\link[=dhs_read]{dhs_read()}} and is not designed to be pointed at one DHS file. For
+those cases:
+\itemize{
+\item \strong{One indicator, one survey, your own data.} Use
+\code{\link[=fit_mbg_indicator]{fit_mbg_indicator()}} directly. It takes a cluster-level
+data.table (produced by \code{\link[sntutils:read]{sntutils::read()}} + a \verb{prep_*_mbg()} helper, or
+built by hand) and runs a single INLA / MBG fit. No archive required.
+
+\if{html}{\out{<div class="sourceCode r">}}\preformatted{kr <- sntutils::read("TGKR81FL.DTA")
+ge <- sntutils::read("TGGE8AFL.dta")
+cl <- calc_pfpr_mbg(dhs_pr = kr, gps_data = ge)$pfpr_rdt_u5
+fit <- fit_mbg_indicator(input_data = cl, ...)
+}\if{html}{\out{</div>}}
+\item \strong{Survey-weighted DHS indicators without spatial modelling.} Use the
+\code{\link[=calc_pfpr_dhs]{calc_*_dhs()}} family - they accept any data frame and
+need no parquet archive and no INLA stack.
+\item \strong{You only need one country, one survey, but want the pipeline shape.}
+Build a minimal one-survey parquet leaf following the directory layout
+in \code{\link[=dhs_read]{dhs_read()}} and then call \code{run_mbg_pipeline()} against it; this is
+usually only worth the setup if you plan to add more surveys later.
+}
+}
+
 \examples{
 \dontrun{
 results <- run_mbg_pipeline(

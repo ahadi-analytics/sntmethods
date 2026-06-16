@@ -125,6 +125,21 @@ cluster data per indicator, fits the INLA/MBG models, generates prediction
 rasters, aggregates to adm2 (or adm3) via population-weighted zonal statistics,
 and rolls up to adm1 and adm0.
 
+::: {.alert .alert-warning}
+**This is not a general-purpose MBG wrapper.** `run_mbg_pipeline()` is built
+around AHADI's hive-partitioned parquet archive (see
+[`?dhs_read`](../reference/dhs_read.html)) and `dhs_read()`'s discovery
+semantics. Use it when you have - or are willing to build - that archive and
+want to fit many indicators across many surveys end-to-end.
+
+For ad-hoc, single-survey, or single-indicator work, stay with
+`fit_mbg_indicator()` (the *Single indicator* section above) - it takes a cluster-level
+data frame you load yourself (e.g. with `sntutils::read()` + a
+`prep_*_mbg()` helper) and runs a single MBG fit, no archive required. See
+[`?run_mbg_pipeline`](../reference/run_mbg_pipeline.html) for the full
+*When to use this / When not to use this* checklist.
+:::
+
 ```r
 results <- run_mbg_pipeline(
   adm0_sf = adm0, adm1_sf = adm1, adm2_sf = adm2,
