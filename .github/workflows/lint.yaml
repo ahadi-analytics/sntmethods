@@ -1,0 +1,48 @@
+# Static code analysis with lintr - the open-source code-quality check.
+# Surfaced via the standard GitHub Actions status badge (no third-party SaaS).
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'R/**'
+      - '.lintr'
+      - '.github/workflows/lint.yaml'
+  pull_request:
+    paths:
+      - 'R/**'
+      - '.lintr'
+      - '.github/workflows/lint.yaml'
+  workflow_dispatch:
+
+name: lint.yaml
+
+permissions: read-all
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      # lint_package() only parses source (object_usage_linter is disabled),
+      # so it needs lintr alone - not the package or its (INLA/mbg) deps.
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::lintr
+
+      - name: Lint
+        run: lintr::lint_package()
+        shell: Rscript {0}
+        env:
+          LINTR_ERROR_ON_LINT: true

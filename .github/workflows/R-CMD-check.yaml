@@ -43,13 +43,12 @@ jobs:
     timeout-minutes: 45
 
     strategy:
-      # PRs: stop the matrix on first failure to save minutes.
-      # Push/schedule: keep going so we see every platform's result.
-      fail-fast: ${{ github.event_name == 'pull_request' }}
+      fail-fast: false
       matrix:
-        # PRs run Linux only (cheap). Push to master + weekly schedule run the
-        # full Linux + Windows matrix. Windows costs ~2x Linux per minute.
-        config: ${{ fromJSON(github.event_name == 'pull_request' && '[{"os":"ubuntu-latest","r":"release"}]' || '[{"os":"ubuntu-latest","r":"release"},{"os":"windows-latest","r":"release"}]') }}
+        # Push and PR runs are Linux-only to keep them fast. Windows (slower,
+        # ~2x cost) is exercised only by the weekly scheduled run, which is
+        # enough to catch platform drift without taxing day-to-day pushes.
+        config: ${{ fromJSON(github.event_name == 'schedule' && '[{"os":"ubuntu-latest","r":"release"},{"os":"windows-latest","r":"release"}]' || '[{"os":"ubuntu-latest","r":"release"}]') }}
 
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
