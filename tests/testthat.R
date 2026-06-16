@@ -6,7 +6,7 @@
 # * https://r-pkgs.org/testing-design.html#sec-tests-files-overview
 # * https://testthat.r-lib.org/articles/special-files.html
 
-# library(testthat)
-# library(sntmethods)
+library(testthat)
+library(sntmethods)
 
-# test_check("sntmethods")
+test_check("sntmethods")
