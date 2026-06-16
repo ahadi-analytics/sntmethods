@@ -22,18 +22,19 @@ test_that("dhs_dictionary returns a tibble with correct columns", {
 test_that("dhs_dictionary has correct total row count", {
   dict <- dhs_dictionary()
 
-  # Sum of all individual dictionaries: 165
-  # (includes `irs`/`irs_coverage` and `smc`/`smc_coverage` alias pairs)
-  expect_equal(nrow(dict), 165L)
+  # Sum of all individual dictionaries: 167
+  # (includes `irs`/`irs_coverage` and `smc`/`smc_coverage` alias pairs,
+  # plus 2 Demographics rows: prop_u5, prop_ov5)
+  expect_equal(nrow(dict), 167L)
 })
 
 
-test_that("all 16 domains are present", {
+test_that("all 17 domains are present", {
   dict <- dhs_dictionary()
 
   expected_domains <- c(
-    "ACT", "Antimalarial", "ANC", "Case Management", "CSB", "EPI",
-    "Fever", "IPTp", "IRS", "ITN", "Malaria Dx", "PfPR",
+    "ACT", "Antimalarial", "ANC", "Case Management", "CSB", "Demographics",
+    "EPI", "Fever", "IPTp", "IRS", "ITN", "Malaria Dx", "PfPR",
     "Severe Anemia", "SMC", "U5MR", "Wealth"
   )
   actual_domains <- sort(unique(dict$domain))
@@ -82,9 +83,13 @@ test_that("observation_unit values are valid", {
   expect_true("Household" %in% itn$observation_unit)
   expect_true("Person" %in% itn$observation_unit)
 
-  # Non-ITN domains should be Country
-  non_itn <- dict[dict$domain != "ITN", ]
-  expect_true(all(non_itn$observation_unit == "Country"))
+  # Demographics is person-level (de jure household members)
+  demog <- dict[dict$domain == "Demographics", ]
+  expect_true(all(demog$observation_unit == "Person"))
+
+  # Remaining domains should be Country
+  other <- dict[!dict$domain %in% c("ITN", "Demographics"), ]
+  expect_true(all(other$observation_unit == "Country"))
 })
 
 

@@ -132,6 +132,8 @@ key indicators. Default: NULL (no minimum).}
 \item "fever": Fever prevalence (U5)
 \item "antimalarial": Any antimalarial treatment (febrile U5)
 \item "wealth": Wealth quintile distribution (proportion in poorest/richest)
+\item "pop_structure": Resident population age structure (proportion
+under 5 and 5+)
 \item "eff_cm": Effective coverage of case management (derived;
 auto-adds "csb" and "act" as dependencies)
 }}

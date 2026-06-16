@@ -217,6 +217,9 @@
     prop_q4            = list(recode = "HR", category = "Wealth",       cascade = na_int, age = "all ages",     pop_type = "all"),
     prop_richest       = list(recode = "HR", category = "Wealth",       cascade = na_int, age = "all ages",     pop_type = "all"),
     prop_q5            = list(recode = "HR", category = "Wealth",       cascade = na_int, age = "all ages",     pop_type = "all"),
+    # Demographics -- PR module (age structure of resident population)
+    prop_u5            = list(recode = "PR", category = "Demographics", cascade = na_int, age = "all ages",     pop_type = "all"),
+    prop_ov5           = list(recode = "PR", category = "Demographics", cascade = na_int, age = "all ages",     pop_type = "all"),
     # ANC -- IR module
     anc_1plus         = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49", pop_type = "wra"),
     anc_2plus         = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49", pop_type = "wra"),
@@ -321,7 +324,7 @@
     pfpr = "u5", itn = "all", irs = "all", anc = "wra",
     csb = "u5", act = "u5", anemia = "u5", iptp = "wra",
     epi = "1_2", u5mr = "u5", smc = "u5", fever = "u5",
-    antimalarial = "u5", eff_cm = "u5"
+    antimalarial = "u5", eff_cm = "u5", pop_structure = "all"
   )
 
   if (ind %in% names(category_pop)) return(category_pop[[ind]])
@@ -479,7 +482,8 @@
     .irs_conditions,
     .smc_conditions,
     .u5mr_conditions,
-    .case_management_conditions
+    .case_management_conditions,
+    .pop_structure_conditions
   )
 
   lookup <- list()
@@ -514,7 +518,7 @@
   # Category-level dispatch keys (run all sub-indicators for that family)
   categories <- c(
     "pfpr", "itn", "irs", "anc", "csb", "act", "anemia", "iptp", "epi",
-    "u5mr", "smc", "fever", "antimalarial", "wealth",
+    "u5mr", "smc", "fever", "antimalarial", "wealth", "pop_structure",
     # Derived (auto-expands to dependencies)
     "eff_cm"
   )
@@ -583,6 +587,8 @@
     "prop_poorest", "prop_q1", "prop_poorer", "prop_q2",
     "prop_middle", "prop_q3", "prop_richer", "prop_q4",
     "prop_richest", "prop_q5",
+    # Demographics (PR module) -- resident population age structure
+    "prop_u5", "prop_ov5",
     # Derived
     "eff_cm_any", "eff_cm_public"
   )

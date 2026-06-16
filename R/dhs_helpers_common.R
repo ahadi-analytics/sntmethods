@@ -702,6 +702,15 @@ dhs_dictionary <- function() {
       eligibility = "All surveyed households",
       dhs_vars    = "hv270, hv271, hv012",
       notes       = NA_character_
+    ),
+    list(
+      fn          = pop_structure_dictionary,
+      domain      = "Demographics",
+      dhs_recode  = "PR",
+      calc_fn     = "calc_pop_structure_mbg",
+      eligibility = "De jure household members with known age",
+      dhs_vars    = "hv001, hv102, hv105",
+      notes       = "Resident population age structure (cluster-level, MBG)"
     )
   )
 

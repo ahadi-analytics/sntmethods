@@ -139,6 +139,8 @@ NULL
 #'     \item "fever": Fever prevalence (U5)
 #'     \item "antimalarial": Any antimalarial treatment (febrile U5)
 #'     \item "wealth": Wealth quintile distribution (proportion in poorest/richest)
+#'     \item "pop_structure": Resident population age structure (proportion
+#'       under 5 and 5+)
 #'     \item "eff_cm": Effective coverage of case management (derived;
 #'       auto-adds "csb" and "act" as dependencies)
 #'   }
@@ -1316,7 +1318,8 @@ run_mbg_pipeline <- function(
     smc = "KR",
     fever = "KR",
     antimalarial = "KR",
-    eff_cm = "KR"
+    eff_cm = "KR",
+    pop_structure = "PR"
   )
 
   for (ind in indicators) {
@@ -1477,6 +1480,7 @@ run_mbg_pipeline <- function(
     fever = 1L,
     antimalarial = 2L,
     wealth = 2L,  # Default: prop_poorest and prop_richest
+    pop_structure = 2L,  # prop_u5 and prop_ov5
     # Individual pfpr indicators fall through to full pfpr calc
     pfpr_rdt = , pfpr_mic = , pfpr_rdt_u5 = , pfpr_mic_u5 = 4L,
     # Individual ITN indicators process only themselves
@@ -1532,6 +1536,8 @@ run_mbg_pipeline <- function(
     prop_poorest = , prop_q1 = , prop_poorer = , prop_q2 = ,
     prop_middle = , prop_q3 = , prop_richer = , prop_q4 = ,
     prop_richest = , prop_q5 = 1L,
+    # Individual demographic indicators
+    prop_u5 = , prop_ov5 = 1L,
     # Default fallback
     1L
   )
@@ -2170,6 +2176,27 @@ run_mbg_pipeline <- function(
           dhs_hr = survey_data$HR,
           gps_data = gps_data,
           indicators = c("prop_poorest", "prop_richest")
+        )
+      }, error = function(e) {
+        results$skipped <<- glue::glue("Calculation error: {e$message}")
+        list()
+      })
+    },
+
+    prop_u5 = , prop_ov5 = ,
+    pop_structure = {
+      if (!"PR" %in% names(survey_data)) {
+        return(skip_indicator("Missing PR data (Person Recode)"))
+      }
+      tryCatch({
+        calc_pop_structure_mbg(
+          dhs_pr = survey_data$PR,
+          gps_data = gps_data,
+          indicators = if (identical(category, "pop_structure")) {
+            c("prop_u5", "prop_ov5")
+          } else {
+            category
+          }
         )
       }, error = function(e) {
         results$skipped <<- glue::glue("Calculation error: {e$message}")
