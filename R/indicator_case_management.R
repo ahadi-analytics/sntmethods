@@ -509,6 +509,7 @@ calc_case_management_dhs <- function(
 #'   numerator_description, denominator_description, denominator_code.
 #'
 #' @keywords internal
+#' @noRd
 case_management_dictionary <- function() {
   conds <- .case_management_conditions()
   tibble::tibble(

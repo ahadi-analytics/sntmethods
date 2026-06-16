@@ -474,6 +474,7 @@ calc_fever_dhs <- function(
 #'   numerator_description, denominator_description, denominator_code.
 #'
 #' @keywords internal
+#' @noRd
 fever_dictionary <- function() {
   conds <- .fever_conditions()
   tibble::tibble(

@@ -716,6 +716,7 @@ calc_act_dhs <- function(
 #'   cascade_step, requires_csb, requires_am.
 #'
 #' @keywords internal
+#' @noRd
 act_dictionary <- function() {
   conds <- .act_conditions()
   tibble::tibble(

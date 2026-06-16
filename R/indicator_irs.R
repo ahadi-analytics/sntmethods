@@ -282,6 +282,7 @@ calc_irs_dhs <- function(
 #'   numerator_description, denominator_description, denominator_code.
 #'
 #' @keywords internal
+#' @noRd
 irs_dictionary <- function() {
   conds <- .irs_conditions()
   tibble::tibble(
