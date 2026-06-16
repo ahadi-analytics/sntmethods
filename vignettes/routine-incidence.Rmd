@@ -130,6 +130,6 @@ inputs and outputs.
 
 - [Trend analysis](trend-analysis.html) to detect direction and significance in
   the resulting monthly series.
-- [Reference](../reference/index.html) for the full `calc_tpr()` and
+- [Reference](https://ahadi-analytics.github.io/sntmethods/reference/index.html) for the full `calc_tpr()` and
   `calc_incidence()` argument lists.
 ```

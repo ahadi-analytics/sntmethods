@@ -65,5 +65,5 @@ districts are improving or worsening.
 ## See also
 
 - [Routine data: incidence & TPR](routine-incidence.html) to produce the series.
-- [Reference](../reference/index.html) for `run_grouped_stl_trend()`.
+- [Reference](https://ahadi-analytics.github.io/sntmethods/reference/index.html) for `run_grouped_stl_trend()`.
 ```

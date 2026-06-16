@@ -133,7 +133,7 @@ can use them without INLA, `mbg`, or even `sf`.
 
 - **Path B - I want to discover and read across an archive of many
   surveys.** Build a hive-partitioned parquet archive in AHADI's layout
-  (see [`?dhs_read`](../reference/dhs_read.html)) and use `dhs_read()` to
+  (see [`?dhs_read`](https://ahadi-analytics.github.io/sntmethods/reference/dhs_read.html)) and use `dhs_read()` to
   query it by `file_type` / `country_code` / `survey_year` / `survey_type`.
   This is the layout `run_mbg_pipeline()` consumes.
 
@@ -171,5 +171,5 @@ one indicator you have read them all. Continue with the
 | Estimate incidence or TPR from routine data         | [Routine data](routine-incidence.html)          |
 | Detect trends in monthly time series                | [Trend analysis](trend-analysis.html)           |
 | Understand the methods and naming conventions       | [Methodology & conventions](methodology.html)   |
-| Look up a specific function                          | [Reference](../reference/index.html)            |
+| Look up a specific function                          | [Reference](https://ahadi-analytics.github.io/sntmethods/reference/index.html)            |
 ```

@@ -64,10 +64,10 @@ archive because it is the route AHADI uses internally and what
 
 - **Archive of many surveys (the path used below).** Build a hive-partitioned
   parquet archive in the layout documented in
-  [`?dhs_read`](../reference/dhs_read.html) and use `dhs_read()` to query it
+  [`?dhs_read`](https://ahadi-analytics.github.io/sntmethods/reference/dhs_read.html) and use `dhs_read()` to query it
   by file type / country / year. The archive is what enables
   cross-survey discovery and feeds `run_mbg_pipeline()`. See
-  [Build your own archive](../reference/dhs_read.html#building-your-own-parquet-archive)
+  [Build your own archive](https://ahadi-analytics.github.io/sntmethods/reference/dhs_read.html#building-your-own-parquet-archive)
   for a recipe.
 
 ```r
@@ -279,5 +279,5 @@ which indicators a given survey can support.
 
 - [Spatial modeling (MBG)](spatial-modeling.html) for sub-adm1 estimates
 - [Methodology & conventions](methodology.html) for indicator specs and dictionaries
-- [Reference](../reference/index.html) for every `calc_*_dhs()` signature
+- [Reference](https://ahadi-analytics.github.io/sntmethods/reference/index.html) for every `calc_*_dhs()` signature
 ```

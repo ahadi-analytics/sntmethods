@@ -115,5 +115,5 @@ in
 - [Get started](getting-started.html) · [DHS survey analysis](dhs-survey-analysis.html)
   · [Spatial modeling](spatial-modeling.html) ·
   [Routine data](routine-incidence.html) · [Trend analysis](trend-analysis.html)
-- [Reference](../reference/index.html) for every exported function.
+- [Reference](https://ahadi-analytics.github.io/sntmethods/reference/index.html) for every exported function.
 ```
