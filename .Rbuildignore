@@ -17,3 +17,7 @@ src
 ^docs$
 ^_pkgdown\.yml$
 ^pkgdown$
+^\.covrignore$
+^generate_svg_badge\.R$
+^test-changed-smart\.sh$
+^AGENTS\.md$
