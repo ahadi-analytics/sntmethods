@@ -14,6 +14,11 @@
   testthat::skip_if_not_installed("sf")
   testthat::skip_if_not_installed("fs")
   testthat::skip_if_not_installed("data.table")
+  # fit_mbg_indicator() checks for the MBG engine up front (.check_pkg),
+  # so every test that calls it needs these too. They are not installable
+  # in CI (INLA is off-CRAN), so skip rather than error there.
+  testthat::skip_if_not_installed("INLA")
+  testthat::skip_if_not_installed("mbg")
 }
 
 .mock_clusters <- function(n = 20, seed = 1) {
