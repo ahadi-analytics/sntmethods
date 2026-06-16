@@ -7,15 +7,25 @@ template:
   includes:
     in_header: |
       <script>
+        // Theme default: respect the visitor's explicit choice (from the
+        // light-switch in the navbar, which writes 'pkgdown-theme' to
+        // localStorage). If they haven't chosen, pick by local time of day:
+        // 07:00 inclusive to 19:00 exclusive -> light, otherwise dark. The
+        // time-of-day default is intentionally NOT written to localStorage,
+        // so each visit re-evaluates until the visitor picks one explicitly.
         (function() {
           try {
-            if (!localStorage.getItem('pkgdown-theme')) {
-              localStorage.setItem('pkgdown-theme', 'dark');
+            var saved = localStorage.getItem('pkgdown-theme');
+            var theme;
+            if (saved === 'light' || saved === 'dark') {
+              theme = saved;
+            } else {
+              var hour = new Date().getHours();
+              theme = (hour >= 7 && hour < 19) ? 'light' : 'dark';
             }
-            document.documentElement.dataset.bsTheme =
-              localStorage.getItem('pkgdown-theme');
+            document.documentElement.dataset.bsTheme = theme;
           } catch (e) {
-            document.documentElement.dataset.bsTheme = 'dark';
+            document.documentElement.dataset.bsTheme = 'light';
           }
         })();
       </script>
