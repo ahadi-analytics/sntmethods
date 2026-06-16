@@ -1,6 +1,6 @@
 # anc indicator
 #
-# Merged from: dhs_calc_anc.R dhs_calc_anc_mbg.R dhs_helpers_anc.R 
+# Merged from: dhs_calc_anc.R dhs_calc_anc_mbg.R dhs_helpers_anc.R
 # Contains the survey-weighted calc, MBG cluster-prep, and indicator-
 # specific helpers for this family.
 

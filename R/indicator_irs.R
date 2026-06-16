@@ -1,6 +1,6 @@
 # irs indicator
 #
-# Merged from: dhs_calc_irs.R dhs_calc_irs_mbg.R dhs_helpers_irs.R 
+# Merged from: dhs_calc_irs.R dhs_calc_irs_mbg.R dhs_helpers_irs.R
 # Contains the survey-weighted calc, MBG cluster-prep, and indicator-
 # specific helpers for this family.
 

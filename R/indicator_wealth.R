@@ -1,6 +1,6 @@
 # wealth indicator
 #
-# Merged from: dhs_calc_wealth.R dhs_calc_wealth_mbg.R dhs_helpers_wealth_stratified.R 
+# Merged from: dhs_calc_wealth.R dhs_calc_wealth_mbg.R dhs_helpers_wealth_stratified.R
 # Contains the survey-weighted calc, MBG cluster-prep, and indicator-
 # specific helpers for this family.
 

@@ -1,6 +1,6 @@
 # csb indicator
 #
-# Merged from: dhs_calc_csb.R dhs_calc_csb_mbg.R dhs_helpers_csb.R dhs_calc_csb_custom_mbg.R dhs_calc_csb_by_wealth_dhs.R dhs_calc_csb_by_wealth_mbg.R 
+# Merged from: dhs_calc_csb.R dhs_calc_csb_mbg.R dhs_helpers_csb.R dhs_calc_csb_custom_mbg.R dhs_calc_csb_by_wealth_dhs.R dhs_calc_csb_by_wealth_mbg.R
 # Contains the survey-weighted calc, MBG cluster-prep, and indicator-
 # specific helpers for this family.
 
@@ -23,7 +23,7 @@
 #'     \item `stratum`: Stratum variable (default: "v022")
 #'     \item `age`: Child's age in months (default: "hw1")
 #'     \item `fever`: Had fever in last 2 weeks (default: "h22")
-#'     \item `alive`: Child survival status (default: "b5"). NOTE: 
+#'     \item `alive`: Child survival status (default: "b5"). NOTE:
 #'       methodology assumes filtering to living children (b5 == 1) is done
 #'       upstream. This function does NOT filter by alive status.
 #'   }

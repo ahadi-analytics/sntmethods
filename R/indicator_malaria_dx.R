@@ -1,6 +1,6 @@
 # malaria_dx indicator
 #
-# Merged from: dhs_calc_malaria_dx.R dhs_calc_malaria_dx_mbg.R dhs_helpers_malaria_dx.R 
+# Merged from: dhs_calc_malaria_dx.R dhs_calc_malaria_dx_mbg.R dhs_helpers_malaria_dx.R
 # Contains the survey-weighted calc, MBG cluster-prep, and indicator-
 # specific helpers for this family.
 

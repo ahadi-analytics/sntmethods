@@ -1,6 +1,6 @@
 # iptp indicator
 #
-# Merged from: dhs_calc_iptp.R dhs_calc_iptp_mbg.R dhs_helpers_iptp.R 
+# Merged from: dhs_calc_iptp.R dhs_calc_iptp_mbg.R dhs_helpers_iptp.R
 # Contains the survey-weighted calc, MBG cluster-prep, and indicator-
 # specific helpers for this family.
 

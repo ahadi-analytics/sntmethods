@@ -1,6 +1,6 @@
 # antimalarial indicator
 #
-# Merged from: dhs_calc_antimalarial.R dhs_calc_antimalarial_mbg.R dhs_helpers_antimalarial.R 
+# Merged from: dhs_calc_antimalarial.R dhs_calc_antimalarial_mbg.R dhs_helpers_antimalarial.R
 # Contains the survey-weighted calc, MBG cluster-prep, and indicator-
 # specific helpers for this family.
 

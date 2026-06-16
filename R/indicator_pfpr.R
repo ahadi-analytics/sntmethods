@@ -1,6 +1,6 @@
 # pfpr indicator
 #
-# Merged from: dhs_calc_pfpr.R dhs_calc_pfpr_mbg.R dhs_helpers_pfpr.R 
+# Merged from: dhs_calc_pfpr.R dhs_calc_pfpr_mbg.R dhs_helpers_pfpr.R
 # Contains the survey-weighted calc, MBG cluster-prep, and indicator-
 # specific helpers for this family.
 

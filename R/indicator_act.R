@@ -1,6 +1,6 @@
 # act indicator
 #
-# Merged from: dhs_calc_act.R dhs_calc_act_mbg.R dhs_helpers_act.R 
+# Merged from: dhs_calc_act.R dhs_calc_act_mbg.R dhs_helpers_act.R
 # Contains the survey-weighted calc, MBG cluster-prep, and indicator-
 # specific helpers for this family.
 

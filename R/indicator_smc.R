@@ -1,6 +1,6 @@
 # smc indicator
 #
-# Merged from: dhs_calc_smc.R dhs_calc_smc_mbg.R dhs_helpers_smc.R 
+# Merged from: dhs_calc_smc.R dhs_calc_smc_mbg.R dhs_helpers_smc.R
 # Contains the survey-weighted calc, MBG cluster-prep, and indicator-
 # specific helpers for this family.
 

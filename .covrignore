@@ -6,6 +6,6 @@ R/mbg_pipeline.R
 R/mbg_fit_indicator.R
 R/mbg_outputs.R
 
-# Agent/assistant config — not package code.
+# Agent/assistant config - not package code.
 CLAUDE.md
 AGENTS.md

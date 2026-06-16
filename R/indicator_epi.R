@@ -1,6 +1,6 @@
 # epi indicator
 #
-# Merged from: dhs_calc_epi.R dhs_calc_epi_mbg.R dhs_helpers_epi.R 
+# Merged from: dhs_calc_epi.R dhs_calc_epi_mbg.R dhs_helpers_epi.R
 # Contains the survey-weighted calc, MBG cluster-prep, and indicator-
 # specific helpers for this family.
 

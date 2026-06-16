@@ -1,6 +1,6 @@
 # anemia indicator
 #
-# Merged from: dhs_calc_severe_anemia.R dhs_calc_anemia_mbg.R dhs_helpers_anemia.R 
+# Merged from: dhs_calc_severe_anemia.R dhs_calc_anemia_mbg.R dhs_helpers_anemia.R
 # Contains the survey-weighted calc, MBG cluster-prep, and indicator-
 # specific helpers for this family.
 

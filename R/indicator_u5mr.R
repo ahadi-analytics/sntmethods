@@ -1,6 +1,6 @@
 # u5mr indicator
 #
-# Merged from: dhs_calc_u5mr.R dhs_calc_u5mr_mbg.R 
+# Merged from: dhs_calc_u5mr.R dhs_calc_u5mr_mbg.R
 # Contains the survey-weighted calc, MBG cluster-prep, and indicator-
 # specific helpers for this family.
 

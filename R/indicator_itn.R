@@ -1,6 +1,6 @@
 # itn indicator
 #
-# Merged from: dhs_calc_itn.R dhs_calc_itn_mbg.R dhs_helpers_itn.R 
+# Merged from: dhs_calc_itn.R dhs_calc_itn_mbg.R dhs_helpers_itn.R
 # Contains the survey-weighted calc, MBG cluster-prep, and indicator-
 # specific helpers for this family.
 
