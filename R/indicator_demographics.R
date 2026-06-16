@@ -25,12 +25,17 @@
 #'   member. Must contain the cluster, age, and de jure residence variables
 #'   named in `survey_vars`.
 #' @param gps_data DHS GPS (GE) data frame with cluster coordinates.
-#' @param indicators Character vector of indicator codes to compute. One or
-#'   more of `"prop_u5"` (under 5 years) and `"prop_ov5"` (5 years and older).
-#'   Default: both.
+#' @param indicators Character vector of indicator codes to compute. Any of
+#'   `"prop_u5"` / `"prop_ov5"` (whole resident population) and the
+#'   residence-stratified variants `"prop_u5_urban"`, `"prop_u5_rural"`,
+#'   `"prop_ov5_urban"`, `"prop_ov5_rural"`. Default: all six. The stratified
+#'   variants split clusters by `hv025` (each DHS EA is classified urban or
+#'   rural), so an urban indicator is present only at urban clusters and a
+#'   rural indicator only at rural clusters.
 #' @param survey_vars Named list mapping logical names to PR variable names:
 #'   `cluster` (default `"hv001"`), `age` (default `"hv105"`, age in years),
-#'   and `dejure` (default `"hv102"`, usual resident flag).
+#'   `dejure` (default `"hv102"`, usual resident flag), and `residence`
+#'   (default `"hv025"`, type of place of residence; 1 = urban, 2 = rural).
 #' @param gps_vars Named list mapping GPS variable names: `cluster`
 #'   (default `"DHSCLUST"`), `lat` (`"LATNUM"`), `lon` (`"LONGNUM"`).
 #'
@@ -72,11 +77,16 @@
 calc_pop_structure_mbg <- function(
   dhs_pr,
   gps_data,
-  indicators = c("prop_u5", "prop_ov5"),
+  indicators = c(
+    "prop_u5", "prop_ov5",
+    "prop_u5_urban", "prop_u5_rural",
+    "prop_ov5_urban", "prop_ov5_rural"
+  ),
   survey_vars = list(
     cluster = "hv001",
     age = "hv105",
-    dejure = "hv102"
+    dejure = "hv102",
+    residence = "hv025"
   ),
   gps_vars = list(
     cluster = "DHSCLUST",
@@ -123,6 +133,7 @@ calc_pop_structure_mbg <- function(
   cluster_var <- survey_vars$cluster
   age_var <- survey_vars$age
   dejure_var <- survey_vars$dejure
+  residence_var <- survey_vars$residence
 
   if (!cluster_var %in% names(dhs_pr)) {
     cli::cli_abort("Cluster variable {.var {cluster_var}} not found in dhs_pr")
@@ -136,6 +147,12 @@ calc_pop_structure_mbg <- function(
     age = as.numeric(haven::zap_labels(dhs_pr[[age_var]])),
     dejure = if (dejure_var %in% names(dhs_pr)) {
       as.numeric(haven::zap_labels(dhs_pr[[dejure_var]]))
+    } else {
+      NA_real_
+    },
+    # hv025: 1 = urban, 2 = rural (cluster-level attribute)
+    residence = if (!is.null(residence_var) && residence_var %in% names(dhs_pr)) {
+      as.numeric(haven::zap_labels(dhs_pr[[residence_var]]))
     } else {
       NA_real_
     }
@@ -183,8 +200,28 @@ calc_pop_structure_mbg <- function(
       next
     }
 
+    # Restrict to a residence stratum for urban/rural indicators
+    data_sub <- pr
+    if (!is.null(spec$residence)) {
+      if (all(is.na(pr$residence))) {
+        cli::cli_alert_warning(
+          "Residence variable {.var {residence_var}} unavailable - skipping {.val {spec$name}}"
+        )
+        next
+      }
+      res_code <- if (identical(spec$residence, "urban")) 1 else 2
+      data_sub <- pr[!is.na(pr$residence) & pr$residence == res_code, ,
+                     drop = FALSE]
+      if (nrow(data_sub) == 0) {
+        cli::cli_alert_warning(
+          "No {spec$residence} members for {.val {spec$name}} - skipping"
+        )
+        next
+      }
+    }
+
     dt <- .aggregate_to_mbg_clusters(
-      individual_data = pr,
+      individual_data = data_sub,
       indicator_col = outcome_col,
       gps_clean = gps_clean,
       result_name = spec$name
@@ -213,12 +250,18 @@ calc_pop_structure_mbg <- function(
 #' age-structure MBG output. Each entry defines the indicator `name` and the
 #' binary `outcome` column counted as the numerator.
 #'
-#' @return List of named lists with fields `name`, `outcome`.
+#' @return List of named lists with fields `name`, `outcome`, and `residence`
+#'   (`NULL` for all-residence indicators, or `"urban"`/`"rural"` for the
+#'   residence-stratified variants).
 #' @noRd
 .pop_structure_mbg_dictionary <- function() {
   list(
-    list(name = "prop_u5",  outcome = "is_u5"),
-    list(name = "prop_ov5", outcome = "is_ov5")
+    list(name = "prop_u5",        outcome = "is_u5",  residence = NULL),
+    list(name = "prop_ov5",       outcome = "is_ov5", residence = NULL),
+    list(name = "prop_u5_urban",  outcome = "is_u5",  residence = "urban"),
+    list(name = "prop_u5_rural",  outcome = "is_u5",  residence = "rural"),
+    list(name = "prop_ov5_urban", outcome = "is_ov5", residence = "urban"),
+    list(name = "prop_ov5_rural", outcome = "is_ov5", residence = "rural")
   )
 }
 
@@ -279,6 +322,46 @@ pop_structure_dictionary <- function() {
       num_desc        = "De jure household members aged 5 years and older",
       denom_desc      = "All de jure household members with known age",
       denom_code      = "hh_pop_dejure"
+    ),
+    list(
+      indicator       = "POP_U5_URBAN",
+      indicator_code  = "prop_u5_urban",
+      indicator_title = "Proportion of population under 5 years (urban)",
+      outcome_var     = "is_u5",
+      filter_expr     = "hv025 == 1",
+      num_desc        = "De jure urban household members under 5 years",
+      denom_desc      = "All de jure urban household members with known age",
+      denom_code      = "hh_pop_dejure_urban"
+    ),
+    list(
+      indicator       = "POP_U5_RURAL",
+      indicator_code  = "prop_u5_rural",
+      indicator_title = "Proportion of population under 5 years (rural)",
+      outcome_var     = "is_u5",
+      filter_expr     = "hv025 == 2",
+      num_desc        = "De jure rural household members under 5 years",
+      denom_desc      = "All de jure rural household members with known age",
+      denom_code      = "hh_pop_dejure_rural"
+    ),
+    list(
+      indicator       = "POP_OV5_URBAN",
+      indicator_code  = "prop_ov5_urban",
+      indicator_title = "Proportion of population 5 years and older (urban)",
+      outcome_var     = "is_ov5",
+      filter_expr     = "hv025 == 1",
+      num_desc        = "De jure urban household members aged 5 years and older",
+      denom_desc      = "All de jure urban household members with known age",
+      denom_code      = "hh_pop_dejure_urban"
+    ),
+    list(
+      indicator       = "POP_OV5_RURAL",
+      indicator_code  = "prop_ov5_rural",
+      indicator_title = "Proportion of population 5 years and older (rural)",
+      outcome_var     = "is_ov5",
+      filter_expr     = "hv025 == 2",
+      num_desc        = "De jure rural household members aged 5 years and older",
+      denom_desc      = "All de jure rural household members with known age",
+      denom_code      = "hh_pop_dejure_rural"
     )
   )
 }

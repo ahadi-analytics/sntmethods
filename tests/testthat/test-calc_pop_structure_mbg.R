@@ -6,6 +6,8 @@
     hv105 = c(2, 4, 30, 98, 1, 8, 95, 3),
     # last-but-one record (95) is not a usual resident -> dropped
     hv102 = c(1, 1, 1, 1, 1, 1, 0, 1),
+    # hv025: cluster 1 is urban (1), cluster 2 is rural (2)
+    hv025 = c(1, 1, 1, 1, 2, 2, 2, 2),
     stringsAsFactors = FALSE
   )
 }
@@ -58,12 +60,47 @@ test_that("calc_pop_structure_mbg errors when age variable is absent", {
 test_that("calc_pop_structure_mbg returns one tibble per indicator", {
   res <- calc_pop_structure_mbg(.mock_pr_roster(), .mock_gps())
 
-  expect_named(res, c("prop_u5", "prop_ov5"), ignore.order = TRUE)
+  expect_named(
+    res,
+    c(
+      "prop_u5", "prop_ov5",
+      "prop_u5_urban", "prop_u5_rural",
+      "prop_ov5_urban", "prop_ov5_rural"
+    ),
+    ignore.order = TRUE
+  )
   for (dt in res) {
     expect_true(all(
       c("cluster_id", "indicator", "samplesize", "x", "y") %in% names(dt)
     ))
   }
+})
+
+
+test_that("urban/rural strata restrict to the matching clusters", {
+  res <- calc_pop_structure_mbg(.mock_pr_roster(), .mock_gps())
+
+  # Cluster 1 is urban, cluster 2 is rural (hv025)
+  expect_equal(res$prop_u5_urban$cluster_id, 1)
+  expect_equal(res$prop_u5_rural$cluster_id, 2)
+
+  # Urban + rural denominators reconstruct the all-residence denominator
+  all_n <- sum(res$prop_u5$samplesize)
+  strat_n <- sum(res$prop_u5_urban$samplesize) +
+    sum(res$prop_u5_rural$samplesize)
+  expect_equal(strat_n, all_n)
+
+  # Urban u5 count (cluster 1: ages 2, 4) = 2
+  expect_equal(res$prop_u5_urban$indicator, 2)
+  expect_equal(res$prop_u5_urban$samplesize, 3)
+})
+
+
+test_that("strata are skipped when hv025 is absent (base indicators remain)", {
+  pr <- .mock_pr_roster()
+  pr$hv025 <- NULL
+  res <- calc_pop_structure_mbg(pr, .mock_gps())
+  expect_named(res, c("prop_u5", "prop_ov5"), ignore.order = TRUE)
 })
 
 test_that("de jure filtering and unknown-age codes drop the right records", {

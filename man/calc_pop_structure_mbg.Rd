@@ -7,8 +7,10 @@
 calc_pop_structure_mbg(
   dhs_pr,
   gps_data,
-  indicators = c("prop_u5", "prop_ov5"),
-  survey_vars = list(cluster = "hv001", age = "hv105", dejure = "hv102"),
+  indicators = c("prop_u5", "prop_ov5", "prop_u5_urban", "prop_u5_rural",
+    "prop_ov5_urban", "prop_ov5_rural"),
+  survey_vars = list(cluster = "hv001", age = "hv105", dejure = "hv102", residence =
+    "hv025"),
   gps_vars = list(cluster = "DHSCLUST", lat = "LATNUM", lon = "LONGNUM")
 )
 }
@@ -19,13 +21,18 @@ named in \code{survey_vars}.}
 
 \item{gps_data}{DHS GPS (GE) data frame with cluster coordinates.}
 
-\item{indicators}{Character vector of indicator codes to compute. One or
-more of \code{"prop_u5"} (under 5 years) and \code{"prop_ov5"} (5 years and older).
-Default: both.}
+\item{indicators}{Character vector of indicator codes to compute. Any of
+\code{"prop_u5"} / \code{"prop_ov5"} (whole resident population) and the
+residence-stratified variants \code{"prop_u5_urban"}, \code{"prop_u5_rural"},
+\code{"prop_ov5_urban"}, \code{"prop_ov5_rural"}. Default: all six. The stratified
+variants split clusters by \code{hv025} (each DHS EA is classified urban or
+rural), so an urban indicator is present only at urban clusters and a
+rural indicator only at rural clusters.}
 
 \item{survey_vars}{Named list mapping logical names to PR variable names:
 \code{cluster} (default \code{"hv001"}), \code{age} (default \code{"hv105"}, age in years),
-and \code{dejure} (default \code{"hv102"}, usual resident flag).}
+\code{dejure} (default \code{"hv102"}, usual resident flag), and \code{residence}
+(default \code{"hv025"}, type of place of residence; 1 = urban, 2 = rural).}
 
 \item{gps_vars}{Named list mapping GPS variable names: \code{cluster}
 (default \code{"DHSCLUST"}), \code{lat} (\code{"LATNUM"}), \code{lon} (\code{"LONGNUM"}).}

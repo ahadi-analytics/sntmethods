@@ -220,6 +220,10 @@
     # Demographics -- PR module (age structure of resident population)
     prop_u5            = list(recode = "PR", category = "Demographics", cascade = na_int, age = "all ages",     pop_type = "all"),
     prop_ov5           = list(recode = "PR", category = "Demographics", cascade = na_int, age = "all ages",     pop_type = "all"),
+    prop_u5_urban      = list(recode = "PR", category = "Demographics", cascade = na_int, age = "all ages",     pop_type = "all"),
+    prop_u5_rural      = list(recode = "PR", category = "Demographics", cascade = na_int, age = "all ages",     pop_type = "all"),
+    prop_ov5_urban     = list(recode = "PR", category = "Demographics", cascade = na_int, age = "all ages",     pop_type = "all"),
+    prop_ov5_rural     = list(recode = "PR", category = "Demographics", cascade = na_int, age = "all ages",     pop_type = "all"),
     # ANC -- IR module
     anc_1plus         = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49", pop_type = "wra"),
     anc_2plus         = list(recode = "IR", category = "Maternal health", cascade = na_int, age = "women 15-49", pop_type = "wra"),
@@ -589,6 +593,8 @@
     "prop_richest", "prop_q5",
     # Demographics (PR module) -- resident population age structure
     "prop_u5", "prop_ov5",
+    "prop_u5_urban", "prop_u5_rural",
+    "prop_ov5_urban", "prop_ov5_rural",
     # Derived
     "eff_cm_any", "eff_cm_public"
   )

@@ -1480,7 +1480,7 @@ run_mbg_pipeline <- function(
     fever = 1L,
     antimalarial = 2L,
     wealth = 2L,  # Default: prop_poorest and prop_richest
-    pop_structure = 2L,  # prop_u5 and prop_ov5
+    pop_structure = 6L,  # prop_u5/ov5 plus urban/rural strata
     # Individual pfpr indicators fall through to full pfpr calc
     pfpr_rdt = , pfpr_mic = , pfpr_rdt_u5 = , pfpr_mic_u5 = 4L,
     # Individual ITN indicators process only themselves
@@ -1537,7 +1537,9 @@ run_mbg_pipeline <- function(
     prop_middle = , prop_q3 = , prop_richer = , prop_q4 = ,
     prop_richest = , prop_q5 = 1L,
     # Individual demographic indicators
-    prop_u5 = , prop_ov5 = 1L,
+    prop_u5 = , prop_ov5 = ,
+    prop_u5_urban = , prop_u5_rural = ,
+    prop_ov5_urban = , prop_ov5_rural = 1L,
     # Default fallback
     1L
   )
@@ -2184,6 +2186,8 @@ run_mbg_pipeline <- function(
     },
 
     prop_u5 = , prop_ov5 = ,
+    prop_u5_urban = , prop_u5_rural = ,
+    prop_ov5_urban = , prop_ov5_rural = ,
     pop_structure = {
       if (!"PR" %in% names(survey_data)) {
         return(skip_indicator("Missing PR data (Person Recode)"))
@@ -2193,7 +2197,11 @@ run_mbg_pipeline <- function(
           dhs_pr = survey_data$PR,
           gps_data = gps_data,
           indicators = if (identical(category, "pop_structure")) {
-            c("prop_u5", "prop_ov5")
+            c(
+              "prop_u5", "prop_ov5",
+              "prop_u5_urban", "prop_u5_rural",
+              "prop_ov5_urban", "prop_ov5_rural"
+            )
           } else {
             category
           }
