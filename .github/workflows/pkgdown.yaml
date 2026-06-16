@@ -48,9 +48,14 @@ jobs:
           sudo apt-get install -y libgdal-dev libgeos-dev libproj-dev libudunits2-dev
         shell: bash
 
+      # Install hard deps (Imports) + the doc toolchain only. The optional
+      # MBG stack (INLA, mbg) lives outside CRAN and cannot be resolved by pak
+      # here; it is not needed to build the reference or the eval=FALSE
+      # vignettes, so we skip Suggests.
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          extra-packages: any::pkgdown, local::.
+          dependencies: '"hard"'
+          extra-packages: any::pkgdown, any::knitr, any::rmarkdown, local::.
           needs: website
 
       - name: Build site

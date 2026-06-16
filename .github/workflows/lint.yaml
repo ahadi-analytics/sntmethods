@@ -35,10 +35,11 @@ jobs:
         with:
           use-public-rspm: true
 
+      # lint_package() only parses source (object_usage_linter is disabled),
+      # so it needs lintr alone - not the package or its (INLA/mbg) deps.
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          extra-packages: any::lintr, local::.
-          needs: lint
+          extra-packages: any::lintr
 
       - name: Lint
         run: lintr::lint_package()

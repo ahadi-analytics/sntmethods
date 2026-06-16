@@ -54,6 +54,9 @@ jobs:
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
+      # The optional MBG stack (INLA, mbg) lives outside CRAN and cannot be
+      # installed in CI, so do not fail the check on those missing Suggests.
+      _R_CHECK_FORCE_SUGGESTS_: false
 
     steps:
       - uses: actions/checkout@v4
@@ -72,10 +75,22 @@ jobs:
           sudo apt-get install -y libgdal-dev libgeos-dev libproj-dev libudunits2-dev
         shell: bash
 
+      # Install hard deps + rcmdcheck + the installable Suggests, but NOT the
+      # MBG stack (INLA, mbg) which pak cannot resolve here. `dependencies:
+      # '"hard"'` skips Suggests; the installable ones tests need are added
+      # back explicitly so the suite still runs.
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          extra-packages: any::rcmdcheck
-          needs: check
+          dependencies: '"hard"'
+          extra-packages: >-
+            any::rcmdcheck, any::testthat, any::knitr, any::rmarkdown,
+            any::arrow, any::sf, any::terra, any::exactextractr,
+            any::data.table, any::tibble, any::tidyr, any::stringr,
+            any::purrr, any::lubridate, any::zoo, any::scales,
+            any::stlplus, any::trend, any::qs2, any::fs, any::glue,
+            any::here, any::janitor, any::readr, any::writexl,
+            any::countrycode, any::rnaturalearth, any::RColorBrewer,
+            any::httr, any::tmap, any::sn
 
       - uses: r-lib/actions/check-r-package@v2
         with:
