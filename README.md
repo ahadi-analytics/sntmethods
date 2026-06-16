@@ -3,7 +3,6 @@
 <!-- badges: start -->
 
 [![R-CMD-check](https://github.com/ahadi-analytics/sntmethods/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/ahadi-analytics/sntmethods/actions/workflows/R-CMD-check.yaml)
-[![pkgdown](https://github.com/ahadi-analytics/sntmethods/actions/workflows/pkgdown.yaml/badge.svg)](https://github.com/ahadi-analytics/sntmethods/actions/workflows/pkgdown.yaml)
 [![lint](https://github.com/ahadi-analytics/sntmethods/actions/workflows/lint.yaml/badge.svg)](https://github.com/ahadi-analytics/sntmethods/actions/workflows/lint.yaml)
 ![Coverage](man/badges/coverage.svg)
 
