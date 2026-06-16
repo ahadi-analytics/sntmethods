@@ -36,10 +36,12 @@ jobs:
           use-public-rspm: true
 
       # lint_package() only parses source (object_usage_linter is disabled),
-      # so it needs lintr alone - not the package or its (INLA/mbg) deps.
+      # so it needs lintr alone. Override `packages` (default `deps::.,
+      # any::sessioninfo`) so the action does NOT resolve the package's own
+      # dependencies - that pulls in INLA, which is off-CRAN and unresolvable.
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          extra-packages: any::lintr
+          packages: any::lintr
 
       - name: Lint
         run: lintr::lint_package()
