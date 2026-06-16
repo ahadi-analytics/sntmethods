@@ -2,32 +2,58 @@
 # Need help debugging build failures? Start at https://github.com/r-lib/actions#where-to-find-help
 on:
   push:
-    branches: [main, master, develop]
+    branches: [main, master]
+    paths-ignore:
+      - '**.md'
+      - 'man/**'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.Rbuildignore'
   pull_request:
-    branches: [main, master, develop]
+    paths-ignore:
+      - '**.md'
+      - 'man/**'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.Rbuildignore'
+  schedule:
+    # weekly full-matrix run (Sunday 06:00 UTC) to catch platform drift
+    - cron: '0 6 * * 0'
+  workflow_dispatch:
 
-name: R-CMD-check
+name: R-CMD-check.yaml
+
+permissions: read-all
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   R-CMD-check:
     runs-on: ${{ matrix.config.os }}
 
+    # skip draft PRs; everything else runs
+    if: ${{ !github.event.pull_request.draft }}
+
     name: ${{ matrix.config.os }} (${{ matrix.config.r }})
 
+    timeout-minutes: 45
+
     strategy:
-      fail-fast: false
+      # PRs: stop the matrix on first failure to save minutes.
+      # Push/schedule: keep going so we see every platform's result.
+      fail-fast: ${{ github.event_name == 'pull_request' }}
       matrix:
-        config:
-          - {os: macOS-latest,   r: 'release'}
-          - {os: windows-latest, r: 'release'}
-          - {os: ubuntu-latest,  r: 'devel', http-user-agent: 'release'}
-          - {os: ubuntu-latest,  r: 'release'}
-          - {os: ubuntu-latest,  r: 'oldrel-1'}
+        # PRs run Linux only (cheap). Push to master + weekly schedule run the
+        # full Linux + Windows matrix. Windows costs ~2x Linux per minute.
+        config: ${{ fromJSON(github.event_name == 'pull_request' && '[{"os":"ubuntu-latest","r":"release"}]' || '[{"os":"ubuntu-latest","r":"release"},{"os":"windows-latest","r":"release"}]') }}
 
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
-      _R_CHECK_FORCE_SUGGESTS_: false
 
     steps:
       - uses: actions/checkout@v4
@@ -37,27 +63,14 @@ jobs:
       - uses: r-lib/actions/setup-r@v2
         with:
           r-version: ${{ matrix.config.r }}
-          http-user-agent: ${{ matrix.config.http-user-agent }}
           use-public-rspm: true
 
-      # Install system dependencies for spatial packages
-      - name: Install spatial system dependencies (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew install gdal proj geos
-
-      - name: Install spatial system dependencies (Linux)
+      - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libgdal-dev \
-            libgeos-dev \
-            libproj-dev \
-            libudunits2-dev \
-            libxml2-dev \
-            libssl-dev \
-            libcurl4-openssl-dev
+          sudo apt-get install -y libgdal-dev libgeos-dev libproj-dev libudunits2-dev
+        shell: bash
 
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
@@ -67,3 +80,4 @@ jobs:
       - uses: r-lib/actions/check-r-package@v2
         with:
           upload-snapshots: true
+          build_args: 'c("--no-manual","--compact-vignettes=gs+qpdf")'
