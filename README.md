@@ -3,6 +3,9 @@
 <!-- badges: start -->
 
 [![R-CMD-check](https://github.com/ahadi-analytics/sntmethods/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/ahadi-analytics/sntmethods/actions/workflows/R-CMD-check.yaml)
+[![pkgdown](https://github.com/ahadi-analytics/sntmethods/actions/workflows/pkgdown.yaml/badge.svg)](https://github.com/ahadi-analytics/sntmethods/actions/workflows/pkgdown.yaml)
+[![CodeFactor](https://www.codefactor.io/repository/github/ahadi-analytics/sntmethods/badge)](https://www.codefactor.io/repository/github/ahadi-analytics/sntmethods)
+![Coverage](man/badges/coverage.svg)
 
 <!-- badges: end -->
 
