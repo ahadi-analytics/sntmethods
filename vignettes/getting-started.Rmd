@@ -108,22 +108,51 @@ remotes::install_github("ihmeuw/mbg")
 The DHS-survey and routine-data workflows have no spatial dependencies - you
 can use them without INLA, `mbg`, or even `sf`.
 
-## A 60-second taste
+## Reading DHS data: two paths
 
-Read a DHS recode and compute a survey-weighted indicator:
+`sntmethods` does **not** lock you into a specific reader. Every
+`calc_*_dhs()` function takes a plain data frame, so you have two paths:
+
+- **Path A - I have one or a few DHS files (`.dta`, `.csv`, `.rds`, ...).**
+  Use [`sntutils::read()`](https://ahadi-analytics.github.io/sntutils/) (or
+  `haven::read_dta()`) to load each file and pass it straight to the
+  indicator. No special directory layout, no archive, no parquet.
+
+  ```r
+  library(sntmethods)
+  library(sntutils)
+
+  hr <- sntutils::read("data/BUHR62FL.DTA")  # any of .dta .csv .rds .sav ...
+  pr <- sntutils::read("data/BUPR62FL.DTA")
+
+  itn <- calc_itn_dhs(dhs_hr = hr, dhs_pr = pr)
+  ```
+
+  This is the right path for most analysts and is what we recommend if you
+  are working with a single country / survey.
+
+- **Path B - I want to discover and read across an archive of many
+  surveys.** Build a hive-partitioned parquet archive in AHADI's layout
+  (see [`?dhs_read`](../reference/dhs_read.html)) and use `dhs_read()` to
+  query it by `file_type` / `country_code` / `survey_year` / `survey_type`.
+  This is the layout `run_mbg_pipeline()` consumes.
+
+  ```r
+  hr <- dhs_read(path = "path/to/parquet", file_type = "HR",
+                 country_code = "BU", survey_year = 2016)
+  pr <- dhs_read(path = "path/to/parquet", file_type = "PR",
+                 country_code = "BU", survey_year = 2016)
+  itn <- calc_itn_dhs(dhs_hr = hr, dhs_pr = pr)
+  ```
+
+`dhs_read()` is **not** a general DHS file reader - it is an archive query
+tool. If you only have a handful of files, stay on Path A. The only reason
+to take Path B is to enable cross-survey discovery and the
+[MBG pipeline](spatial-modeling.html).
+
+The output is identical in both cases:
 
 ```r
-library(sntmethods)
-
-# Household and person recodes for one survey
-hr <- dhs_read(path = "path/to/parquet", file_type = "HR",
-               country_code = "BU", survey_year = 2016)
-pr <- dhs_read(path = "path/to/parquet", file_type = "PR",
-               country_code = "BU", survey_year = 2016)
-
-# ITN ownership/access/use - survey-weighted, with CIs and design effects
-itn <- calc_itn_dhs(dhs_hr = hr, dhs_pr = pr)
-
 itn$adm1
 #> # a long-format tibble: indicator, indicator_code, point, ci_l, ci_u,
 #> #   numerator, denominator, adm1, survey_year, ...

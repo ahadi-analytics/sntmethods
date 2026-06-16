@@ -2,7 +2,7 @@
 % Please edit documentation in R/utils.R
 \name{dhs_read}
 \alias{dhs_read}
-\title{Filter DHS Parquet Dataset (Arrow)}
+\title{Read a DHS recode from a hive-partitioned parquet archive}
 \usage{
 dhs_read(
   path,
@@ -15,23 +15,128 @@ dhs_read(
 )
 }
 \arguments{
-\item{path}{Root parquet directory}
+\item{path}{Root parquet directory (must follow the \emph{Directory layout}
+above).}
 
-\item{survey_id}{Optional survey ID (e.g., "KEKR8A")}
+\item{survey_id}{Optional survey ID (e.g. \code{"KEKR8A"}). Matches the
+\code{survey_id=...} partition.}
 
-\item{file_type}{Optional file type (PR, IR, KR, GE)}
+\item{file_type}{DHS recode code: one of \code{"PR"}, \code{"HR"}, \code{"IR"}, \code{"KR"},
+\code{"GE"}, \code{"BR"}, \code{"MR"}, \code{"WI"}. Required.}
 
-\item{country_code}{Optional two-letter DHS country code}
+\item{country_code}{DHS two-letter country code (e.g. \code{"TG"}).}
 
-\item{survey_year}{Optional numeric survey year}
+\item{survey_year}{Survey year (e.g. \code{2017}).}
 
-\item{survey_type}{Optional DHS survey type (e.g., "DHS", "MIS")}
+\item{survey_type}{DHS survey type (e.g. \code{"DHS"}, \code{"MIS"}). Applied as a
+post-read filter (not a partition column).}
 
 \item{verbose}{Logical; print progress messages? Default \code{TRUE}.}
 }
 \value{
-A tibble of filtered DHS records
+A tibble of filtered DHS records with \code{haven} labels preserved.
 }
 \description{
-Filter DHS Parquet Dataset (Arrow)
+Reads a single DHS / MIS recode from a parquet archive that is laid out
+using AHADI's Hive partitioning convention (see \emph{Directory layout} below).
+This is the function \code{run_mbg_pipeline()} and the AHADI example scripts use
+internally; it is \strong{not} a general-purpose DHS reader.
+}
+\section{When to use \code{dhs_read()}}{
+
+
+Use \code{dhs_read()} only when you have a parquet archive that follows the
+layout below. The archive is what makes multi-country, multi-year,
+multi-recode discovery (\code{dhs_read(file_type = "GE", country_code = ...)})
+and the \code{run_mbg_pipeline()} workflow possible.
+
+If you have a \strong{single DHS file} (\code{.dta}, \code{.csv}, \code{.rds}, \code{.sav}, ...),
+you do \strong{not} need \code{dhs_read()} or a parquet archive at all. Read the
+file with \code{\link[sntutils:read]{sntutils::read()}} (or \code{haven::read_dta()}) and pass the
+resulting data frame straight to any \verb{calc_*_dhs()} function:
+
+\if{html}{\out{<div class="sourceCode r">}}\preformatted{kr <- sntutils::read("TGKR81FL.DTA")   # or .csv, .rds, .sav, ...
+ge <- sntutils::read("TGGE8AFL.dta")
+fever <- calc_fever_dhs(dhs_kr = kr, gps_data = ge,
+                        shapefile = shp_admin,
+                        admin_level = c("adm0", "adm1"))
+}\if{html}{\out{</div>}}
+
+Every \verb{calc_*_dhs()} estimator accepts a plain data frame - the recode-
+specific reader is just convenience.
+}
+
+\section{Directory layout (Hive partitioning)}{
+
+
+\code{dhs_read()} expects \code{path} to be the root of a directory tree partitioned
+in this order, with one parquet file per survey at the leaf:
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{path/
+  file_type=GE/
+    country_code=TG/
+      survey_year=2017/
+        survey_id=TGGE8I/
+          data.parquet
+  file_type=KR/
+    country_code=TG/
+      survey_year=2017/
+        survey_id=TGKR81/
+          data.parquet
+  file_type=PR/...
+}\if{html}{\out{</div>}}
+
+Partition keys are read literally as \code{file_type=...}, \code{country_code=...},
+\code{survey_year=...}, \code{survey_id=...}. Allowed \code{file_type} values are
+\code{PR}, \code{HR}, \code{IR}, \code{KR}, \code{GE}, \code{BR}, \code{MR}, \code{WI}. \code{country_code} is the
+DHS two-letter code (e.g. \code{TG}, \code{BU}, \code{KE}).
+}
+
+\section{Building your own parquet archive}{
+
+
+To use \code{dhs_read()} (and therefore \code{run_mbg_pipeline()}) on your own data,
+convert each raw DHS recode into a parquet file at the matching leaf path.
+A minimal recipe per file:
+
+\if{html}{\out{<div class="sourceCode r">}}\preformatted{library(arrow); library(haven); library(fs)
+
+raw <- haven::read_dta("TGKR81FL.DTA")          # preserves labels
+raw$file_type    <- "KR"
+raw$country_code <- "TG"
+raw$survey_year  <- 2017L
+raw$survey_id    <- "TGKR81"
+raw$survey_type  <- "DHS"                       # or "MIS"
+
+leaf <- fs::path("path/to/parquet",
+                 "file_type=KR",
+                 "country_code=TG",
+                 "survey_year=2017",
+                 "survey_id=TGKR81")
+fs::dir_create(leaf)
+arrow::write_parquet(raw, fs::path(leaf, "data.parquet"))
+}\if{html}{\out{</div>}}
+
+Repeat per recode (GE/PR/HR/KR/IR) and per survey. Keep \code{haven} labels on
+the columns - \code{dhs_read()} and the indicator functions rely on them.
+}
+
+\section{Behaviour notes}{
+
+\itemize{
+\item When \code{country_code} and \code{survey_year} (and optionally \code{survey_id})
+identify a single survey, \code{dhs_read()} calls \code{arrow::read_parquet()}
+directly so haven labels and survey-specific variables are preserved.
+\item When the filter spans multiple surveys, it falls back to
+\code{arrow::open_dataset()} which standardises labels and drops variables
+absent in some surveys. For indicator work, prefer the single-survey path.
+\item Defensive deduplication runs on standard recode keys to guarantee one
+row per respondent unit (some DHS parquet files contain duplicate rows).
+}
+}
+
+\seealso{
+\code{\link[sntutils:read]{sntutils::read()}} for reading a single DHS file directly,
+\code{\link[=run_mbg_pipeline]{run_mbg_pipeline()}} for the multi-survey pipeline that builds on top
+of this archive layout.
 }

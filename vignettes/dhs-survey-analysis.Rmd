@@ -34,6 +34,42 @@ depends on are actually present *before* you build it.
 A complete, runnable version of this workflow ships with the package at
 [`inst/scripts/example_dhs_analysis.R`](https://github.com/ahadi-analytics/sntmethods/blob/master/inst/scripts/example_dhs_analysis.R).
 
+## Reading DHS data: pick a path
+
+Every `calc_*_dhs()` function accepts a plain data frame, so how you read the
+data is up to you. The walkthrough below uses `dhs_read()` against a parquet
+archive because it is the route AHADI uses internally and what
+`run_mbg_pipeline()` is built on. **It is not the only route.**
+
+- **One or a few DHS files (`.dta`, `.csv`, `.rds`, `.sav`, ...)** -
+  read each recode with [`sntutils::read()`](https://ahadi-analytics.github.io/sntutils/)
+  (or `haven::read_dta()`) and skip straight to *Step 2* below. Most analysts
+  should take this path.
+
+  ```r
+  kr <- sntutils::read("TGKR81FL.DTA")
+  ge <- sntutils::read("TGGE8AFL.dta")
+  shp_admin <- sf::read_sf("path/to/admin.shp")
+
+  fever <- calc_fever_dhs(dhs_kr = kr, gps_data = ge,
+                          shapefile = shp_admin,
+                          admin_level = c("adm0", "adm1"))
+  ```
+
+  In this mode you do not need `dhs_read()`, you do not need a parquet
+  archive, and you do not need any directory layout convention. **Step 0
+  (discovery / dictionary inspection) still works** - run
+  `make_dhs_raw_dictionary(kr)` and `list_dhs_var_labels(kr)` on the data
+  frame you just loaded.
+
+- **Archive of many surveys (the path used below).** Build a hive-partitioned
+  parquet archive in the layout documented in
+  [`?dhs_read`](../reference/dhs_read.html) and use `dhs_read()` to query it
+  by file type / country / year. The archive is what enables
+  cross-survey discovery and feeds `run_mbg_pipeline()`. See
+  [Build your own archive](../reference/dhs_read.html#building-your-own-parquet-archive)
+  for a recipe.
+
 ```r
 library(sntmethods)
 
