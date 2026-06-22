@@ -256,18 +256,58 @@ table td, table th {
   border-left: 5px solid $ahadi-steel !important;
   background: rgba($ahadi-steel, 0.08);
   border-top: none; border-right: none; border-bottom: none;
+  color: $ahadi-navy !important;
+  padding: 0.85rem 1rem;
+  margin: 1.2rem 0;
 }
 
 .alert-warning {
   border-left: 5px solid $ahadi-gold !important;
   background: rgba($ahadi-gold, 0.08);
   border-top: none; border-right: none; border-bottom: none;
+  color: $ahadi-navy !important;
+  padding: 0.85rem 1rem;
+  margin: 1.2rem 0;
 }
 
 .alert-danger {
   border-left: 5px solid $ahadi-coral !important;
   background: rgba($ahadi-coral, 0.08);
   border-top: none; border-right: none; border-bottom: none;
+  color: $ahadi-navy !important;
+  padding: 0.85rem 1rem;
+  margin: 1.2rem 0;
+}
+
+.alert-success p, .alert-success li,
+.alert-tip p,     .alert-tip li,
+.alert-warning p, .alert-warning li,
+.alert-danger p,  .alert-danger li {
+  color: $ahadi-navy !important;
+  margin-bottom: 0.25rem;
+}
+
+.alert-success strong,
+.alert-tip strong,
+.alert-warning strong,
+.alert-danger strong {
+  color: $ahadi-navy !important;
+  font-weight: 600;
+}
+
+.alert-success a,
+.alert-tip a,
+.alert-warning a,
+.alert-danger a {
+  color: $ahadi-link !important;
+  text-decoration: underline;
+}
+
+.alert-success a:hover,
+.alert-tip a:hover,
+.alert-warning a:hover,
+.alert-danger a:hover {
+  color: $ahadi-gold !important;
 }
 
 // -----------------------------------------------------------------------------
@@ -447,6 +487,27 @@ $dark-text:      #E6EEF5; // primary text on dark bg
 
   .alert-primary strong,
   .alert-info strong {
+    color: #FFFFFF !important;
+  }
+
+  .alert-success,
+  .alert-tip,
+  .alert-warning,
+  .alert-danger {
+    color: $dark-text !important;
+  }
+
+  .alert-success p, .alert-success li,
+  .alert-tip p,     .alert-tip li,
+  .alert-warning p, .alert-warning li,
+  .alert-danger p,  .alert-danger li {
+    color: $dark-text !important;
+  }
+
+  .alert-success strong,
+  .alert-tip strong,
+  .alert-warning strong,
+  .alert-danger strong {
     color: #FFFFFF !important;
   }
 
