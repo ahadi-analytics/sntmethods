@@ -56,9 +56,21 @@ jobs:
       # The optional MBG stack (INLA, mbg) lives outside CRAN and cannot be
       # installed in CI, so do not fail the check on those missing Suggests.
       _R_CHECK_FORCE_SUGGESTS_: false
+      # The repo carries an renv project for dev reproducibility. Letting it
+      # drive CI forces ~193 source builds (incl. INLA, which can't install
+      # here) and blows past the 45-min timeout. Disable autoload and hide
+      # the lockfile so setup-r-dependencies uses pak + DESCRIPTION + RSPM
+      # binaries instead.
+      RENV_CONFIG_AUTOLOADER_ENABLED: FALSE
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Hide renv project from CI
+        shell: bash
+        run: |
+          [ -f renv.lock ] && mv renv.lock renv.lock.ci-bak || true
+          [ -d renv ] && mv renv renv.ci-bak || true
 
       - uses: r-lib/actions/setup-pandoc@v2
 
