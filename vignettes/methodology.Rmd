@@ -38,13 +38,13 @@ kinds of dictionaries the package provides.
 ## Two kinds of dictionaries
 
 **Indicator dictionaries** describe the *outputs* - each indicator's numerator,
-denominator, codes, and metadata. Use `dhs_dictionary()` for the unified view,
-or per-domain helpers (`itn_dictionary()`, `act_dictionary()`,
-`pfpr_dictionary()`, ...):
+denominator, codes, and metadata. Use `dhs_dictionary()` for the unified view
+across all 16 domains; filter to whichever domain you need.
 
 ```r
 library(sntmethods)
 dhs_dictionary()
+dhs_dictionary() |> dplyr::filter(domain == "ITN")
 ```
 
 **Raw variable dictionaries** describe the *inputs* - every variable present in

@@ -695,6 +695,7 @@ calc_csb_dhs_core <- function(
 #'   numerator_description, denominator_description, denominator_code.
 #'
 #' @keywords internal
+#' @noRd
 csb_dictionary <- function() {
   conds <- .csb_conditions()
   tibble::tibble(

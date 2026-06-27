@@ -145,10 +145,10 @@ survey_dictionary <- purrr::imap_dfr(recodes, function(ft, nm) {
 })
 ```
 
-The package also ships **curated** dictionaries describing the *indicators*
-(not just the raw variables) - `dhs_dictionary()` for the unified view across
-all domains, and per-domain helpers (`itn_dictionary()`, `act_dictionary()`,
-...). See [Methodology & conventions](methodology.html).
+The package also ships a **curated** dictionary describing the *indicators*
+(not just the raw variables). Use `dhs_dictionary()` for the unified view
+across all 16 indicator domains - filter it to whichever domain you need.
+See [Methodology & conventions](methodology.html).
 
 ## Step 1: read the recodes
 

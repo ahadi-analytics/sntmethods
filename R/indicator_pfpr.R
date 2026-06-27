@@ -917,6 +917,7 @@ calc_pfpr_dhs <- function(
 #'   denominator_code, data_level.
 #'
 #' @keywords internal
+#' @noRd
 pfpr_dictionary <- function() {
   conds <- .pfpr_conditions()
   tibble::tibble(

@@ -1123,6 +1123,7 @@ calc_iptp_dhs <- function(
 #' @return Tibble with columns: indicator, indicator_code, indicator_title,
 #'   numerator_description, denominator_description, denominator_code.
 #' @keywords internal
+#' @noRd
 iptp_dictionary <- function() {
   conds <- .iptp_conditions()
   tibble::tibble(
