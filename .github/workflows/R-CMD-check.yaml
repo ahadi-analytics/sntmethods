@@ -69,6 +69,9 @@ jobs:
       - name: Hide renv project from CI
         shell: bash
         run: |
+          # .Rprofile sources renv/activate.R on every R startup, so it has
+          # to go too — otherwise R itself fails to launch in CI.
+          [ -f .Rprofile ] && mv .Rprofile .Rprofile.ci-bak || true
           [ -f renv.lock ] && mv renv.lock renv.lock.ci-bak || true
           [ -d renv ] && mv renv renv.ci-bak || true
 
