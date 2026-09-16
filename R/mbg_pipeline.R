@@ -279,11 +279,13 @@ run_mbg_pipeline <- function(
   cache = TRUE,
   csb_priority_method = c("all", "first", "public", "private"),
   custom_csb_indicator = NULL,
+  on_unresolved_type = c("ask", "skip", "abort"),
   verbose = TRUE,
   debug = FALSE
 ) {
 
   csb_priority_method <- match.arg(csb_priority_method)
+  on_unresolved_type <- match.arg(on_unresolved_type)
 
   cli::cli_alert_info(
     "CSB priority method: {.val {csb_priority_method}}{if (csb_priority_method == 'all') ' (overlaps allowed; csb_public + csb_private + csb_none may exceed 100%)' else ' (mutually exclusive; csb_public + csb_private + csb_none sums to 100%)'}"
@@ -521,62 +523,112 @@ run_mbg_pipeline <- function(
     cluster_data = list(),
     raster_paths = list(),
     survey_metadata = list(),
-    skipped_indicators = list()  # Track skipped indicators per year
+    skipped_indicators = list(),  # Track skipped indicators per year
+    survey_audit = list()         # Data sufficiency per survey (C6)
   )
 
-  # ---- Find surveys using dhs_read() ----
+  # ---- Find surveys by indexing the archive ----
 
   cli::cli_h2("Discovering available surveys")
 
-  # Use dhs_read to find available surveys with GPS data (no survey_type filter
-  # so we can discover all available types)
-  gps_check <- tryCatch({
-    dhs_read(
+  survey_index <- tryCatch(
+    dhs_archive_surveys(
       path = path_dhs_parquet,
-      file_type = "GE",
       country_code = country_iso2,
-      verbose = FALSE
-    )
-  }, error = function(e) {
-    cli::cli_abort(c(
-      "Could not query DHS parquet archive for GPS data",
-      "i" = "Error: {e$message}"
-    ))
-  })
+      file_type = "GE"
+    ),
+    error = function(e) {
+      cli::cli_abort(c(
+        "Could not index the DHS parquet archive for GPS data",
+        "i" = "Error: {conditionMessage(e)}"
+      ))
+    }
+  )
 
-  if (is.null(gps_check) || nrow(gps_check) == 0) {
+  if (is.null(survey_index) || nrow(survey_index) == 0) {
     cli::cli_abort("No surveys with GPS data found for {country_iso2}")
   }
 
-  # Handle missing survey_type - infer from survey_id if needed
-  if ("survey_type" %in% names(gps_check)) {
-    na_types <- is.na(gps_check$survey_type) | gps_check$survey_type == ""
-    if (any(na_types)) {
-      # Default to "DHS" for missing survey types
-      gps_check$survey_type[na_types] <- "DHS"
-      cli::cli_warn(
-        "survey_type is missing for {sum(na_types)} record(s), defaulting to {.val DHS}"
+  unresolved <- survey_index |>
+    dplyr::filter(.data$type_source == "unresolved")
+
+  available_surveys <- survey_index |>
+    dplyr::filter(.data$type_source != "unresolved") |>
+    dplyr::select("DHSYEAR", "survey_type", "type_source", "n_rows") |>
+    dplyr::distinct() |>
+    dplyr::arrange(.data$DHSYEAR, .data$survey_type)
+
+  # ---- Gate on surveys whose type could not be resolved ----
+
+  if (nrow(unresolved) > 0) {
+    unresolved_str <- paste(
+      paste0(
+        "year ", unresolved$DHSYEAR,
+        " (", unresolved$n_rows, " GPS rows",
+        ", filed as survey_year=", unresolved$survey_year_path, ")"
+      ),
+      collapse = "; "
+    )
+
+    cli::cli_alert_danger(
+      "{nrow(unresolved)} survey/surveys have no resolvable survey_type:"
+    )
+    cli::cli_ul(paste0(
+      "year ", unresolved$DHSYEAR,
+      " - ", unresolved$n_rows, " GPS rows, survey_id ",
+      ifelse(nzchar(unresolved$survey_id), unresolved$survey_id, "unknown")
+    ))
+    cli::cli_alert_info(
+      paste(
+        "Survey type was not found in the survey_type= partition, the",
+        "in-file survey_type column, or a SurveyID field. These surveys",
+        "cannot be matched to their PR/HR/KR/IR recodes and will be",
+        "skipped. Fix by re-ingesting with survey_type as an in-file",
+        "column."
       )
+    )
+
+    if (identical(on_unresolved_type, "abort")) {
+      cli::cli_abort("Aborting: unresolved survey types ({unresolved_str}).")
     }
-  } else {
-    # If survey_type column doesn't exist at all, add it
-    gps_check$survey_type <- "DHS"
-    cli::cli_warn("survey_type column not found in GPS data, defaulting to {.val DHS}")
+
+    if (identical(on_unresolved_type, "ask")) {
+      proceed <- .dhs_confirm(
+        "Skip these surveys and continue with the rest?",
+        default = TRUE
+      )
+      if (!isTRUE(proceed)) {
+        cli::cli_abort("Aborted by user at the survey-discovery gate.")
+      }
+    }
+
+    cli::cli_alert_warning(
+      "Skipping {nrow(unresolved)} survey/surveys with unresolved type."
+    )
   }
 
-  # Build available surveys data frame with (year, type) pairs
-  available_surveys <- gps_check |>
-    dplyr::select(DHSYEAR, survey_type) |>
-    dplyr::distinct() |>
-    dplyr::arrange(DHSYEAR, survey_type)
+  if (nrow(available_surveys) == 0) {
+    cli::cli_abort(
+      "No surveys with a resolvable survey_type for {country_iso2}"
+    )
+  }
 
+  # Report how each label was arrived at, so a run is auditable.
   avail_str <- paste(
-    apply(available_surveys, 1, function(r) paste0(r["survey_type"], " ", r["DHSYEAR"])),
+    paste0(available_surveys$survey_type, " ", available_surveys$DHSYEAR),
     collapse = ", "
   )
+
   cli::cli_alert_success(
     "Found GPS data for {nrow(available_surveys)} survey(s): {avail_str}"
   )
+
+  by_source <- table(available_surveys$type_source)
+  source_str <- paste(
+    names(by_source), by_source,
+    sep = " x", collapse = ", "
+  )
+  cli::cli_alert_info("survey_type resolved from: {source_str}")
 
   # Filter by survey_year if specified
   if (!is.null(survey_year)) {
@@ -1159,7 +1211,52 @@ run_mbg_pipeline <- function(
     results$raster_paths[[survey_key]] <- year_results$raster_paths
     results$skipped_indicators[[survey_key]] <- skipped_indicators
 
+    # ---- Data-sufficiency audit for this survey (C6) ----
+    survey_audit <- .mbg_survey_audit(
+      cluster_data = year_results$cluster_data,
+      survey_type = current_survey_type,
+      survey_year = current_year
+    )
+    .mbg_flag_sparse(survey_audit)
+    results$survey_audit[[survey_key]] <- survey_audit
+
   }  # End loop over surveys
+
+  # ---- Collapse the per-survey audit (C6) ----
+
+  results$survey_audit <- tryCatch(
+    purrr::list_rbind(results$survey_audit),
+    error = function(e) results$survey_audit
+  )
+
+  if (is.data.frame(results$survey_audit) &&
+        nrow(results$survey_audit) > 0) {
+    cli::cli_h2("Survey data audit")
+    print(as.data.frame(results$survey_audit))
+
+    if (!is.null(table_out_path)) {
+      tryCatch(
+        sntutils::write_snt_data(
+          obj = list(
+            data = results$survey_audit,
+            data_dict = sntutils::build_dictionary(
+              data = results$survey_audit
+            )
+          ),
+          data_name = glue::glue(
+            "{tolower(country_iso3)}_mbg_survey_audit"
+          ),
+          path = table_out_path,
+          file_formats = c("xlsx", "qs2")
+        ),
+        error = function(e) {
+          cli::cli_alert_warning(
+            "Could not write survey audit: {conditionMessage(e)}"
+          )
+        }
+      )
+    }
+  }
 
   # ---- Build combined final dataset ----
 
@@ -4258,3 +4355,103 @@ run_mbg_pipeline <- function(
 #' @usage # Deprecated: use run_mbg_pipeline() instead
 #' @export
 run_mbg_indicator_pipeline <- run_mbg_pipeline
+
+
+#' Summarise the data behind one survey's MBG inputs
+#'
+#' @description
+#' Every `calc_*_mbg()` function returns cluster tables with the same
+#' schema - `cluster_id`, `indicator` (numerator), `samplesize`
+#' (denominator), `x`, `y` - so a single summary works across indicators.
+#'
+#' The column that matters most is `clusters_with_event`: a binomial SPDE
+#' model fitted to clusters that are almost all `0 / n` produces a surface
+#' driven by the prior and the population weights rather than by the data.
+#' The fit succeeds, the map looks smooth, and nothing in the output says
+#' the signal came from 24 clusters. This table says it.
+#'
+#' @param cluster_data Named list of cluster data.tables for one survey.
+#' @param survey_type Survey type label.
+#' @param survey_year Survey year.
+#' @param recodes_loaded Named integer vector of rows per recode read.
+#' @return A tibble, one row per indicator.
+#' @keywords internal
+#' @noRd
+.mbg_survey_audit <- function(
+  cluster_data,
+  survey_type,
+  survey_year,
+  recodes_loaded = NULL
+) {
+  if (length(cluster_data) == 0) {
+    return(tibble::tibble())
+  }
+
+  recode_str <- if (is.null(recodes_loaded) || length(recodes_loaded) == 0) {
+    NA_character_
+  } else {
+    paste(
+      names(recodes_loaded), format(recodes_loaded, big.mark = ","),
+      sep = ":", collapse = ", "
+    )
+  }
+
+  rows <- lapply(names(cluster_data), function(ind_name) {
+    dt <- cluster_data[[ind_name]]
+
+    if (is.null(dt) || nrow(dt) == 0 ||
+          !all(c("indicator", "samplesize") %in% names(dt))) {
+      return(NULL)
+    }
+
+    n_event <- sum(dt$indicator, na.rm = TRUE)
+    n_denom <- sum(dt$samplesize, na.rm = TRUE)
+
+    tibble::tibble(
+      survey_type = survey_type,
+      survey_year = as.integer(survey_year),
+      indicator = ind_name,
+      n_clusters = nrow(dt),
+      n_denominator = as.numeric(n_denom),
+      n_numerator = as.numeric(n_event),
+      pct = if (n_denom > 0) 100 * n_event / n_denom else NA_real_,
+      clusters_with_event = sum(dt$indicator > 0, na.rm = TRUE),
+      pct_clusters_with_event = 100 *
+        sum(dt$indicator > 0, na.rm = TRUE) / nrow(dt),
+      recodes_loaded = recode_str
+    )
+  })
+
+  purrr::list_rbind(rows[!vapply(rows, is.null, logical(1))])
+}
+
+
+#' Warn when an indicator's clusters are too sparse to model
+#'
+#' @param audit Audit tibble from `.mbg_survey_audit()`.
+#' @param min_clusters_with_event Threshold below which a warning is
+#'   emitted. Not a hard stop: sparsity is a judgement for the analyst,
+#'   and a low-transmission surface can still be the right output.
+#' @keywords internal
+#' @noRd
+.mbg_flag_sparse <- function(audit, min_clusters_with_event = 20L) {
+  if (nrow(audit) == 0) {
+    return(invisible(audit))
+  }
+
+  sparse <- audit[audit$clusters_with_event < min_clusters_with_event, ]
+
+  if (nrow(sparse) > 0) {
+    cli::cli_alert_warning(
+      "Sparse data for {nrow(sparse)} indicator(s) - the fitted surface \\
+       will be driven largely by the prior:"
+    )
+    cli::cli_ul(paste0(
+      sparse$indicator, ": ", sparse$clusters_with_event, "/",
+      sparse$n_clusters, " clusters with an event, ",
+      round(sparse$pct, 2), "% overall"
+    ))
+  }
+
+  invisible(audit)
+}

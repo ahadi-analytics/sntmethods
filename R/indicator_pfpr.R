@@ -615,7 +615,9 @@ calc_pfpr_dhs <- function(
     stratum = "hv022",
     adm1    = "hv024",
     adm2    = NULL,
-    age     = "hc1",
+    age       = "hc1",
+    age_alt   = "hml16a",
+    age_years = "hml16",
     present = "hv103",
     mother  = "hv042",
     rdt     = "hml35",
@@ -1441,6 +1443,13 @@ aggregate_pfpr_admin <- function(
 #'     \item mic: Microscopy result variable (default: "hml32")
 #'   }
 #' @param gps_vars Named list for GPS variable mapping.
+#' @param age_coverage_tolerance Integer months of slack allowed when
+#'   checking that a survey's tested age range covers an indicator's age
+#'   window. Defaults to `6`: DHS does not test children below six months,
+#'   so a survey covering 6-59 months would otherwise fail the `u5` window
+#'   of 0-59. Indicators whose window the survey does not cover are
+#'   skipped, so a 6-59 month survey never returns an estimate labelled
+#'   2-10. Reasons are recorded in `attr(x, "skipped_indicators")`.
 #'
 #' @return A named list of data.tables (one per indicator), each with columns:
 #'   \itemize{
@@ -1471,6 +1480,36 @@ aggregate_pfpr_admin <- function(
 #'
 #' @seealso [calc_pfpr_dhs()] for survey-weighted estimates
 #' @export
+#' Observed age range of validly tested individuals
+#'
+#' @param pr Prepared PR data from `.prepare_pfpr_data()`.
+#' @param test_col Column holding the test result (`rdt_res` / `mic_res`).
+#' @param valid_values Result codes that count as tested.
+#' @return Numeric length-2 vector of min and max age in months, or
+#'   `c(NA, NA)` when nothing was tested.
+#' @keywords internal
+#' @noRd
+.pfpr_tested_age_range <- function(pr, test_col, valid_values) {
+  if (!test_col %in% names(pr)) {
+    return(c(NA_real_, NA_real_))
+  }
+
+  tested <- pr[
+    pr$present == 1 &
+      pr$mother == 1 &
+      pr[[test_col]] %in% valid_values &
+      !is.na(pr$age), ,
+    drop = FALSE
+  ]
+
+  if (nrow(tested) == 0) {
+    return(c(NA_real_, NA_real_))
+  }
+
+  c(min(tested$age, na.rm = TRUE), max(tested$age, na.rm = TRUE))
+}
+
+
 calc_pfpr_mbg <- function(
   dhs_pr,
   gps_data,
@@ -1480,6 +1519,8 @@ calc_pfpr_mbg <- function(
   survey_vars = list(
     cluster = "hv001",
     age = "hc1",
+    age_alt = "hml16a",
+    age_years = "hml16",
     present = "hv103",
     mother = "hv042",
     rdt = "hml35",
@@ -1489,7 +1530,8 @@ calc_pfpr_mbg <- function(
     cluster = "DHSCLUST",
     lat = "LATNUM",
     lon = "LONGNUM"
-  )
+  ),
+  age_coverage_tolerance = 6
 ) {
   # ---- Input validation ----
 
@@ -1551,8 +1593,43 @@ calc_pfpr_mbg <- function(
   dict_specs <- dict[vapply(dict, function(d) d$name %in% indicators, logical(1))]
 
   results <- list()
+  skipped <- list()
 
   for (spec in dict_specs) {
+    # ---- Does this survey cover the indicator's age window? (C5) ----
+
+    tested_range <- .pfpr_tested_age_range(
+      pr = pr,
+      test_col = spec$test_col,
+      valid_values = spec$valid_values
+    )
+
+    if (all(is.na(tested_range))) {
+      cli::cli_alert_warning(
+        "{spec$name}: no valid {spec$test_type} results - skipping"
+      )
+      skipped[[spec$name]] <- "no valid test results"
+      next
+    }
+
+    covers_lower <- tested_range[1] <= spec$age_min + age_coverage_tolerance
+    covers_upper <- tested_range[2] >= spec$age_max - age_coverage_tolerance
+
+    if (!covers_lower || !covers_upper) {
+      cli::cli_alert_warning(
+        paste0(
+          "{spec$name}: survey tested {round(tested_range[1])}-",
+          "{round(tested_range[2])} months, which does not cover the ",
+          "{spec$age_min}-{spec$age_max} month window - skipping"
+        )
+      )
+      skipped[[spec$name]] <- sprintf(
+        "tested %g-%g months; window %g-%g",
+        tested_range[1], tested_range[2], spec$age_min, spec$age_max
+      )
+      next
+    }
+
     # Age filter + eligibility (present, mother)
     age_data <- pr[
       pr$present == 1 &
@@ -1620,6 +1697,11 @@ calc_pfpr_mbg <- function(
     vapply(dict_specs, `[[`, character(1), "name")
   )
   results <- .filter_redundant_mbg_results(results, age_groups_from_dict)
+
+  # Record indicators the survey could not support, with the reason (C5).
+  # An attribute, not a list element, so callers iterating names(results)
+  # are unaffected.
+  attr(results, "skipped_indicators") <- skipped
 
   if (length(results) == 0) {
     cli::cli_warn(
@@ -2013,6 +2095,8 @@ prep_pfpr_mbg <- function(
   survey_vars = list(
     cluster = "hv001",
     age = "hc1",
+    age_alt = "hml16a",
+    age_years = "hml16",
     present = "hv103",
     mother = "hv042",
     rdt = "hml35",
@@ -2085,6 +2169,81 @@ prep_pfpr_mbg <- function(
 #'   If include_survey_vars = TRUE, also: survey_weight, stratum_id, adm1, (adm2).
 #'
 #' @noRd
+#' Resolve a child's age in months from the PR recode
+#'
+#' @description
+#' Falls back through the three places DHS records age, in order of
+#' preference:
+#'
+#' 1. `hc1` - age in months, household roster. Recorded only for children
+#'    under five, so it is `NA` for every older child an MIS tested.
+#' 2. `hml16a` - corrected age in months, malaria roster.
+#' 3. `hml16` - corrected age in years, malaria roster, multiplied by 12.
+#'
+#' Implausible values are dropped before the fallback so that a "don't
+#' know" code (typically 98) cannot masquerade as an age: `hc1` above 59,
+#' `hml16a` above 240, and `hml16` above 95 years all become `NA`.
+#'
+#' Resolution is per-row, not per-column: a survey that has `hc1` for its
+#' under-fives and `hml16` for older children ends up with one continuous
+#' age variable rather than whichever single column was chosen.
+#'
+#' @param dhs_pr PR recode.
+#' @param survey_vars Variable mapping; uses `age`, `age_alt`, `age_years`.
+#' @param verbose Logical; report which variables supplied the ages.
+#' @return Numeric vector of ages in months, length `nrow(dhs_pr)`.
+#' @keywords internal
+#' @noRd
+.pfpr_resolve_age <- function(dhs_pr, survey_vars, verbose = TRUE) {
+  as_num <- function(x) {
+    suppressWarnings(
+      as.numeric(as.character(as.vector(haven::zap_labels(x))))
+    )
+  }
+
+  age <- rep(NA_real_, nrow(dhs_pr))
+  sources <- character()
+
+  take <- function(age, var_name, multiplier, max_valid, label) {
+    if (is.null(var_name) || !var_name %in% names(dhs_pr)) {
+      return(list(age = age, used = 0L))
+    }
+    vals <- as_num(dhs_pr[[var_name]])
+    vals[!is.na(vals) & (vals < 0 | vals > max_valid)] <- NA_real_
+    vals <- vals * multiplier
+    fill <- is.na(age) & !is.na(vals)
+    age[fill] <- vals[fill]
+    list(age = age, used = sum(fill))
+  }
+
+  step <- take(age, survey_vars$age, 1, 59, "hc1")
+  age <- step$age
+  if (step$used > 0) {
+    sources <- c(sources, paste0(survey_vars$age, " (", step$used, ")"))
+  }
+
+  step <- take(age, survey_vars$age_alt, 1, 240, "hml16a")
+  age <- step$age
+  if (step$used > 0) {
+    sources <- c(sources, paste0(survey_vars$age_alt, " (", step$used, ")"))
+  }
+
+  step <- take(age, survey_vars$age_years, 12, 95, "hml16")
+  age <- step$age
+  if (step$used > 0) {
+    sources <- c(sources, paste0(survey_vars$age_years, " (", step$used, ")"))
+  }
+
+  if (isTRUE(verbose) && length(sources) > 0) {
+    cli::cli_alert_info(
+      "Age in months resolved from: {paste(sources, collapse = ', ')}"
+    )
+  }
+
+  age
+}
+
+
 .prepare_pfpr_data <- function(
   dhs_pr,
   survey_vars,
@@ -2123,7 +2282,7 @@ prep_pfpr_mbg <- function(
   pr <- pr |>
     dplyr::mutate(
       cluster_id = .data[[survey_vars$cluster]],
-      age = suppressWarnings(as.numeric(as.character(.data[[survey_vars$age]]))),
+      age = .pfpr_resolve_age(dhs_pr, survey_vars, verbose = FALSE),
       present = suppressWarnings(as.numeric(as.character(.data[[survey_vars$present]]))),
       mother = if (has_mother_col) suppressWarnings(as.numeric(as.character(.data[[survey_vars$mother]]))) else 1L,
       rdt_res = if (survey_vars$rdt %in% names(dhs_pr)) suppressWarnings(as.numeric(as.character(.data[[survey_vars$rdt]]))) else NA_real_,
