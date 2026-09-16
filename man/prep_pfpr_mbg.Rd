@@ -10,8 +10,8 @@ prep_pfpr_mbg(
   indicator = "pfpr_rdt_u5",
   age_min = 6,
   age_max = 59,
-  survey_vars = list(cluster = "hv001", age = "hc1", present = "hv103", mother = "hv042",
-    rdt = "hml35", mic = "hml32"),
+  survey_vars = list(cluster = "hv001", age = "hc1", age_alt = "hml16a", age_years =
+    "hml16", present = "hv103", mother = "hv042", rdt = "hml35", mic = "hml32"),
   gps_vars = list(cluster = "DHSCLUST", lat = "LATNUM", lon = "LONGNUM")
 )
 }

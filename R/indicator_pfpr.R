@@ -1392,6 +1392,36 @@ aggregate_pfpr_admin <- function(
 
 # ---- dhs_calc_pfpr_mbg.R ----
 
+#' Observed age range of validly tested individuals
+#'
+#' @param pr Prepared PR data from `.prepare_pfpr_data()`.
+#' @param test_col Column holding the test result (`rdt_res` / `mic_res`).
+#' @param valid_values Result codes that count as tested.
+#' @return Numeric length-2 vector of min and max age in months, or
+#'   `c(NA, NA)` when nothing was tested.
+#' @keywords internal
+#' @noRd
+.pfpr_tested_age_range <- function(pr, test_col, valid_values) {
+  if (!test_col %in% names(pr)) {
+    return(c(NA_real_, NA_real_))
+  }
+
+  tested <- pr[
+    pr$present == 1 &
+      pr$mother == 1 &
+      pr[[test_col]] %in% valid_values &
+      !is.na(pr$age), ,
+    drop = FALSE
+  ]
+
+  if (nrow(tested) == 0) {
+    return(c(NA_real_, NA_real_))
+  }
+
+  c(min(tested$age, na.rm = TRUE), max(tested$age, na.rm = TRUE))
+}
+
+
 #' Prepare PfPR Data for MBG Analysis
 #'
 #' Prepares cluster-level malaria parasite prevalence data for Model-Based
@@ -1448,8 +1478,7 @@ aggregate_pfpr_admin <- function(
 #'   window. Defaults to `6`: DHS does not test children below six months,
 #'   so a survey covering 6-59 months would otherwise fail the `u5` window
 #'   of 0-59. Indicators whose window the survey does not cover are
-#'   skipped, so a 6-59 month survey never returns an estimate labelled
-#'   2-10. Reasons are recorded in `attr(x, "skipped_indicators")`.
+#'   skipped; reasons are recorded in `attr(x, "skipped_indicators")`.
 #'
 #' @return A named list of data.tables (one per indicator), each with columns:
 #'   \itemize{
@@ -1480,36 +1509,6 @@ aggregate_pfpr_admin <- function(
 #'
 #' @seealso [calc_pfpr_dhs()] for survey-weighted estimates
 #' @export
-#' Observed age range of validly tested individuals
-#'
-#' @param pr Prepared PR data from `.prepare_pfpr_data()`.
-#' @param test_col Column holding the test result (`rdt_res` / `mic_res`).
-#' @param valid_values Result codes that count as tested.
-#' @return Numeric length-2 vector of min and max age in months, or
-#'   `c(NA, NA)` when nothing was tested.
-#' @keywords internal
-#' @noRd
-.pfpr_tested_age_range <- function(pr, test_col, valid_values) {
-  if (!test_col %in% names(pr)) {
-    return(c(NA_real_, NA_real_))
-  }
-
-  tested <- pr[
-    pr$present == 1 &
-      pr$mother == 1 &
-      pr[[test_col]] %in% valid_values &
-      !is.na(pr$age), ,
-    drop = FALSE
-  ]
-
-  if (nrow(tested) == 0) {
-    return(c(NA_real_, NA_real_))
-  }
-
-  c(min(tested$age, na.rm = TRUE), max(tested$age, na.rm = TRUE))
-}
-
-
 calc_pfpr_mbg <- function(
   dhs_pr,
   gps_data,
@@ -1698,8 +1697,8 @@ calc_pfpr_mbg <- function(
   )
   results <- .filter_redundant_mbg_results(results, age_groups_from_dict)
 
-  # Record indicators the survey could not support, with the reason (C5).
-  # An attribute, not a list element, so callers iterating names(results)
+  # Indicators the survey could not support, with the reason (C5). An
+  # attribute, not a list element, so callers iterating names(results)
   # are unaffected.
   attr(results, "skipped_indicators") <- skipped
 
@@ -2153,22 +2152,6 @@ prep_pfpr_mbg <- function(
 
 # ---- dhs_helpers_pfpr.R ----
 
-#' Prepare PfPR Data for Analysis
-#'
-#' Shared data cleaning and indicator computation for PfPR functions.
-#' Used by both calc_pfpr_dhs_core() and calc_pfpr_mbg().
-#'
-#' @param dhs_pr DHS Person Records dataset.
-#' @param survey_vars Named list mapping DHS variable names.
-#' @param age_min Minimum age in months (default: 6).
-#' @param age_max Maximum age in months (default: 59).
-#' @param include_survey_vars Logical. If TRUE, includes survey design columns.
-#'
-#' @return A data frame of eligible children with columns:
-#'   cluster_id, age, rdt_res, mic_res, tested_rdt, tested_mic, rdt_pos, mic_pos.
-#'   If include_survey_vars = TRUE, also: survey_weight, stratum_id, adm1, (adm2).
-#'
-#' @noRd
 #' Resolve a child's age in months from the PR recode
 #'
 #' @description
@@ -2244,6 +2227,22 @@ prep_pfpr_mbg <- function(
 }
 
 
+#' Prepare PfPR Data for Analysis
+#'
+#' Shared data cleaning and indicator computation for PfPR functions.
+#' Used by both calc_pfpr_dhs_core() and calc_pfpr_mbg().
+#'
+#' @param dhs_pr DHS Person Records dataset.
+#' @param survey_vars Named list mapping DHS variable names.
+#' @param age_min Minimum age in months (default: 6).
+#' @param age_max Maximum age in months (default: 59).
+#' @param include_survey_vars Logical. If TRUE, includes survey design columns.
+#'
+#' @return A data frame of eligible children with columns:
+#'   cluster_id, age, rdt_res, mic_res, tested_rdt, tested_mic, rdt_pos, mic_pos.
+#'   If include_survey_vars = TRUE, also: survey_weight, stratum_id, adm1, (adm2).
+#'
+#' @noRd
 .prepare_pfpr_data <- function(
   dhs_pr,
   survey_vars,
@@ -2375,5 +2374,3 @@ prep_pfpr_mbg <- function(
 
   pr
 }
-
-

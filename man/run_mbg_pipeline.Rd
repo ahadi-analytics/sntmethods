@@ -35,6 +35,7 @@ run_mbg_pipeline(
   cache = TRUE,
   csb_priority_method = c("all", "first", "public", "private"),
   custom_csb_indicator = NULL,
+  on_unresolved_type = c("ask", "skip", "abort"),
   verbose = TRUE,
   debug = FALSE
 )

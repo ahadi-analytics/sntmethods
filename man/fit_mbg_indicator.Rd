@@ -80,7 +80,7 @@ fitted model. Default \code{250}.}
 \item{cluster_cols}{Named list mapping the canonical cluster columns
 to user-supplied column names. Defaults to
 \code{list(cluster_id = "cluster_id", x = "x", y = "y", indicator
-  = "indicator", samplesize = "samplesize")}.}
+= "indicator", samplesize = "samplesize")}.}
 
 \item{id_field}{Character. Column name in the shapefiles holding the
 polygon id (default \code{"shapeID"}; falls back to a unique row
@@ -109,7 +109,7 @@ files are written.}
 \item{cache_dir}{Optional path for cached id-raster, aggregation
 table(s) and cell-prediction matrix. If \code{NULL} and
 \code{output_dir} is supplied, defaults to \code{file.path(
-  output_dir, "cache")}. If both are \code{NULL}, no caching is
+output_dir, "cache")}. If both are \code{NULL}, no caching is
 performed.}
 
 \item{use_cache}{Logical. If \code{FALSE}, caches are ignored on

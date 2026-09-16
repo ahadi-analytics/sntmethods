@@ -17,7 +17,6 @@ URL: https://github.com/ahadi-analytics/sntmethods, https://ahadi-analytics.gith
 BugReports: https://github.com/ahadi-analytics/sntmethods/issues
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.3
 SystemRequirements: GDAL (>= 3.0.0), GEOS (>= 3.8.0), PROJ (>= 6.0.0) for spatial functionality (optional)
 Imports:
     cli (>= 3.6.5),
@@ -72,3 +71,4 @@ Remotes:
     ahadi-analytics/sntutils
 Depends:
     R (>= 4.2)
+Config/roxygen2/version: 8.0.0

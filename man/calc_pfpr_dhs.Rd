@@ -7,8 +7,8 @@
 calc_pfpr_dhs(
   dhs_pr,
   survey_vars = list(cluster = "hv021", weight = "hv005", stratum = "hv022", adm1 =
-    "hv024", adm2 = NULL, age = "hc1", present = "hv103", mother = "hv042", rdt =
-    "hml35", mic = "hml32"),
+    "hv024", adm2 = NULL, age = "hc1", age_alt = "hml16a", age_years = "hml16", present =
+    "hv103", mother = "hv042", rdt = "hml35", mic = "hml32"),
   region_var = NULL,
   gps_data = NULL,
   gps_vars = list(cluster = "DHSCLUST", lat = "LATNUM", lon = "LONGNUM"),

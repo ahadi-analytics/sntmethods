@@ -10,9 +10,10 @@ calc_pfpr_mbg(
   indicators = NULL,
   test_type = NULL,
   age_groups = NULL,
-  survey_vars = list(cluster = "hv001", age = "hc1", present = "hv103", mother = "hv042",
-    rdt = "hml35", mic = "hml32"),
-  gps_vars = list(cluster = "DHSCLUST", lat = "LATNUM", lon = "LONGNUM")
+  survey_vars = list(cluster = "hv001", age = "hc1", age_alt = "hml16a", age_years =
+    "hml16", present = "hv103", mother = "hv042", rdt = "hml35", mic = "hml32"),
+  gps_vars = list(cluster = "DHSCLUST", lat = "LATNUM", lon = "LONGNUM"),
+  age_coverage_tolerance = 6
 )
 }
 \arguments{
@@ -51,6 +52,13 @@ translated to indicator codes.}
 }}
 
 \item{gps_vars}{Named list for GPS variable mapping.}
+
+\item{age_coverage_tolerance}{Integer months of slack allowed when
+checking that a survey's tested age range covers an indicator's age
+window. Defaults to \code{6}: DHS does not test children below six months,
+so a survey covering 6-59 months would otherwise fail the \code{u5} window
+of 0-59. Indicators whose window the survey does not cover are
+skipped; reasons are recorded in \code{attr(x, "skipped_indicators")}.}
 }
 \value{
 A named list of data.tables (one per indicator), each with columns:
