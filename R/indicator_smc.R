@@ -285,6 +285,7 @@ calc_smc_dhs <- function(
 #'   numerator_description, denominator_description, denominator_code.
 #'
 #' @keywords internal
+#' @noRd
 smc_dictionary <- function() {
   conds <- .smc_conditions()
   tibble::tibble(

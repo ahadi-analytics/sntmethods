@@ -596,6 +596,7 @@ calc_severe_anemia_dhs <- function(
 #'   numerator_description, denominator_description, denominator_code.
 #'
 #' @keywords internal
+#' @noRd
 severe_anemia_dictionary <- function() {
   conds <- .severe_anemia_conditions()
   tibble::tibble(

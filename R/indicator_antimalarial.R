@@ -592,6 +592,7 @@ calc_antimalarial_dhs <- function(
 #'   numerator_description, denominator_description, denominator_code.
 #'
 #' @keywords internal
+#' @noRd
 antimalarial_dictionary <- function() {
   conds <- .antimalarial_conditions()
   tibble::tibble(

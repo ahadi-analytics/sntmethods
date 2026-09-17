@@ -726,6 +726,7 @@ calc_wealth_dhs_core <- function(
 #'   numerator_description, denominator_description, denominator_code.
 #'
 #' @keywords internal
+#' @noRd
 wealth_dictionary <- function() {
   conds <- .wealth_conditions()
   tibble::tibble(

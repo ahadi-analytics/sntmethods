@@ -1602,6 +1602,7 @@ calc_incidence <- function(
 #' @return Data frame with n0_cases and n0_incidence columns added
 #'
 #' @keywords internal
+#' @noRd
 .calc_n0_internal <- function(df, scale_factor) {
   df |>
     dplyr::mutate(
@@ -1629,6 +1630,7 @@ calc_incidence <- function(
 #' @return Data frame with n1_cases and n1_incidence columns added
 #'
 #' @keywords internal
+#' @noRd
 .calc_n1_internal <- function(df, scale_factor) {
   # Check if n1_cases already exists (from facility-level aggregation)
   if ("n1_cases" %in% names(df)) {
@@ -1681,6 +1683,7 @@ calc_incidence <- function(
 #' @return Data frame with n2_cases and n2_incidence columns added
 #'
 #' @keywords internal
+#' @noRd
 .calc_n2_internal <- function(df, scale_factor) {
   df |>
     dplyr::mutate(
@@ -1722,6 +1725,7 @@ calc_incidence <- function(
 #' @return Data frame with n3_cases and n3_incidence columns added
 #'
 #' @keywords internal
+#' @noRd
 .calc_n3_internal <- function(df, scale_factor) {
   df |>
     dplyr::mutate(
@@ -1787,6 +1791,7 @@ calc_incidence <- function(
 #' @return Data frame with n4_cases and n4_incidence columns added
 #'
 #' @keywords internal
+#' @noRd
 .calc_n4_internal <- function(df, scale_factor) {
   # If adj_none already exists (from N3 calculation), use it directly
   if ("adj_none" %in% names(df)) {
@@ -1866,6 +1871,7 @@ calc_incidence <- function(
 #' @return Data frame with n5_cases and n5_incidence columns added
 #'
 #' @keywords internal
+#' @noRd
 .calc_n5_internal <- function(df, scale_factor, cs_none_divisor = 2) {
   # If adj_none already exists (from N3 or N4 calculation), derive reduced version
   if ("adj_none" %in% names(df)) {

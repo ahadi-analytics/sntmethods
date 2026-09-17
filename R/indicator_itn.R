@@ -935,6 +935,7 @@ calc_itn_dhs <- function(
 #'   denominator_code.
 #'
 #' @keywords internal
+#' @noRd
 itn_dictionary <- function() {
   conds <- .itn_conditions()
   tibble::tibble(
