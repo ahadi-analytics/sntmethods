@@ -2257,18 +2257,45 @@ prep_pfpr_mbg <- function(
     cli::cli_abort("`dhs_pr` is empty")
   }
 
-  # Check required columns (mother/hv042 is optional -- absent in some MIS surveys)
-  has_mother_col <- !is.null(survey_vars$mother) && survey_vars$mother %in% names(dhs_pr)
-  needed <- c(survey_vars$cluster, survey_vars$age, survey_vars$present)
+  # Required columns. Age is checked separately: DHS records it in hc1
+  # (months, under-fives only), hml16a (months, malaria roster) or hml16
+  # (years), and an MIS that tested all ages may carry none of the first.
+  # Requiring survey_vars$age specifically aborts on such a survey before
+  # .pfpr_resolve_age() ever gets to fall back. (C12)
+  needed <- c(survey_vars$cluster, survey_vars$present)
   missing_cols <- setdiff(needed, names(dhs_pr))
   if (length(missing_cols) > 0) {
     cli::cli_abort("Columns not found in dhs_pr: {.var {missing_cols}}")
   }
 
+  age_candidates <- c(
+    survey_vars$age, survey_vars$age_alt, survey_vars$age_years
+  )
+  age_candidates <- age_candidates[!vapply(age_candidates, is.null, logical(1))]
+  age_available <- intersect(unlist(age_candidates), names(dhs_pr))
+
+  if (length(age_available) == 0) {
+    cli::cli_abort(c(
+      "No usable age variable in dhs_pr",
+      "i" = "Looked for: {.var {unlist(age_candidates)}}"
+    ))
+  }
+
+  # The subsample flag is optional, and "present" is not the same as
+  # "usable": an MIS tests everyone, so hv042 is shipped as a column
+  # labelled na - with every value missing. Treating that as available
+  # filters every row away, which is why usability is tested here rather
+  # than membership of names(). (C12)
+  has_mother_col <- !is.null(survey_vars$mother) &&
+    survey_vars$mother %in% names(dhs_pr) &&
+    any(!is.na(dhs_pr[[survey_vars$mother]]))
+
   if (!has_mother_col) {
     cli::cli_alert_warning(
-      "Column {.var {survey_vars$mother}} not found in dhs_pr; ",
-      "skipping mother-listed-in-household filter (common in MIS surveys)"
+      paste0(
+        "Column {.var {survey_vars$mother}} absent or entirely missing in ",
+        "dhs_pr; skipping the subsample filter (expected for MIS surveys)"
+      )
     )
   }
 
