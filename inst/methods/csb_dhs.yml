@@ -147,8 +147,9 @@ csb_classification:
     variables: ["h32n", "h32o", "h32p", "h32q", "h32r"]
 
 eligibility:
-  - "Child age 0-59 months"
-  - "Child had fever in last 2 weeks (h22 == 1)"
+  criteria:
+    - "Child age 0-59 months"
+    - "Child had fever in last 2 weeks (h22 == 1)"
   note: >
     All febrile U5 children are eligible regardless of GPS availability.
     GPS coordinates are used only for spatial aggregation to administrative

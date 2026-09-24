@@ -144,27 +144,27 @@ strictness_presets:
 
 outbreak_classification:
   description: >
-    Consecutive outlier months are reclassified as “outbreaks” if they form
+    Consecutive outlier months are reclassified as "outbreaks" if they form
     a sustained cluster meeting continuity criteria. This helps separate
     isolated anomalies (e.g., reporting spikes) from sustained epidemiological
     events. Controlled by classify_outbreaks = TRUE (default: FALSE).
   parameters:
-    outbreak_min_run: “Minimum number of outlier months in a cluster to qualify
-      as an outbreak (default: 2).”
-    outbreak_max_gap: “Maximum number of non-outlier months allowed between
+    outbreak_min_run: "Minimum number of outlier months in a cluster to qualify
+      as an outbreak (default: 2)."
+    outbreak_max_gap: "Maximum number of non-outlier months allowed between
       outlier months within the same cluster (default: 12). Clusters separated
-      by more than this gap are treated as independent events.”
-    outbreak_prop_tolerance: “Reserved parameter (default: 0.9). Not currently
-      used in gap-based clustering logic.”
+      by more than this gap are treated as independent events."
+    outbreak_prop_tolerance: "Reserved parameter (default: 0.9). Not currently
+      used in gap-based clustering logic."
   rules:
-    - “Minimum cluster size ≥ outbreak_min_run months (default ≥ 2).”
-    - “Allowed gap between outliers within a cluster ≤ outbreak_max_gap months
-      (default ≤ 12 months).”
-    - “All months between the first and last outlier in a valid cluster are
-      reclassified, even non-outlier months within the span.”
+    - "Minimum cluster size ≥ outbreak_min_run months (default ≥ 2)."
+    - "Allowed gap between outliers within a cluster ≤ outbreak_max_gap months
+      (default ≤ 12 months)."
+    - "All months between the first and last outlier in a valid cluster are
+      reclassified, even non-outlier months within the span."
   outputs:
-    - “outlier_flag_* columns reclassified to include 'outbreak' state.”
-    - “Simplified categories: normal, outlier, outbreak, insufficient_data.”
+    - "outlier_flag_* columns reclassified to include 'outbreak' state."
+    - "Simplified categories: normal, outlier, outbreak, insufficient_data."
 
 integration_with_reporting_and_activity:
   - "Facilities with reporting_rate < reporting_rate_min are assigned
