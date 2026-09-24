@@ -334,6 +334,7 @@ calc_anc_dhs <- function(
 #' @return Tibble with columns: indicator, indicator_code, indicator_title,
 #'   numerator_description, denominator_description, denominator_code.
 #' @keywords internal
+#' @noRd
 anc_dictionary <- function() {
   conds <- .anc_conditions()
   tibble::tibble(

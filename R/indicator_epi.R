@@ -632,6 +632,7 @@ calc_epi_dhs <- function(
 #'   numerator_description, denominator_description, denominator_code.
 #'
 #' @keywords internal
+#' @noRd
 epi_dictionary <- function() {
   conds <- .epi_conditions()
   tibble::tibble(

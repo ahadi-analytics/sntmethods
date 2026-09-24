@@ -460,6 +460,7 @@ calc_malaria_dx_dhs <- function(
 #'   numerator_description, denominator_description, denominator_code.
 #'
 #' @keywords internal
+#' @noRd
 malaria_dx_dictionary <- function() {
   conds <- .malaria_dx_conditions()
   tibble::tibble(
