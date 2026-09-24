@@ -3770,6 +3770,9 @@ run_mbg_pipeline <- function(
 
   if (length(indicator_rows) == 0) {
     out <- list(adm0 = tibble::tibble(), adm1 = tibble::tibble())
+    if (aggregation_level == "adm3") {
+      out$adm2 <- tibble::tibble()
+    }
     out[[primary_col]] <- tibble::tibble()
     return(out)
   }
@@ -3840,6 +3843,36 @@ run_mbg_pipeline <- function(
       },
       .groups = "drop"
     )
+
+  # adm2: built only when the primary level is finer than adm2. Without
+  # it, an adm3 run returns adm0, adm1 and adm3 and silently drops the
+  # district level, which is where most programme decisions are made.
+  adm2_long <- NULL
+
+  if (aggregation_level == "adm3" && "adm2" %in% names(primary_long)) {
+    adm2_long <- primary_long |>
+      dplyr::group_by(
+        dplyr::across(
+          dplyr::all_of(c(meta_cols, "adm0", "adm1", "adm2", desc_cols))
+        )
+      ) |>
+      dplyr::summarise(
+        point       = .safe_wmean(point, denominator),
+        ci_l        = .safe_wmean(ci_l, denominator),
+        ci_u        = .safe_wmean(ci_u, denominator),
+        numerator   = sum(numerator, na.rm = TRUE),
+        denominator = sum(denominator, na.rm = TRUE),
+        survey_numerator   = sum(survey_numerator, na.rm = TRUE),
+        survey_denominator = sum(survey_denominator, na.rm = TRUE),
+        n_survey_clusters  = sum(n_survey_clusters, na.rm = TRUE),
+        median_survey_month = if (has_month) {
+          as.integer(stats::median(median_survey_month, na.rm = TRUE))
+        } else {
+          NA_integer_
+        },
+        .groups = "drop"
+      )
+  }
 
   # adm0: population-weighted mean of all primary-level estimates
   adm0_long <- primary_long |>
@@ -3916,6 +3949,10 @@ run_mbg_pipeline <- function(
   adm1_long    <- .join_dict(adm1_long)
   adm0_long    <- .join_dict(adm0_long)
 
+  if (!is.null(adm2_long)) {
+    adm2_long <- .join_dict(adm2_long)
+  }
+
   # ---- Join eligibility notes from indicator meta ----
 
   all_ind_codes <- unique(c(
@@ -3936,6 +3973,10 @@ run_mbg_pipeline <- function(
   primary_long <- .join_elig(primary_long)
   adm1_long    <- .join_elig(adm1_long)
   adm0_long    <- .join_elig(adm0_long)
+
+  if (!is.null(adm2_long)) {
+    adm2_long <- .join_elig(adm2_long)
+  }
 
   # ---- Standardise column order (matching DHS output) ----
 
@@ -3971,6 +4012,11 @@ run_mbg_pipeline <- function(
     adm0 = .order_cols(adm0_long, character(0)),
     adm1 = .order_cols(adm1_long, "adm1")
   )
+
+  if (!is.null(adm2_long)) {
+    out$adm2 <- .order_cols(adm2_long, c("adm1", "adm2"))
+  }
+
   out[[primary_col]] <- .order_cols(primary_long, primary_admin_cols)
 
   out
